@@ -135,7 +135,18 @@ def default_db_path(root: str) -> str:
 
 def cmd_search(args: argparse.Namespace, db: Database, root: str) -> int:
     q_toks = tokenize(args.query)
-    candidates = db.search_fts(args.query, limit=args.limit, scope=args.scope)
+    hybrid = bool(getattr(args, "hybrid", False))
+    if hybrid:
+        from sot_graph.vector import available as vec_available, hybrid_search
+        if not vec_available():
+            print("⚠ sqlite-vec not installed — install with `pip install 'sot-graph[vector]'`; "
+                  "falling back to BM25.")
+        res = hybrid_search(db, args.query, limit=args.limit * 2)
+        candidates = res["results"]
+        mode = res["mode"]
+    else:
+        candidates = db.search_fts(args.query, limit=args.limit, scope=args.scope)
+        mode = "bm25"
 
     verified = []
     for cand in candidates:
@@ -153,7 +164,8 @@ def cmd_search(args: argparse.Namespace, db: Database, root: str) -> int:
             "kind": cand["kind"],
             "line": cand.get("line_start"),
             "body": cand["body"],
-            "score": round(cand["score"], 3),
+            "score": round(cand.get("fused_score", cand["score"]), 6),
+            "sources": cand.get("sources"),
         })
 
     # Sort priority: STRONG / REBUILT -> WEAK -> NOPATH, then highest coverage
@@ -170,7 +182,8 @@ def cmd_search(args: argparse.Namespace, db: Database, root: str) -> int:
         print(json.dumps({"query": args.query, "results": final_list}, indent=2))
         return 0
 
-    print(f"\n🔍 Knowledge Search: \"{args.query}\" (Found: {len(final_list)} verified hits)")
+    mode_note = " [hybrid: bm25+vector]" if hybrid and mode == "hybrid" else ""
+    print(f"\n🔍 Knowledge Search: \"{args.query}\" (Found: {len(final_list)} verified hits){mode_note}")
     print("=" * 80)
     if not final_list:
         print("  (No verified matching knowledge found in graph)")
@@ -366,6 +379,18 @@ def cmd_map(args: argparse.Namespace, db: Database, root: str) -> int:
     if result["truncated"]:
         footer += ", truncated by budget"
     print(f"\n🗺️  Repo map{footer})")
+    return 0
+
+
+def cmd_embed(args: argparse.Namespace, db: Database) -> int:
+    from sot_graph.vector import available as vec_available, index_nodes
+
+    if not vec_available():
+        print("❌ sqlite-vec is not installed. Install with: pip install 'sot-graph[vector]'")
+        return 2
+    count = index_nodes(db.conn)
+    print(f"✅ Embedded {count} graph nodes into the vector index (dim=256, HashEmbedder).")
+    print("   Plug a neural embedder via sot_graph.vector for semantic recall.")
     return 0
 
 
@@ -741,7 +766,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("-n", "--limit", type=int, default=6, help="Maximum results (default: 6)")
     p_search.add_argument("--scope", default=None, help="Filter by path or keyword substring")
     p_search.add_argument("--threshold", type=float, default=0.5, help="Coverage threshold for STRONG verdict")
+    p_search.add_argument("--hybrid", action="store_true", help="Fuse BM25 with vector similarity (needs [vector] extra + `sot embed`)")
     p_search.add_argument("--json", action="store_true", help="Output JSON format")
+
+    # embed
+    p_emb = subparsers.add_parser("embed", help="Build/refresh the optional vector index ([vector] extra)")
+    p_emb.add_argument("--limit", type=int, default=5000, help="Maximum nodes to embed (default: 5000)")
 
     # explore
     p_exp = subparsers.add_parser("explore", help="Explore AST relations and cross-file edges")
@@ -902,6 +932,8 @@ def main() -> int:
             return cmd_rename(args, db)
         elif args.command == "map":
             return cmd_map(args, db, root)
+        elif args.command == "embed":
+            return cmd_embed(args, db)
         elif args.command == "insert":
             return cmd_insert(args, db)
         elif args.command == "reconcile":
