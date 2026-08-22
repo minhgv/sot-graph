@@ -22,3 +22,9 @@ Before modifying or refactoring core functions/classes:
   `sot reconcile` or `sot_reconcile` tool.
 - After completing tricky bugs or complex architectural designs, record knowledge:
   `sot insert --title "..." --body "..." --keywords "..."`.
+
+## 5. Architecture Analysis & Report Synthesis Protocol
+When requested to review or synthesize comprehensive architecture documentation for a repository:
+1. Run `sot bundle` (or tool `sot_bundle`) to generate 5 high-density fact files in `.sot/bundle/`.
+2. Ingest the 5 fact files (`01_module_inventory.md`, `02_routing_endpoints.md`, `03_workflows_states.md`, `04_dependencies_violations.md`, `05_system_metrics.json`) along with `src/sot_graph/templates/ARCHITECTURE_TEMPLATE.md`.
+3. Output the 6-section report in Vietnamese with 100% grounded facts, valid ASCII/Mermaid diagrams, and prioritized P0/P1/P2 recommendations with exact code line references.

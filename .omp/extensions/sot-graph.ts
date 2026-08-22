@@ -316,6 +316,30 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
       return { content: [{ type: "text", text: output.trim() }], details: { ok } };
     },
   });
+  // 11. sot_bundle: Fact Bundle Extractor for LLM Architecture Reports
+  pi.registerTool({
+    name: "sot_bundle",
+    label: "SOT Architecture Fact Bundler",
+    description:
+      "Extract 5 high-density architecture fact bundle markdown/json files (01_module_inventory.md, 02_routing_endpoints.md, 03_workflows_states.md, 04_dependencies_violations.md, 05_system_metrics.json) into .sot/bundle/ for LLM synthesis of comprehensive architecture reports.",
+    promptSnippet: "Extract 5 architecture fact bundle files for LLM report synthesis",
+    parameters: {
+      type: "object",
+      properties: {
+        output: { type: "string", description: "Target directory path (default: .sot/bundle/)" },
+        json: { type: "boolean", description: "Output in JSON format" },
+      },
+    },
+    async execute(_id, params) {
+      const args = ["bundle"];
+      if (params.output) args.push("-o", String(params.output));
+      if (params.json) args.push("--json");
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
 
   // Optional Hook: check graph status on session start
   if (typeof pi.on === "function") {

@@ -4,9 +4,11 @@ import collections
 import dataclasses
 import math
 from typing import Any, Dict, List, Optional, Set, Tuple
-
 from sot_graph.analytics.graph import AnalyticsGraph, CommunityResult
-
+from sot_graph.analytics.architecture import (
+    ArchitectureProfile,
+    build_architecture_profile,
+)
 
 @dataclasses.dataclass
 class GodNodeInfo:
@@ -59,7 +61,7 @@ class AnalysisResult:
     god_nodes: List[GodNodeInfo]
     surprising_connections: List[SurprisingConnection]
     suggested_focus_areas: List[str]
-
+    architecture_profile: Optional[ArchitectureProfile] = None
 
 def calculate_graph_metrics(
     graph: AnalyticsGraph, community_res: CommunityResult
@@ -282,10 +284,13 @@ def analyze_graph(
     surprising = find_surprising_connections(graph, comm_res)
     focus_areas = suggest_focus_areas(metrics, god_nodes, comm_res)
 
+    arch_profile = build_architecture_profile(graph, comm_res)
+
     return AnalysisResult(
         metrics=metrics,
         community_result=comm_res,
         god_nodes=god_nodes,
         surprising_connections=surprising,
         suggested_focus_areas=focus_areas,
+        architecture_profile=arch_profile,
     )

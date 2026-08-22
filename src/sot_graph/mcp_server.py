@@ -69,6 +69,9 @@ def create_server(service: McpService) -> Any:
             types.Tool(name="sot_communities", description="Read-only architectural community/cluster detection with cohesion scores.", inputSchema={
                 "type": "object", "properties": {"scope": {"type": "string"}, "min_size": {"type": "integer", "minimum": 1}}, "additionalProperties": False,
             }),
+            types.Tool(name="sot_bundle", description="Extract 5 high-density architecture fact bundle markdown/json files for LLM report synthesis.", inputSchema={
+                "type": "object", "properties": {"output_dir": {"type": "string"}}, "additionalProperties": False,
+            }),
         ]
 
     @server.call_tool()
@@ -91,6 +94,10 @@ def create_server(service: McpService) -> Any:
                 result = await service.aget_communities(
                     scope=args.get("scope"),
                     min_community_size=args.get("min_size", 1),
+                )
+            elif name == "sot_bundle":
+                result = await service.aget_architecture_bundle(
+                    output_dir=args.get("output_dir"),
                 )
             else:
                 result = {"error": {"code": "unknown_tool", "message": "unknown MCP tool"}}

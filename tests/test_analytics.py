@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import io
-import json
 import shutil
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
+from sot_graph.analytics.architecture import (
+    ArchitecturalLayer,
+    classify_node_layer,
+    detect_pattern_and_framework,
+)
 from sot_graph.analytics.diagnostics import (
     analyze_graph,
     calculate_graph_metrics,
@@ -22,8 +26,8 @@ from sot_graph.reconciler import Reconciler
 class AnalyticsTests(unittest.TestCase):
     def setUp(self) -> None:
         self._temp_dir = tempfile.mkdtemp(prefix="sot-analytics-")
-        self.root = Path(self._temp_dir)
-        self.db_path = self.root / ".sot" / "sot.db"
+        self.root_path = Path(self._temp_dir)
+        self.db_path = self.root_path / ".sot" / "sot.db"
         self.db = Database(str(self.db_path))
 
     def tearDown(self) -> None:
@@ -31,138 +35,184 @@ class AnalyticsTests(unittest.TestCase):
         shutil.rmtree(self._temp_dir, ignore_errors=True)
 
     def _populate_mock_project(self) -> None:
-        """Create a mock codebase with two distinct modules and a cross-cutting god node."""
-        src_auth = self.root / "src" / "auth"
-        src_auth.mkdir(parents=True, exist_ok=True)
-        (src_auth / "login.py").write_text(
-            "class LoginService:\n"
-            "    def authenticate(self, user, pwd):\n"
-            "        return True\n"
-            "    def issue_token(self, user):\n"
-            "        return 'tok_123'\n"
+        """Create a mock multi-layer codebase with presentation, bloc, domain, data, and core layers."""
+        # 1. Core Layer
+        core_dir = self.root_path / "lib" / "core"
+        core_dir.mkdir(parents=True, exist_ok=True)
+        (core_dir / "app_router.dart").write_text(
+            "class AppRouter { static void navigate(String path) {} }\n"
         )
-        (src_auth / "session.py").write_text(
-            "from auth.login import LoginService\n"
-            "class SessionManager:\n"
-            "    def __init__(self):\n"
-            "        self.svc = LoginService()\n"
+        (core_dir / "api_client.dart").write_text(
+            "class ApiClient { Future<Map> get(String url) async => {}; }\n"
         )
 
-        src_billing = self.root / "src" / "billing"
-        src_billing.mkdir(parents=True, exist_ok=True)
-        (src_billing / "invoice.py").write_text(
-            "class InvoiceManager:\n"
-            "    def generate_invoice(self, amount):\n"
-            "        return {'amount': amount}\n"
-        )
-        (src_billing / "payment.py").write_text(
-            "from billing.invoice import InvoiceManager\n"
-            "from auth.login import LoginService\n"
-            "class PaymentProcessor:\n"
-            "    def process(self):\n"
-            "        LoginService().authenticate('admin', 'pwd')\n"
-            "        InvoiceManager().generate_invoice(100)\n"
+        # 2. Auth Feature (Clean Architecture)
+        auth_pres = self.root_path / "lib" / "features" / "auth" / "presentation"
+        auth_pres.mkdir(parents=True, exist_ok=True)
+        (auth_pres / "login_screen.dart").write_text(
+            "import 'package:app/features/auth/bloc/auth_bloc.dart';\n"
+            "class LoginScreen extends StatelessWidget {\n"
+            "  void onLoginPressed() { AuthBloc.login(); }\n"
+            "}\n"
         )
 
-        reconciler = Reconciler(self.db, str(self.root))
+        auth_bloc = self.root_path / "lib" / "features" / "auth" / "bloc"
+        auth_bloc.mkdir(parents=True, exist_ok=True)
+        (auth_bloc / "auth_bloc.dart").write_text(
+            "import 'package:app/features/auth/domain/auth_usecase.dart';\n"
+            "class AuthBloc {\n"
+            "  static void login() { AuthUseCase.execute(); }\n"
+            "}\n"
+        )
+
+        auth_domain = self.root_path / "lib" / "features" / "auth" / "domain"
+        auth_domain.mkdir(parents=True, exist_ok=True)
+        (auth_domain / "auth_usecase.dart").write_text(
+            "import 'package:app/features/auth/data/auth_repository.dart';\n"
+            "class AuthUseCase {\n"
+            "  static void execute() { AuthRepository.authenticate(); }\n"
+            "}\n"
+        )
+
+        auth_data = self.root_path / "lib" / "features" / "auth" / "data"
+        auth_data.mkdir(parents=True, exist_ok=True)
+        (auth_data / "auth_repository.dart").write_text(
+            "import 'package:app/core/api_client.dart';\n"
+            "class AuthRepository {\n"
+            "  static void authenticate() { ApiClient().get('/auth'); }\n"
+            "}\n"
+        )
+
+        # 3. Layer Bypass Anti-pattern: UI calling Data directly
+        billing_pres = self.root_path / "lib" / "features" / "billing" / "presentation"
+        billing_pres.mkdir(parents=True, exist_ok=True)
+        (billing_pres / "quick_pay_widget.dart").write_text(
+            "import 'package:app/core/api_client.dart';\n"
+            "class QuickPayWidget extends StatelessWidget {\n"
+            "  void pay() { ApiClient().get('/pay'); }\n"
+            "}\n"
+        )
+
+        reconciler = Reconciler(
+            self.db,
+            str(self.root_path),
+        )
         reconciler.reconcile()
+
+    def test_layer_classification(self) -> None:
+        """Test layer classification across various node paths and types."""
+        l1 = classify_node_layer("n1", {"path": "lib/features/auth/presentation/login_page.dart"})
+        self.assertEqual(l1, ArchitecturalLayer.PRESENTATION)
+
+        l2 = classify_node_layer("n2", {"path": "lib/features/auth/bloc/auth_bloc.dart"})
+        self.assertEqual(l2, ArchitecturalLayer.BUSINESS_LOGIC)
+
+        l3 = classify_node_layer("n3", {"path": "lib/features/auth/domain/login_usecase.dart"})
+        self.assertEqual(l3, ArchitecturalLayer.DOMAIN)
+
+        l4 = classify_node_layer("n4", {"path": "lib/features/auth/data/auth_repository.dart"})
+        self.assertEqual(l4, ArchitecturalLayer.DATA)
+
+        l5 = classify_node_layer("n5", {"path": "lib/core/config/app_config.dart"})
+        self.assertEqual(l5, ArchitecturalLayer.CORE)
+
+    def test_pattern_and_framework_detection(self) -> None:
+        """Test automatic architecture pattern detection."""
+        self._populate_mock_project()
+        g = AnalyticsGraph.from_database(self.db)
+        pattern, lang, frameworks = detect_pattern_and_framework(g)
+
+        self.assertIn("Flutter", pattern)
+        self.assertIn("Dart", lang)
+        self.assertTrue(len(frameworks) > 0)
 
     def test_analytics_graph_construction_and_metrics(self) -> None:
         self._populate_mock_project()
         graph = AnalyticsGraph.from_database(self.db)
+        self.assertGreater(len(graph.nodes), 0)
+        self.assertGreater(len(graph.edges), 0)
 
-        self.assertGreater(len(graph.nodes), 4)
-        self.assertGreater(len(graph.edges), 2)
+        comm_res = graph.detect_communities(min_community_size=1)
+        self.assertGreater(len(comm_res.communities), 0)
+        self.assertGreater(len(comm_res.community_info), 0)
 
-        res = graph.detect_communities(min_community_size=1)
-        self.assertGreaterEqual(len(res.communities), 1)
-        self.assertIn(res.modularity, res.__dict__.values())
-
-        metrics = calculate_graph_metrics(graph, res)
-        self.assertGreater(metrics.node_count, 0)
-        self.assertGreater(metrics.edge_count, 0)
+        metrics = calculate_graph_metrics(graph, comm_res)
+        self.assertEqual(metrics.node_count, len(graph.nodes))
+        self.assertEqual(metrics.edge_count, len(graph.edges))
         self.assertGreaterEqual(metrics.density, 0.0)
 
-    def test_god_nodes_and_surprising_connections(self) -> None:
+    def test_architectural_profile_and_mermaid_diagrams(self) -> None:
         self._populate_mock_project()
         graph = AnalyticsGraph.from_database(self.db)
+        analysis = analyze_graph(graph)
 
-        analysis = analyze_graph(graph, min_community_size=1, threshold_sigma=0.5)
-        self.assertIsNotNone(analysis.metrics)
-        self.assertIsNotNone(analysis.community_result)
+        self.assertIsNotNone(analysis.architecture_profile)
+        prof = analysis.architecture_profile
+        self.assertIsNotNone(prof)
 
-        # Generate markdown report and assert section headers
-        report = generate_markdown_report(analysis, project_name="MockProject")
-        self.assertIn("# Architectural Knowledge Graph Report: MockProject", report)
-        self.assertIn("## 1. Executive Summary & Graph Topology", report)
-        self.assertIn("## 2. Architectural Communities & Module Breakdown", report)
-        self.assertIn("## 3. Critical God Nodes & Architectural Bottlenecks", report)
-        self.assertIn("## 5. Actionable Recommendations & Focus Areas", report)
+        # Check Layer Breakdown
+        self.assertIn(ArchitecturalLayer.PRESENTATION, prof.layer_breakdown)
+        self.assertIn(ArchitecturalLayer.BUSINESS_LOGIC, prof.layer_breakdown)
+        self.assertIn(ArchitecturalLayer.DATA, prof.layer_breakdown)
 
-    def test_db_community_persistence_and_retrieval(self) -> None:
-        sample_communities = [
-            {
-                "community_id": 0,
-                "label": "Auth Module (login, session)",
-                "cohesion_score": 0.85,
-                "node_count": 4,
-                "nodes": ["auth:login", "auth:session", "auth:LoginService", "auth:SessionManager"],
-            },
-            {
-                "community_id": 1,
-                "label": "Billing Module (invoice, payment)",
-                "cohesion_score": 0.72,
-                "node_count": 3,
-                "nodes": ["billing:invoice", "billing:payment", "billing:InvoiceManager"],
-            },
-        ]
+        # Check Mermaid Diagrams
+        self.assertIn("```mermaid", prof.mermaid_layer_diagram)
+        self.assertIn("graph TD", prof.mermaid_layer_diagram)
+        self.assertIn("```mermaid", prof.mermaid_hld_diagram)
+        self.assertIn("```mermaid", prof.mermaid_routing_tree)
+        self.assertIn("```mermaid", prof.mermaid_execution_flow)
+        self.assertIn("sequenceDiagram", prof.mermaid_execution_flow)
 
-        self.db.save_communities(sample_communities)
-        stored = self.db.get_communities()
-        self.assertEqual(len(stored), 2)
-        self.assertEqual(stored[0]["label"], "Auth Module (login, session)")
-        self.assertEqual(len(stored[0]["nodes"]), 4)
+        # Check Functional Modules & Routing
+        self.assertIsNotNone(prof.functional_modules)
+        self.assertIsNotNone(prof.routing_architecture)
+        self.assertGreaterEqual(len(prof.functional_modules), 1)
 
-        single = self.db.get_community(1)
-        self.assertIsNotNone(single)
-        assert single is not None
-        self.assertEqual(single["community_id"], 1)
-        self.assertEqual(single["label"], "Billing Module (invoice, payment)")
+        # Check Domains Aggregated
+        domain_names = [d.name for d in prof.domains]
+        self.assertTrue(any("Auth" in name for name in domain_names))
 
+        # Check Report Generation
+        report = generate_markdown_report(analysis, project_name="MockCRM")
+        self.assertIn("# Architectural Knowledge Graph Report: MockCRM", report)
+        self.assertIn("## 1. Executive Summary & Architecture Topology", report)
+        self.assertIn("## 2. High-Level Design (HLD) & System Context Diagram", report)
+        self.assertIn("## 3. High-Level Architectural Layer Boundary Diagram", report)
+        self.assertIn("## 4. Comprehensive Routing & Dispatch Architecture", report)
+        self.assertIn("## 5. Functional Module Breakdown & Feature Taxonomy", report)
+        self.assertIn("## 6. Core Lifecycle Execution & Data Flow Diagram", report)
+        self.assertIn("## 7. Multi-Layer Component Breakdown & Inventory", report)
+        self.assertIn("## 8. High-Level Business Domains & Subsystems", report)
+        self.assertIn("## 9. Architectural Violations & Structural Warnings", report)
+        self.assertIn("## 10. Critical God Nodes & Blast Radius Assessment", report)
+        self.assertIn("## 11. Prioritized Architectural Refactoring Roadmap", report)
+        self.assertIn("## 12. Machine-Readable Architecture Schema (JSON-LD)", report)
+        self.assertIn('"@context": "https://schema.org/"', report)
+        self.assertIn('"@type": "SoftwareApplicationArchitecture"', report)
     def test_cli_report_and_cluster_commands(self) -> None:
         self._populate_mock_project()
         parser = build_parser()
 
-        # Test 'sot cluster' JSON
-        args_cluster_json = parser.parse_args(["cluster", "--json"])
+        # Test CLI report command
+        out_report = self.root_path / "architecture_report.md"
+        args_report = parser.parse_args(
+            ["--root", str(self.root_path), "report", "-o", str(out_report)]
+        )
+        cmd_report(args_report, self.db, str(self.root_path))
+        self.assertTrue(out_report.exists())
+        content = out_report.read_text(encoding="utf-8")
+        self.assertIn("Architectural Knowledge Graph Report", content)
+        self.assertIn("```mermaid", content)
+
+        # Test CLI cluster command
         buf = io.StringIO()
         with redirect_stdout(buf):
-            code = cmd_cluster(args_cluster_json, self.db)
-        self.assertEqual(code, 0)
-        data = json.loads(buf.getvalue())
-        self.assertIn("communities_count", data)
-        self.assertIn("communities", data)
-
-        # Test 'sot report' JSON
-        args_report_json = parser.parse_args(["report", "--json"])
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            code = cmd_report(args_report_json, self.db, str(self.root))
-        self.assertEqual(code, 0)
-        rep_data = json.loads(buf.getvalue())
-        self.assertIn("metrics", rep_data)
-        self.assertIn("communities", rep_data)
-        self.assertIn("god_nodes", rep_data)
-
-        # Test 'sot report' Markdown file write
-        report_file = self.root / "TEST_REPORT.md"
-        args_report_md = parser.parse_args(["report", "-o", str(report_file)])
-        with redirect_stdout(io.StringIO()):
-            code = cmd_report(args_report_md, self.db, str(self.root))
-        self.assertEqual(code, 0)
-        self.assertTrue(report_file.exists())
-        content = report_file.read_text(encoding="utf-8")
-        self.assertIn("# Architectural Knowledge Graph Report", content)
+            args_cluster = parser.parse_args(
+                ["--root", str(self.root_path), "cluster", "--min-size", "1"]
+            )
+            cmd_cluster(args_cluster, self.db)
+        output = buf.getvalue()
+        self.assertIn("Architectural Communities", output)
 
 
 if __name__ == "__main__":

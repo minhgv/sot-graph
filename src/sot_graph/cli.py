@@ -299,6 +299,29 @@ def cmd_doctor(db: Database) -> int:
     print(f"  • Pending Edges   : {st['pending']}")
     print("=" * 40)
     return 0
+def cmd_bundle(args: argparse.Namespace, db: Database, root: str) -> int:
+    from sot_graph.analytics.bundle import ArchitectureBundler
+
+    bundler = ArchitectureBundler(db, root)
+    out_dir = args.output or os.path.join(root, ".sot", "bundle")
+    bundle = bundler.extract_bundle(out_dir)
+
+    if args.json:
+        payload = {
+            "output_dir": os.path.abspath(out_dir),
+            "files": list(bundle.keys()),
+            "status": "success",
+        }
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"[OK] Architecture Fact Bundle extracted to: {out_dir}/")
+        for fname in sorted(bundle.keys()):
+            fpath = os.path.join(out_dir, fname)
+            size = os.path.getsize(fpath) if os.path.exists(fpath) else len(bundle[fname])
+            print(f"  • {fname:<32} ({size:,} bytes)")
+        print("\nTip: LLM Agents can now ingest these 5 fact files with ARCHITECTURE_TEMPLATE.md to generate the full architecture report.")
+    return 0
+
 
 def cmd_report(args: argparse.Namespace, db: Database, root: str) -> int:
     from sot_graph.analytics.graph import AnalyticsGraph
@@ -603,6 +626,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_expo.add_argument("-f", "--format", default="graphrag", choices=["graphrag", "json", "obsidian", "graphml"], help="Export format (default: graphrag)")
     p_expo.add_argument("-o", "--output", default=None, help="Output file or directory path")
     p_expo.add_argument("--scope", default=None, help="Scope export to path or subdirectory")
+    # bundle
+    p_bun = subparsers.add_parser("bundle", help="Extract 5 high-density fact bundle markdown files for LLM architecture reports")
+    p_bun.add_argument("-o", "--output", default=None, help="Output directory path (default: .sot/bundle/)")
+    p_bun.add_argument("--json", action="store_true", help="Output summary in JSON format")
+
 
     # setup
     p_setup = subparsers.add_parser("setup", help="Configure AI coding harnesses (OMP, OpenCode, Antigravity, Claude)")
@@ -655,6 +683,8 @@ def main() -> int:
             return cmd_viz(args, db, root)
         elif args.command == "export":
             return cmd_export(args, db)
+        elif args.command == "bundle":
+            return cmd_bundle(args, db, root)
         return 0
     finally:
         db.close()

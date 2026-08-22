@@ -410,6 +410,33 @@ class McpService:
                 "communities": comm_list,
             })
         return self._run(op)
+    def get_architecture_bundle(
+        self,
+        *,
+        output_dir: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Extract the 5 fact bundle markdown/json files for LLM architecture reports."""
+        from sot_graph.analytics.bundle import ArchitectureBundler
+        from sot_graph.analytics.graph import AnalyticsGraph
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            graph = AnalyticsGraph.from_connection(conn)
+            bundler = ArchitectureBundler(root_dir=self.project_root, graph=graph)
+            out_dir = output_dir or os.path.join(self.project_root, ".sot", "bundle")
+            bundle = bundler.extract_bundle(out_dir)
+            return self._fits_response({
+                "ok": True,
+                "status": "success",
+                "output_dir": os.path.abspath(out_dir),
+                "files": {fname: len(content) for fname, content in bundle.items()},
+                "metrics": {
+                    "total_nodes": len(bundler.graph.nodes),
+                    "total_edges": len(bundler.graph.edges),
+                    "modularity": bundler.analysis.metrics.modularity,
+                },
+            })
+        return self._run(op)
+
 
     async def _async(self, method: Any, *args: Any, **kwargs: Any) -> Any:
         try:
@@ -437,6 +464,8 @@ class McpService:
 
     async def aget_communities(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return await self._async(self.get_communities, *args, **kwargs)
+    async def aget_architecture_bundle(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.get_architecture_bundle, *args, **kwargs)
 
 
 __all__ = ["McpService", "McpServiceError", "ServiceLimits"]

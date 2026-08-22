@@ -12,6 +12,7 @@
  * - sot_report: Architecture Assessment & God Node Blast Radius
  * - sot_viz: Interactive D3.js Knowledge Graph Visualizer Generation
  * - sot_export: Multi-format Graph Export (GraphRAG JSON, Obsidian, GraphML)
+ * - sot_bundle: Architecture Fact Bundler for LLM Report Synthesis
  */
 import { execFile } from "node:child_process";
 import { join } from "node:path";
@@ -311,6 +312,30 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
       const args = ["export", "--format", String(params.format)];
       if (params.output) args.push("-o", String(params.output));
       if (params.scope) args.push("--scope", String(params.scope));
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
+  // 11. sot_bundle: Fact Bundle Extractor for LLM Architecture Reports
+  pi.registerTool({
+    name: "sot_bundle",
+    label: "SOT Architecture Fact Bundler",
+    description:
+      "Extract 5 high-density architecture fact bundle markdown/json files (01_module_inventory.md, 02_routing_endpoints.md, 03_workflows_states.md, 04_dependencies_violations.md, 05_system_metrics.json) into .sot/bundle/ for LLM synthesis of comprehensive architecture reports.",
+    promptSnippet: "Extract 5 architecture fact bundle files for LLM report synthesis",
+    parameters: {
+      type: "object",
+      properties: {
+        output: { type: "string", description: "Target directory path (default: .sot/bundle/)" },
+        json: { type: "boolean", description: "Output in JSON format" },
+      },
+    },
+    async execute(_id, params) {
+      const args = ["bundle"];
+      if (params.output) args.push("-o", String(params.output));
+      if (params.json) args.push("--json");
 
       const { ok, output } = await runCmd(getSotBin(), args);
       return { content: [{ type: "text", text: output.trim() }], details: { ok } };
