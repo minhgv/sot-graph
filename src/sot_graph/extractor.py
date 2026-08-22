@@ -33,6 +33,8 @@ EXT_DISPATCH = {
     ".rb": "extract_ruby",
     ".php": "extract_php",
     ".swift": "extract_swift",
+    ".kt": "extract_kotlin",
+    ".kts": "extract_kotlin",
     ".dart": "extract_dart",
 }
 
@@ -54,6 +56,8 @@ LANGUAGE_MAP = {
     ".rb": "ruby",
     ".php": "php",
     ".swift": "swift",
+    ".kt": "kotlin",
+    ".kts": "kotlin",
     ".dart": "dart",
     ".arb": "json",
     ".md": "markdown",
@@ -206,10 +210,11 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
 
         # Method-call qualification: a call on `self`/`cls` (or the enclosing
         # class name) targets the class-scoped symbol 'Class.method', while
-        # the raw call target is only the bare attribute name.
+        # the raw call target is only the bare attribute name. A receiver-less
+        # BARE call inside a method (Java/Kotlin sibling call) qualifies too.
         if rel == "calls" and "." in src_raw:
             parent = src_raw.rsplit(".", 1)[0]
-            if receiver in ("self", "cls", parent):
+            if receiver in ("self", "cls", parent, None):
                 qualified_id = symbol_to_node_id.get(f"{parent}.{dst_raw}")
                 if qualified_id:
                     edges.append({

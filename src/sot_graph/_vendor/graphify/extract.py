@@ -351,25 +351,35 @@ def extract_js(path: Path) -> Dict[str, Any]:
     return _extract_regex_patterns(path, patterns)
 
 
+def _ts_or_regex(path: Path, language: str, patterns: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Prefer the optional tree-sitter AST extractor; fall back to regex."""
+    try:
+        from sot_graph.ts_extract import extract_ts
+
+        return extract_ts(path, language)
+    except Exception:
+        return _extract_regex_patterns(path, patterns)
+
+
 def extract_go(path: Path) -> Dict[str, Any]:
-    """Go language extractor."""
+    """Go language extractor (tree-sitter when [tree-sitter] extra is present)."""
     patterns = [
         {"regex": r"func\s+(?:\([^)]+\)\s+)?([a-zA-Z0-9_]+)\s*\(", "kind": "function", "prefix": "func"},
         {"regex": r"type\s+([a-zA-Z0-9_]+)\s+struct\b", "kind": "struct", "prefix": "type struct"},
         {"regex": r"type\s+([a-zA-Z0-9_]+)\s+interface\b", "kind": "interface", "prefix": "type interface"},
     ]
-    return _extract_regex_patterns(path, patterns)
+    return _ts_or_regex(path, "go", patterns)
 
 
 def extract_rust(path: Path) -> Dict[str, Any]:
-    """Rust language extractor."""
+    """Rust language extractor (tree-sitter when [tree-sitter] extra is present)."""
     patterns = [
         {"regex": r"(?:pub\s+)?fn\s+([a-zA-Z0-9_]+)\s*\(", "kind": "function", "prefix": "fn"},
         {"regex": r"(?:pub\s+)?struct\s+([a-zA-Z0-9_]+)", "kind": "struct", "prefix": "struct"},
         {"regex": r"(?:pub\s+)?enum\s+([a-zA-Z0-9_]+)", "kind": "enum", "prefix": "enum"},
         {"regex": r"(?:pub\s+)?trait\s+([a-zA-Z0-9_]+)", "kind": "trait", "prefix": "trait"},
     ]
-    return _extract_regex_patterns(path, patterns)
+    return _ts_or_regex(path, "rust", patterns)
 
 
 def extract_c(path: Path) -> Dict[str, Any]:
@@ -395,7 +405,7 @@ def extract_java(path: Path) -> Dict[str, Any]:
         {"regex": r"(?:public|protected|private)?\s*interface\s+([a-zA-Z0-9_]+)", "kind": "interface", "prefix": "interface"},
         {"regex": r"(?:public|protected|private|static|\s)+[a-zA-Z0-9_<>\[\]]+\s+([a-zA-Z0-9_]+)\s*\([^)]*\)\s*\{?", "kind": "function", "prefix": "method"},
     ]
-    return _extract_regex_patterns(path, patterns)
+    return _ts_or_regex(path, "java", patterns)
 
 
 def extract_ruby(path: Path) -> Dict[str, Any]:
@@ -421,7 +431,16 @@ def extract_swift(path: Path) -> Dict[str, Any]:
         {"regex": r"(?:public|private|internal)?\s*struct\s+([a-zA-Z0-9_]+)", "kind": "struct", "prefix": "struct"},
         {"regex": r"(?:public|private|internal)?\s*func\s+([a-zA-Z0-9_]+)\s*\(", "kind": "function", "prefix": "func"},
     ]
-    return _extract_regex_patterns(path, patterns)
+    return _ts_or_regex(path, "swift", patterns)
+
+
+def extract_kotlin(path: Path) -> Dict[str, Any]:
+    patterns = [
+        {"regex": r"(?:public|private|internal)?\s*class\s+([a-zA-Z0-9_]+)", "kind": "class", "prefix": "class"},
+        {"regex": r"\bfun\s+([a-zA-Z0-9_]+)\s*\(", "kind": "function", "prefix": "fun"},
+        {"regex": r"\bobject\s+([a-zA-Z0-9_]+)", "kind": "object", "prefix": "object"},
+    ]
+    return _ts_or_regex(path, "kotlin", patterns)
 
 
 DART_KEYWORDS = {
