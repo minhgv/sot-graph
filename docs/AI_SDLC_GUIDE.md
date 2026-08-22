@@ -1,225 +1,225 @@
-# Ứng Dụng sot-graph Trong Vòng Đời Phát Triển Phần Mềm Trợ Lực AI (AI SDLC)
+# Applying sot-graph Across the AI-Assisted Software Development Life Cycle (AI SDLC)
 
-> **Cẩm nang chuyên sâu về việc tích hợp `sot-graph` làm Lớp Tri Thức Nguồn Chân Lý Duy Nhất (Single Source of Truth Knowledge Layer) cho AI Coding Agents.**
-> *Loại bỏ Phantom Anchors, chống ảo giác đường dẫn, ngăn chặn tái tạo mã thừa (Cold Start Redundancy) và kiểm soát bán kính ảnh hưởng (Blast Radius).*
+> **Comprehensive Guide to Integrating `sot-graph` as the Authoritative Single Source of Truth Knowledge Layer for AI Coding Agents.**  
+> *Eliminate Phantom Anchors, prevent path hallucinations, eradicate Cold Start Redundancy, and constrain Blast Radius during active coding loops.*
 
 ---
 
-## 📑 Mục Lục
-1. [Bối Cảnh & Vấn Đề Cốt Lõi Trong AI SDLC](#-1-bối-cảnh--vấn-đề-cốt-lõi-trong-ai-sdlc)
-2. [Chi Tiết 6 Giai Đoạn AI SDLC Cùng sot-graph](#-2-chi-tiết-6-giai-đoạn-ai-sdlc-cùng-sot-graph)
-   - [Phase 1: Khám Phá & Lập Kế Hoạch (Discovery & Architecture Scoping)](#phase-1-khám-phá--lập-kế-hoạch-discovery--architecture-scoping)
-   - [Phase 2: Sinh Mã & Triển Khai Trong Active Coding Loop (Generation & Development)](#phase-2-sinh-mã--triển-khai-trong-active-coding-loop-generation--development)
-   - [Phase 3: Tái Cấu Trúc & Giảm Thiểu Vùng Ảnh Hưởng (Refactoring & Blast Radius Mitigation)](#phase-3-tái-cấu-trúc--giảm-thiểu-vùng-ảnh-hưởng-refactoring--blast-radius-mitigation)
-   - [Phase 4: Đánh Giá & CI/CD Verification Gate (Code Review & Drift Auditing)](#phase-4-đánh-giá--cicd-verification-gate-code-review--drift-auditing)
-   - [Phase 5: Lưu Trữ & Kế Thừa Tri Thức Kiến Trúc (Knowledge Retention & ADR)](#phase-5-lưu-trữ--kế-thừa-tri-thức-kiến-trúc-knowledge-retention--adr)
-   - [Phase 6: Bảo Trì, Vệ Sinh & Tối Ưu Hệ Thống (Maintenance & Graph Hygiene)](#phase-6-bảo-trì-vệ-sinh--tối-ưu-hệ-thống-maintenance--graph-hygiene)
-3. [Bảng So Sánh: AI SDLC Truyền Thống vs AI SDLC Với sot-graph](#-3-bảng-so-sánh-ai-sdlc-truyền-thống-vs-ai-sdlc-với-sot-graph)
-4. [Tích Hợp Tự Động Vào CI/CD & Git Hooks](#-4-tích-hợp-tự-động-vào-cicd--git-hooks)
-5. [Cấu Hình Mẫu Cho AI Coding Agents (AGENTS.md)](#-5-cấu-hình-mẫu-cho-ai-coding-agents-agentsmd)
-6. [Phân Tích Kinh Tế Token (Token Economy & Cost Efficiency)](#-6-phân-tích-kinh-tế-token-token-economy--cost-efficiency)
+## 📑 Table of Contents
+1. [Context & Core Challenges in AI SDLC](#-1-context--core-challenges-in-ai-sdlc)
+2. [Detailed 6 Phases of AI SDLC with sot-graph](#-2-detailed-6-phases-of-ai-sdlc-with-sot-graph)
+   - [Phase 1: Discovery & Architecture Scoping](#phase-1-discovery--architecture-scoping)
+   - [Phase 2: Generation & Active Development Loop](#phase-2-generation--active-development-loop)
+   - [Phase 3: Refactoring & Blast Radius Mitigation](#phase-3-refactoring--blast-radius-mitigation)
+   - [Phase 4: Code Review & CI/CD Verification Gate](#phase-4-code-review--cicd-verification-gate)
+   - [Phase 5: Knowledge Retention & Architecture Decision Records (ADR)](#phase-5-knowledge-retention--architecture-decision-records-adr)
+   - [Phase 6: Maintenance, Graph Hygiene & Database Optimization](#phase-6-maintenance-graph-hygiene--database-optimization)
+3. [Comparison Matrix: Traditional AI SDLC vs AI SDLC with sot-graph](#-3-comparison-matrix-traditional-ai-sdlc-vs-ai-sdlc-with-sot-graph)
+4. [Automated CI/CD & Git Hooks Integration](#-4-automated-cicd--git-hooks-integration)
+5. [Sample Agent Configuration (AGENTS.md)](#-5-sample-agent-configuration-agentsmd)
+6. [Token Economy & Cost Efficiency Analysis](#-6-token-economy--cost-efficiency-analysis)
 ---
 
-## 🎯 1. Bối Cảnh & Vấn Đề Cốt Lõi Trong AI SDLC
+## 🎯 1. Context & Core Challenges in AI SDLC
 
-Trong kỷ nguyên các **AI Coding Agent** (như Oh My Pi, Claude Code, Cursor, Windsurf, Devin) trực tiếp tham gia viết code hàng ngày, quy trình phát triển phần mềm truyền thống (SDLC) đã chuyển dịch thành **AI-Assisted SDLC**.
+In the era of autonomous **AI Coding Agents** (such as Oh My Pi, Claude Code, Cursor, Windsurf, Devin) authoring code daily, traditional software development workflows have evolved into **AI-Assisted SDLC**.
 
-Tuy nhiên, các hệ thống AI Coding hiện nay đang gặp phải **3 "Căn Bệnh Trầm Kha"**:
+However, contemporary AI coding agents suffer from **3 Critical Failure Modes**:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                        3 NGHẼN CẢNH LỚN NHẤT CỦA AI CODING AGENT                        │
+3 MAJOR BOTTLENECKS OF CONTEMPORARY AI CODING AGENTS
 ├──────────────────────────────┬─────────────────────────────┬────────────────────────────┤
 │   1. COLD START REDUNDANCY   │     2. PHANTOM ANCHORS      │   3. REFACTOR BLIND SPOT   │
 │                              │                             │                            │
-│  Mỗi phiên làm việc bắt đầu  │  Agent nhớ file/hàm đã bị   │  Sửa đổi 1 hàm trung tâm   │
-│  từ số 0. Agent tự viết lại  │  xóa hoặc đổi tên từ trước. │  làm gãy 15 module ở xa    │
-│  hàm tiện ích đã có sẵn, làm │  Sinh patch trỏ vào đường   │  mà Agent hoàn toàn không  │
-│  phình to codebase gấp 3 lần.│  dẫn chết (Dead Paths).     │  hề hay biết.              │
+│  Every session starts from   │  The agent remembers files  │  Modifying a core utility  │
+│  scratch. The agent rebuilds │  or functions that have     │  silently breaks 15 distant│
+│  existing utilities, causing │  been deleted or renamed,   │  modules that the agent is │
+│  codebase bloat (3x sprawl). │  generating dead patches.   │  completely unaware of.    │
 └──────────────────────────────┴─────────────────────────────┴────────────────────────────┘
 ```
 
-`sot-graph` sinh ra nhằm cung cấp một **Lớp Tri Thức Xác Thực Vật Lý Trên Ổ Đĩa (Physically Verified Knowledge Layer)**. Bằng cách kết hợp **Filesystem làm Nguồn Chân Lý Duy Nhất (SSOT)**, **SQLite FTS5 + WAL**, và **Thuật Toán Đồ Thị Trực Tiếp**, `sot-graph` đồng hành xuyên suốt 6 giai đoạn phát triển phần mềm.
+`sot-graph` was engineered to provide a **Physically Verified Knowledge Layer**. By anchoring the **Filesystem as the Single Source of Truth (SSOT)**, backed by **SQLite FTS5 + WAL** and **in-process deterministic graph algorithms**, `sot-graph` seamlessly guides agents across all 6 phases of software engineering.
 
 ---
 
-## 🚀 2. Chi Tiết 6 Giai Đoạn AI SDLC Cùng sot-graph
+## 🚀 2. Detailed 6 Phases of AI SDLC with sot-graph
 
 ```
                   ┌────────────────────────────────────────────────────────┐
-                  │              VÒNG ĐỜI AI SDLC VỚI SOT-GRAPH             │
+                  │              AI SDLC WITH SOT-GRAPH KNOWLEDGE LAYER    │
                   └────────────────────────────────────────────────────────┘
                                               │
     ┌─────────────────────────────────────────┼─────────────────────────────────────────┐
     │                                         │                                         │
     ▼                                         ▼                                         ▼
-[ 1. KHÁM PHÁ & LẬP KẾ HOẠCH ]     [ 2. SINH MÃ & PHÁT TRIỂN ]        [ 3. TÁI CẤU TRÚC & REFACTOR ]
-• Kiểm tra tri thức tái sử dụng    • Tra cứu symbol xác minh đĩa     • Phân tích 2-hop Blast Radius
-• Tránh viết lại hàm có sẵn        • Auto-Heal khi file đổi vị trí   • Đánh giá God Nodes & Cohesion
-• Lập bản đồ cộng đồng Louvain     • Pending Edge giải quyết import  • Đo Modularity Q ngăn gãy API
+[ 1. DISCOVERY & SCOPING ]            [ 2. GENERATION & DEV ]             [ 3. REFACTORING & IMPACT ]
+• Check existing reusable logic       • Disk-verified symbol lookup       • 2-hop Blast Radius analysis
+• Prevent helper duplication          • Auto-Heal on path relocations     • God Node & Cohesion diagnostics
+• Louvain community boundaries        • 2-way atomic pending edges        • Modularity Q protects contracts
     │                                         │                                         │
     ├─────────────────────────────────────────┼─────────────────────────────────────────┤
     │                                         │                                         │
     ▼                                         ▼                                         ▼
-[ 4. CODE REVIEW & CI/CD ]         [ 5. LƯU TRỮ TRI THỨC (ADR) ]      [ 6. BẢO TRÌ & HYGIENE ]
-• Phát hiện Architectural Drift   • Ghi chú giải pháp hiểm hóc      • Dọn dẹp rác với `sot clean`
-• Auto-Purge đường dẫn đã xóa     • Không mất context giữa session  • Thu gọn DB với `sot vacuum`
-• Gatekeeper kiểm tra lệch pha    • Tra cứu FTS5 BM25 tức thì       • Giữ hiệu năng Sub-Millisecond
+[ 4. CODE REVIEW & CI/CD ]            [ 5. KNOWLEDGE RETENTION ]          [ 6. OPS & GRAPH HYGIENE ]
+• Detect Architectural Drift          • Persist complex ADR decisions     • Prune stale records with `clean`
+• Auto-Purge deleted paths            • Zero context loss across chats    • Defrag database with `vacuum`
+• Quality gate prevents divergence    • Instant FTS5 BM25 retrieval       • Sub-millisecond read latency
 ```
 
 ---
 
-### Phase 1: Khám Phá & Lập Kế Hoạch (Discovery & Architecture Scoping)
+### Phase 1: Discovery & Architecture Scoping
 
-#### Thách thức thực tế
-- Khi nhận một user prompt (ví dụ: *"Hãy viết chức năng xác thực token JWT kèm phân quyền role"*), Agent thường bắt đầu code ngay mà không biết rằng trong thư mục `src/auth/` hoặc `utils/` đã có sẵn các helper mã hóa HMAC, parse claims, hoặc validate expiration.
-- Agent dùng lệnh `grep`/`find` thô sơ làm tràn ngập context window với hàng nghìn dòng code không liên quan, dẫn tới cạn token và giảm sút khả năng suy luận logic.
+#### The Real-World Challenge
+- When given a user prompt (e.g., *"Implement JWT token validation with role-based access control"*), agents often jump straight to writing code from scratch, unaware that `src/auth/` or `utils/` already contains HMAC signing, claims parsing, or expiration validation helpers.
+- Primitive `grep`/`find` scans flood the LLM context window with thousands of irrelevant lines, burning tokens and degrading reasoning depth.
 
-#### Cách `sot-graph` giải quyết
-1. **Tra Cứu Nhanh & Phân Loại Mức Độ Tin Cậy (`sot search` / MCP `sot_search`):**
-   Agent chỉ cần 1 câu lệnh để truy vấn toàn bộ codebase qua SQLite FTS5 (BM25 score):
+#### How `sot-graph` Solves It
+1. **Rapid Verified Search (`sot search` / MCP `sot_search`):**
+   The agent queries the entire codebase via SQLite FTS5 (BM25 ranking) in a single command:
    ```bash
    ./bin/sot search "jwt token validation role"
    ```
-   Hệ thống phản hồi tức thì (< 1.2ms) kèm nhãn **Trust Verdict**:
-   - `[STRONG]`: File tồn tại vật lý và chứa ≥ 50% từ khóa (Agent có thể dùng ngay).
-   - `[WEAK]`: Khớp ngữ nghĩa tiêu đề (cần đọc lướt trước khi dùng).
-2. **Khảo Sát Ranh Giới Module Qua Cộng Đồng Louvain (`sot cluster` / `sot report`):**
-   Agent hiểu được kiến trúc tổng quan mà không cần đọc từng file:
+   The engine responds immediately (< 1.2ms) with authoritative **Trust Verdicts**:
+   - `[STRONG]`: File physically exists on disk and contains ≥ 50% query keyword coverage (Agent can immediately use/import).
+   - `[WEAK]`: Semantic or header match (Agent should inspect before implementing).
+2. **Architecture Scoping via Louvain Communities (`sot cluster` / `sot report`):**
+   The agent discovers the modular structure without reading raw files:
    ```bash
    ./bin/sot cluster --min-size 3
    ```
-   Kết quả trả về danh sách các cụm chức năng (Auth, Billing, Notifications...) cùng hệ số Modularity $Q$, giúp Agent đặt file mới đúng vị trí kiến trúc.
+   The response enumerates functional clusters (Auth, Billing, Notifications...) along with the global Modularity score $Q$, ensuring new files are placed in their proper architectural domain.
 
 ---
 
-### Phase 2: Sinh Mã & Triển Khai Trong Active Coding Loop (Generation & Development)
+### Phase 2: Generation & Active Development Loop
 
-#### Thách thức thực tế
-- **Phantom Anchors**: Lập trình viên vừa đổi tên file `src/services/user_service.py` thành `src/core/services/user.py`. Agent nhớ đường dẫn cũ trong context, tạo ra đoạn import `from src.services.user_service import UserService` $\rightarrow$ runtime crash.
-- **Import chéo và thứ tự index**: File A import Class từ File B chưa được lưu vào đồ thị, gây đứt gãy đồ thị quan hệ.
+#### The Real-World Challenge
+- **Phantom Anchors**: A developer renames `src/services/user_service.py` to `src/core/services/user.py`. The agent remembers the old path from previous turns and generates `from src.services.user_service import UserService` $\rightarrow$ immediate runtime failure.
+- **Cross-Import & Out-of-Order Indexing**: File A imports a class from File B before File B has been indexed, breaking relationship graphs.
 
-#### Cách `sot-graph` giải quyết
-1. **Cơ Chế Tự Động Định Vị Lại (Auto-Rehome `[REBUILT]`):**
-   Khi Agent tra cứu `UserService`, nếu đường dẫn cũ không còn, `verifier.py` tự động quét basename trên đĩa, phát hiện vị trí mới tại `src/core/services/user.py`, cập nhật lại SQLite và trả về kết quả `[REBUILT]`. Agent lập tức viết đúng đường dẫn mới!
-2. **Đồng Bộ Hai Chiều Cho Pending Edges (`db.resolve_pending_edges`):**
-   Mọi liên kết gọi hàm/import chưa rõ đích đến được lưu tạm tại `pending_edges`. Ngay khi file đích được parse, câu lệnh SQL nguyên tử tự động thăng hạng chúng thành `graph_edges` hoàn chỉnh.
-3. **Đồng Bộ Siêu Nhanh Trong Micro-Giây (Fast Dirty Check):**
-   Trong vòng lặp sinh mã, Agent chỉ mất **~24.1ms** để gọi `sot reconcile`. Reconciler so sánh cặp `(size, mtime_ms)` $O(1)$, chỉ parse lại đúng 1 file vừa thay đổi.
+#### How `sot-graph` Solves It
+1. **Auto-Rehome Mechanism (`[REBUILT]`):**
+   When the agent looks up `UserService`, if the old path is missing, `verifier.py` scans disk basenames, detects the relocated file at `src/core/services/user.py`, updates SQLite, and returns `[REBUILT]`. The agent writes the correct import on the first pass!
+2. **Two-Way Pending Edge Resolution (`db.resolve_pending_edges`):**
+   Unresolved imports/calls are staged in `pending_edges`. The moment the target file is parsed, a single atomic SQL transaction promotes them into fully resolved `graph_edges`.
+3. **Microsecond Reconciliation (Fast Dirty Check):**
+   During active coding, calling `sot reconcile` takes only **~24.1ms**. The reconciler performs an $O(1)$ comparison of `(size, mtime_ms)`, re-parsing only the single file that actually changed.
 
 ---
 
-### Phase 3: Tái Cấu Trúc & Giảm Thiểu Vùng Ảnh Hưởng (Refactoring & Blast Radius Mitigation)
+### Phase 3: Refactoring & Blast Radius Mitigation
 
-#### Thách thức thực tế
-- Khi Agent được yêu cầu *"Thay đổi chữ ký hàm `process_payment(amount)` thành `process_payment(amount, currency, idempotency_key)`"*, Agent thường chỉ sửa đúng định nghĩa hàm và 1-2 vị trí gọi gần nhất.
-- Hàng chục lời gọi gián tiếp ở các module khác bị bỏ sót, gây lỗi âm thầm khi lên môi trường staging.
+#### The Real-World Challenge
+- When asked to *"Refactor `process_payment(amount)` to `process_payment(amount, currency, idempotency_key)`"*, the agent typically updates the signature and 1 or 2 nearby call sites.
+- Dozens of indirect callers across other packages are overlooked, creating silent regressions in staging.
 
-#### Cách `sot-graph` giải quyết
-1. **Phân Tích 2-hop Blast Radius (`sot explore` / MCP `sot_explore`):**
-   Trước khi sửa hàm, Agent chạy lệnh:
+#### How `sot-graph` Solves It
+1. **2-hop Blast Radius Analysis (`sot explore` / MCP `sot_explore`):**
+   Before touching the function, the agent runs:
    ```bash
    ./bin/sot explore "PaymentService.process_payment" --depth 2
    ```
-   Hệ thống thực hiện duyệt BFS đúng 2 bước, liệt kê toàn bộ:
-   - Các hàm gọi trực tiếp (Incoming Edges - Hop 1).
-   - Các service cấp cao phụ thuộc gián tiếp (Upstream Callers - Hop 2).
-2. **Cảnh Báo Nút Siêu Kết Nối (God Node Diagnostics):**
-   Nếu hàm/class vượt quá ngưỡng $\text{Cutoff} = \mu + 1.5\sigma$, hệ thống gắn cờ cảnh báo:
+   The engine performs a bounded 2-step BFS traversal, listing:
+   - Direct callers (Incoming Edges - Hop 1).
+   - Higher-level upstream services depending indirectly (Upstream Callers - Hop 2).
+2. **God Node Diagnostics:**
+   If a symbol's degree exceeds $\text{Cutoff} = \mu + 1.5\sigma$, the system flags a warning:
    ```
    ⚠️ WARNING: 'PaymentService' is a GOD NODE with Blast Radius = 28 [CRITICAL]
    Modifying this symbol will impact 5 architectural communities.
    ```
-   Agent sẽ tự động bổ sung test case và cập nhật toàn bộ các caller liên quan.
-3. **Đánh Giá Điểm Cohesion Cụm ($C < 0.4$):**
-   Hệ thống chỉ ra các module bị phụ thuộc chéo quá mức (Tightly Coupled) để Agent đề xuất tách interface phù hợp.
+   The agent proactively updates all upstream callers and expands unit test coverage.
+3. **Cluster Cohesion Scoring ($C < 0.4$):**
+   Identifies tightly coupled modules so the agent can suggest clean interface decoupling.
 
 ---
 
-### Phase 4: Đánh Giá & CI/CD Verification Gate (Code Review & Drift Auditing)
+### Phase 4: Code Review & CI/CD Verification Gate
 
-#### Thách thức thực tế
-- Khi nhiều Agent và lập trình viên cùng merge code vào nhánh `main`, các file cũ bị xóa nhưng tài liệu kiến trúc không được cập nhật. Codebase rơi vào trạng thái "lệch pha" (**Architectural Drift**).
+#### The Real-World Challenge
+- When multiple developers and agents merge PRs into `main`, files get deleted but architectural knowledge remains stale, resulting in **Architectural Drift**.
 
-#### Cách `sot-graph` giải quyết
-1. **Kiểm Toán Trôi Dạt Sâu (`sot verify --deep` / MCP `sot_verify_drift`):**
-   Trong pipeline CI/CD hoặc Pull Request check, chạy lệnh:
+#### How `sot-graph` Solves It
+1. **Deep Drift Auditing (`sot verify --deep` / MCP `sot_verify_drift`):**
+   In CI/CD pipelines or pre-commit checks, execute:
    ```bash
    ./bin/sot verify --deep
    ```
-   Hệ thống đối chiếu hash SHA-256 của từng file vật lý với journal. Nếu phát hiện sai lệch:
-   - Tự động thanh trừng (**Auto-Purge**) các đường dẫn đã bị xóa vĩnh viễn (`[REMOVED]`).
-   - Xuất báo cáo tỷ lệ sai lệch (**Drift Percentage**).
+   The system verifies every physical file's SHA-256 hash against the journal:
+   - Automatically purges permanently deleted paths (`[REMOVED]`).
+   - Reports exact drift percentages and anomalous files.
 2. **CI/CD Quality Gate:**
-   Nếu tỷ lệ drift vượt ngưỡng cho phép, pipeline CI sẽ tự động chạy `sot reconcile` để đưa đồ thị về trạng thái nhất quán 100% trước khi deploy.
+   If drift exceeds allowable thresholds, CI can automatically invoke `sot reconcile` to ensure 100% database-to-disk consistency before deployment.
 
 ---
 
-### Phase 5: Lưu Trữ & Kế Thừa Tri Thức Kiến Trúc (Knowledge Retention & ADR)
+### Phase 5: Knowledge Retention & Architecture Decision Records (ADR)
 
-#### Thách thức thực tế
-- **Context Reset**: Mỗi khi mở một session mới, AI Agent bị "mất trí nhớ". Một bài học đắt giá về cách xử lý deadlock trong PostgreSQL vừa được Agent giải quyết hôm qua, hôm nay một Agent khác lại mắc đúng sai lầm đó.
+#### The Real-World Challenge
+- **Context Reset**: Every new chat session wipes agent memory. A hard-fought lesson regarding PostgreSQL deadlock handling resolved yesterday is repeated as a bug by another agent today.
 
-#### Cách `sot-graph` giải quyết
-1. **Mỏ Neo Kiến Thức Ảo (`sot insert` & `[NOPATH]`):**
-   Sau khi hoàn thành một bug-fix phức tạp hoặc đưa ra quyết định kiến trúc quan trọng (Architecture Decision Record - ADR), Agent chủ động lưu lại vào SQLite:
+#### How `sot-graph` Solves It
+1. **Virtual Knowledge Anchors (`sot insert` & `[NOPATH]`):**
+   Upon solving a complex bug or agreeing on an architectural standard, the agent persists an ADR directly into SQLite:
    ```bash
    ./bin/sot insert \
      --title "Postgres Deadlock Prevention in Order Processing" \
      --body "Always acquire row locks in deterministic ID ascending order (SELECT FOR UPDATE ORDER BY id ASC)." \
      --keywords "postgres,deadlock,locking,order_service"
    ```
-2. **Kế Thừa Vĩnh Viễn Không Cần Đọc Lại File:**
-   Trong các phiên làm việc tiếp theo, khi một Agent khác gõ:
+2. **Cross-Session Persistence Without Re-reading Code:**
+   In future sessions, when any agent searches:
    ```bash
    ./bin/sot search "deadlock order locking"
    ```
-   Node `[NOPATH]` sẽ xuất hiện ngay đầu danh sách kết quả, đóng vai trò là kim chỉ nam hướng dẫn Agent tuân thủ chuẩn kiến trúc của dự án.
+   The `[NOPATH]` virtual anchor appears at the top of the search results, instantly enforcing architectural compliance.
 
 ---
 
-### Phase 6: Bảo Trì, Vệ Sinh & Tối Ưu Hệ Thống (Maintenance & Graph Hygiene)
+### Phase 6: Maintenance, Graph Hygiene & Database Optimization
 
-#### Thách thức thực tế
-- Sau hàng tháng phát triển với hàng nghìn lần thêm/sửa/xóa file, database có thể tích tụ các orphan nodes, phân mảnh B-Tree hoặc làm chậm tốc độ tra cứu FTS5.
+#### The Real-World Challenge
+- Over months of active development with thousands of file mutations, graph databases can accumulate orphaned nodes, fragmented B-Trees, and degraded FTS index speed.
 
-#### Cách `sot-graph` giải quyết
-1. **Lệnh Dọn Dẹp An Toàn (`sot clean`):**
-   - Hỗ trợ chế độ `--dry-run` để kiểm tra trước các node rác sẽ bị xóa mà không gây rủi ro:
+#### How `sot-graph` Solves It
+1. **Safe Database Pruning (`sot clean`):**
+   - Supports `--dry-run` to preview deleted records safely without modifying disk:
      ```bash
      ./bin/sot clean --dry-run
      ```
-   - Thực thi dọn sạch hoàn toàn các dead paths và orphan edges:
+   - Prunes all dead paths and orphaned edges:
      ```bash
      ./bin/sot clean --all --yes
      ```
-2. **Thu Gọn & Tối Ưu B-Tree (`sot vacuum`):**
-   - Tái cấu trúc cơ sở dữ liệu SQLite FTS5, tối ưu hóa các trang disk page để duy trì độ trễ truy vấn dưới **1.2ms**:
+2. **B-Tree Optimization & WAL Checkpointing (`sot vacuum`):**
+   - Restructures SQLite FTS5 storage and defragments pages to guarantee sub-**1.2ms** query latency:
      ```bash
      ./bin/sot vacuum
      ```
-3. **Cơ Chế Khóa SQLite WAL An Toàn:**
-   - Trong quá trình bảo trì, các Agent khác vẫn có thể thực hiện lệnh `search` và `explore` song song nhờ chế độ `WAL` (Write-Ahead Logging) và kết nối `mode=ro` (Read-Only) không bị block.
+3. **Non-Blocking WAL Concurrency:**
+   - During maintenance, agents can still execute concurrent `search` and `explore` commands via `WAL` mode and `mode=ro` (Read-Only) connections without lock contention.
 
 ---
 
-## 📊 3. Bảng So Sánh: AI SDLC Truyền Thống vs AI SDLC Với sot-graph
+## 📊 3. Comparison Matrix: Traditional AI SDLC vs AI SDLC with sot-graph
 
-| Tiêu Chí Đánh Giá | AI SDLC Truyền Thống (Không có sot-graph) | AI SDLC Với sot-graph |
+| Evaluation Criterion | Traditional AI SDLC (Without sot-graph) | AI SDLC with sot-graph |
 | :--- | :--- | :--- |
-| **Độ Chính Xác Vị Trí File** | **Kém (Dễ Ảo Giác)**: Agent thường đoán mò đường dẫn cũ hoặc sinh code trỏ vào file đã bị xóa. | **Tuyệt Đối (100% Verified)**: Mọi node đều qua cổng `TrustVerifier` đối chiếu trực tiếp trên đĩa. |
-| **Khả Năng Tái Sử Dụng Mã** | **Thấp**: Thường xuyên viết lại helper/utility đã có sẵn (Cold Start Redundancy). | **Cao**: `sot search` với FTS5 BM25 giúp Agent tìm thấy hàm có sẵn chỉ trong 1ms. |
-| **Kiểm Soát Khi Refactor** | **Mù Quáng (Blind Edits)**: Chỉ sửa cục bộ 1 file, không biết các caller gián tiếp bị gãy. | **Toàn Diện**: Phân tích **2-hop Blast Radius** và phát hiện **God Nodes** trước khi sửa. |
-| **Độ Trễ Tra Cứu Ngữ Cảnh** | **Chậm (10s - 30s)**: Phải đọc toàn bộ file hoặc gọi Vector DB / Embeddings qua mạng. | **Cực Nhanh (~1.17ms)**: Tra cứu trực tiếp trên SQLite FTS5 nội bộ máy. |
-| **Tài Nguyên Hệ Thống** | **Nặng nề**: Cần Docker, Vector DB Server, background daemons chạy ngầm tốn 1-2GB RAM. | **Siêu Nhẹ (Zero-Daemon)**: Khởi động tức thì qua CLI/MCP, tốn `< 25MB RAM`, không daemon. |
-| **Tự Chữa Lành (Self-Healing)** | **Không có**: Khi đổi tên thư mục (`mv`), toàn bộ memory/vector index của Agent bị hỏng. | **Tự Động**: `Auto-Rehome` tự định vị lại file bị di chuyển; `Auto-Purge` tự xóa dead paths. |
+| **Path Grounding Accuracy** | **Poor (Prone to Hallucinations)**: Agents guess stale paths or write code against deleted files. | **Absolute (100% Verified)**: Every node is physically verified on disk by `TrustVerifier`. |
+| **Code Reuse Capability** | **Low**: Frequently reinvents existing utilities (Cold Start Redundancy). | **High**: `sot search` with FTS5 BM25 locates existing utilities in < 1.2ms. |
+| **Refactoring Control** | **Blind Edits**: Modifies only local files, unaware of broken indirect callers. | **Comprehensive**: Analyzes **2-hop Blast Radius** and flags **God Nodes** prior to edits. |
+| **Context Retrieval Latency** | **Slow (10s - 30s)**: Requires reading entire files or querying remote Vector DBs. | **Ultra-Fast (~1.17ms P95)**: Queries local in-process SQLite FTS5 directly. |
+| **Infrastructure Overhead** | **Heavy**: Demands Docker, Vector DBs, background daemons consuming 1-2GB RAM. | **Zero-Daemon (< 25MB RAM)**: Embedded in-process Python/SQLite CLI & MCP server. |
+| **Self-Healing Capabilities** | **None**: Directory moves (`mv`) completely break vector/agent memory indices. | **Automated**: `Auto-Rehome` tracks moved files; `Auto-Purge` cleans dead paths. |
 
 ---
 
-## ⚙️ 4. Tích Hợp Tự Động Vào CI/CD & Git Hooks
+## ⚙️ 4. Automated CI/CD & Git Hooks Integration
 
 ### 1. Git Pre-Commit Hook (`.git/hooks/pre-commit`)
-Tự động đồng bộ đồ thị tri thức và ngăn chặn commit code khi đồ thị bị trôi dạt:
+Automatically reconciles the knowledge graph and prevents commits when drift is detected:
 
 ```bash
 #!/bin/bash
@@ -227,7 +227,7 @@ Tự động đồng bộ đồ thị tri thức và ngăn chặn commit code kh
 echo "[sot-graph] Reconciling knowledge graph before commit..."
 ./bin/sot reconcile --batch-size 64
 
-# Kiểm tra tính toàn vẹn
+# Integrity verification
 ./bin/sot verify
 if [ $? -ne 0 ]; then
   echo "[sot-graph] ❌ Verification failed. Please resolve discrepancies."
@@ -237,7 +237,7 @@ echo "[sot-graph]  Knowledge graph is fully in sync with filesystem."
 ```
 
 ### 2. GitHub Actions Workflow (`.github/workflows/sot_verification.yml`)
-Kiểm toán kiến trúc và cập nhật báo cáo đồ thị tự động khi có Pull Request:
+Audits architecture and updates structural reports automatically on every Pull Request:
 
 ```yaml
 name: SOT-Graph Architecture Audit
@@ -282,112 +282,112 @@ jobs:
 
 ---
 
-## 🤖 5. Cấu Hình Mẫu Cho AI Coding Agents (AGENTS.md)
+## 🤖 5. Sample Agent Configuration (AGENTS.md)
 
-Thêm đoạn quy ước sau vào file `AGENTS.md` hoặc `.cursorrules` ở thư mục gốc dự án của bạn để mọi AI Coding Agent (Oh My Pi, Claude Code, Cursor, Windsurf) tự động tuân thủ quy trình:
+Add the following protocol to `AGENTS.md` or `.cursorrules` in your project root so that all AI Coding Agents (Oh My Pi, Claude Code, Cursor, Windsurf) adhere to the knowledge reuse workflow:
 
 ```markdown
 ## SOT-Graph Knowledge Reuse & Architecture Protocol
 
-Trước khi thực hiện bất kỳ thay đổi mã nguồn, tính năng mới hoặc tái cấu trúc (Refactoring):
+Before implementing any code changes, new features, or refactoring:
 
-1. **Kiểm tra tri thức tái sử dụng (Tránh Cold Start Redundancy):**
-   Chạy lệnh: `sot search "<chức_năng_hoặc_từ_khóa>"`
-   - `[STRONG]`: Độ tin cậy tuyệt đối - Sử dụng lại hàm/class tại file:dòng được chỉ định.
-   - `[WEAK]`: Khớp ngữ nghĩa - Đọc lướt nội dung file trước khi quyết định viết mới.
-   - `[REBUILT]`: File đã được tự động định vị lại sau khi đổi tên - Dùng đường dẫn mới nhất.
+1. **Check for existing reusable logic (Prevent Cold Start Redundancy):**
+   Run: `sot search "<feature_or_keyword>"`
+   - `[STRONG]`: High confidence - reuse the class/function at the reported file:line.
+   - `[WEAK]`: Semantic match - inspect the file before implementing from scratch.
+   - `[REBUILT]`: File was automatically relocated after renaming - use the updated path.
 
-2. **Phân tích vùng ảnh hưởng trước khi sửa hàm cốt lõi (Blast Radius Check):**
-   Chạy lệnh: `sot explore "<tên_hàm_hoặc_class>" --depth 2`
-   - Đọc kỹ danh sách caller trực tiếp (Hop 1) và gián tiếp (Hop 2) để cập nhật đồng bộ.
-   - Nếu biểu tượng được gắn nhãn `GOD NODE`, chú ý kiểm tra lại toàn bộ các test case liên quan.
+2. **Analyze blast radius before modifying core symbols (Blast Radius Check):**
+   Run: `sot explore "<function_or_class_name>" --depth 2`
+   - Review direct callers (Hop 1) and indirect callers (Hop 2) to update all call sites.
+   - If the symbol is marked as `GOD NODE`, verify and update all associated unit test cases.
 
-3. **Đồng bộ hóa sau khi hoàn thành code:**
-   Chạy lệnh: `sot reconcile` để cập nhật trạng thái đồ thị tri thức mới nhất.
+3. **Reconcile after completing changes:**
+   Run: `sot reconcile` to synchronize the knowledge graph with disk.
 
-4. **Lưu trữ quyết định kiến trúc quan trọng (Knowledge Retention):**
-   Sau khi giải quyết xong một lỗi hiểm hóc hoặc quy ước kiến trúc mới, lưu lại:
-   `sot insert --title "<Tiêu Đề>" --body "<Mô tả chi tiết giải pháp>" --keywords "k1,k2"`
+4. **Persist important architectural decisions (Knowledge Retention):**
+   After resolving a non-trivial bug or establishing a project pattern, persist it:
+   `sot insert --title "<Title>" --body "<Detailed solution explanation>" --keywords "k1,k2"`
 ```
 
 ---
 
-## 💰 6. Phân Tích Kinh Tế Token (Token Economy & Cost Efficiency)
+## 💰 6. Token Economy & Cost Efficiency Analysis
 
-Một câu hỏi quan trọng trong vận hành thực tế: **"Khi tích hợp sot-graph vào dự án, chi phí token phát sinh ra sao?"**
+A fundamental operational question: **"When integrating sot-graph into a codebase, what is the token overhead?"**
 
-> **Kết luận cốt lõi:** `sot-graph` tự nó tiêu tốn **0 LLM Token** ($0.00 USD) để lập chỉ mục, lưu trữ và tra cứu; đồng thời giúp AI Agent **TIẾT KIỆM từ 65% đến 90% lượng token nạp vào Context Window** xuyên suốt vòng đời phát triển phần mềm.
-
----
-
-### 1. Chi Phí Vận Hành Nội Tại: 0 LLM Token ($0.00 USD)
-
-Khác biệt hoàn toàn với các giải pháp RAG dựa trên đám mây hoặc Vector DB đắt đỏ (vốn liên tục tiêu tốn API calls cho LLM Summarization và Embedding Model):
-
-1. **AST Parsing & Extraction:** Chạy 100% bằng Tree-sitter / Regex Parser cục bộ trên CPU máy lập trình viên $\rightarrow$ **0 Token**.
-2. **Indexing & SHA-256 Hashing:** Toàn bộ bảng băm và chỉ mục FTS5 Inverted Index được xây dựng trên SQLite nội bộ $\rightarrow$ **0 Token**.
-3. **Thuật Toán Đồ Thị & Phân Cụm:** Thuật toán phân cụm Louvain, đo Modularity $Q$, tính toán God Node ($\mu + 1.5\sigma$) và duyệt BFS 2-hop chạy thuần túy trên RAM bằng Python $\rightarrow$ **0 Token**.
-4. **Zero Embedding Cost:** Không phụ thuộc và không tốn chi phí gọi các API Embedding như `text-embedding-3-small` hay `ada-002`.
+> **Core Finding:** `sot-graph` itself consumes **0 LLM Tokens** ($0.00 USD) for indexing, storage, and retrieval, while enabling AI Agents to **SAVE between 65% and 90% of token ingestion into the Context Window** across the software lifecycle.
 
 ---
 
-### 2. Định Lượng Token Nạp Vào Context Window Của AI Agent
+### 1. Intrinsic Operational Cost: 0 LLM Tokens ($0.00 USD)
 
-Khi Agent (Oh My Pi, Claude Code, Cursor) tương tác với `sot-graph` qua CLI hoặc giao thức MCP Server (Stdio), lượng token nạp vào Context Window cực kỳ tinh gọn:
+Unlike cloud RAG or vector database solutions (which consume continuous API credits for LLM summarization and embedding vectors):
 
-| Lệnh CLI / MCP Tool | Bản Chất Dữ Liệu Trả Về Cho Agent | Số Lượng Token Nạp Vào Context |
+1. **AST Parsing & Extraction:** 100% local CPU processing via Tree-sitter / Regex $\rightarrow$ **0 Tokens**.
+2. **Indexing & SHA-256 Hashing:** All hash tables and SQLite FTS5 inverted indices run in-process $\rightarrow$ **0 Tokens**.
+3. **Graph Algorithms & Clustering:** Louvain community detection, Modularity $Q$, God Node cutoff ($\mu + 1.5\sigma$), and BFS 2-hop traversals execute in RAM $\rightarrow$ **0 Tokens**.
+4. **Zero Embedding Cost:** No dependency on or billing from external embedding APIs (e.g., `text-embedding-3-small` or `ada-002`).
+
+---
+
+### 2. Quantifying Context Window Token Ingestion
+
+When agents interact with `sot-graph` via CLI or MCP Stdio protocol, payloads injected into the Context Window are extremely compact:
+
+| CLI Command / MCP Tool | Returned Data Payload | Context Tokens Ingested |
 | :--- | :--- | :---: |
-| **`sot search`** / `sot_search` | Danh sách 3–5 candidate nodes kèm nhãn `[STRONG]`, đường dẫn vật lý chính xác và số dòng code. | **~150 – 350 tokens** |
-| **`sot explore`** / `sot_explore` | Cây quan hệ 2-hop (Caller trực tiếp & gián tiếp, quan hệ import/call). | **~300 – 700 tokens** |
-| **`sot cluster`** / `sot_communities` | Danh sách các cụm chức năng và hệ số Modularity $Q$. | **~200 – 450 tokens** |
-| **`sot verify`** / `sot_verify_drift` | Báo cáo tỷ lệ sai lệch SHA-256 và danh sách file lệch pha. | **~80 – 200 tokens** |
-| **`sot insert`** | Ghi nhận mỏ neo tri thức mới (ADR / Bug fix note). | **~50 – 100 tokens** |
+| **`sot search`** / `sot_search` | 3–5 candidate nodes with `[STRONG]` labels, exact file paths, and line numbers. | **~150 – 350 tokens** |
+| **`sot explore`** / `sot_explore` | 2-hop relationship tree (direct callers, upstream dependencies, call sites). | **~300 – 700 tokens** |
+| **`sot cluster`** / `sot_communities` | List of functional clusters and Modularity score $Q$. | **~200 – 450 tokens** |
+| **`sot verify`** / `sot_verify_drift` | SHA-256 drift report and list of anomalous files. | **~80 – 200 tokens** |
+| **`sot insert`** | Virtual knowledge anchor confirmation (ADR / Bug note). | **~50 – 100 tokens** |
 
 ---
 
-### 3. Bài Toán Đối Đầu: Tiết Kiệm Token Ròng (Net Token Savings)
+### 3. Head-to-Head Comparison: Net Token Savings
 
-Xem xét một tác vụ thực tế điển hình: **"Thêm logic xác thực phân quyền Role-Based Access Control (RBAC) vào một API hiện có trong dự án quy mô 300 files"**.
+Consider a typical real-world development task: **"Add Role-Based Access Control (RBAC) validation logic to an existing API in a 300-file repository"**.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│             SO SÁNH TIÊU THỤ TOKEN TRONG 1 PHIÊN LÀM VIỆC CỦA AI AGENT                 │
+│             TOKEN CONSUMPTION COMPARISON DURING A SINGLE AGENT SESSION                 │
 ├─────────────────────────────────────────────┬──────────────────────────────────────────┤
-│    KHI KHÔNG CÓ SOT-GRAPH (TRUYỀN THỐNG)    │           KHI CÓ SOT-GRAPH               │
+│    WITHOUT SOT-GRAPH (TRADITIONAL)          │           WITH SOT-GRAPH                 │
 ├─────────────────────────────────────────────┼──────────────────────────────────────────┤
-│ 1. Agent chạy grep/find ra 40 files kết quả │ 1. Agent chạy `sot search`               │
-│    -> Nạp 4,000 tokens output grep thô.     │    -> Nạp đúng 250 tokens kết quả FTS5.  │
+│ 1. Agent runs grep/find, gets 40 matches    │ 1. Agent runs `sot search`               │
+│    -> Ingests 4,000 tokens of raw output.   │    -> Ingests 250 tokens of FTS5 hits.   │
 │                                             │                                          │
-│ 2. Đọc lướt 15 files để hiểu ngữ cảnh       │ 2. Agent định vị đúng file `auth.py`     │
-│    (mỗi file 400 dòng ~ 2,500 tokens)       │    qua nhãn [STRONG], chỉ đọc 60 dòng    │
-│    -> Tốn 37,500 tokens vào context.        │    -> Tốn 400 tokens.                    │
+│ 2. Reads 15 files to understand context     │ 2. Agent locates exact `auth.py` via     │
+│    (each file 400 lines ~ 2,500 tokens)     │    [STRONG] verdict; reads only 60 lines │
+│    -> Consumes 37,500 tokens in context.    │    -> Consumes 400 tokens.               │
 │                                             │                                          │
-│ 3. Sửa hàm, vô tình làm gãy 4 module khác   │ 3. Chạy `sot explore AuthService`        │
-│    do không biết quan hệ phụ thuộc.         │    thấy ngay 4 module liên quan          │
-│    -> Test fail, lặp lại 3 vòng debug       │    -> Sửa đồng bộ ngay từ lượt đầu       │
-│    -> Tốn 45,000 tokens đọc log & sửa lại.  │    -> Tốn 600 tokens.                    │
+│ 3. Edits function, silently breaks 4 callers│ 3. Runs `sot explore AuthService`, sees  │
+│    due to unknown dependencies.             │    all 4 dependent modules immediately   │
+│    -> Tests fail, 3 debug loops required    │    -> Synchronously updates all callers  │
+│    -> Consumes 45,000 tokens reading logs.  │    -> Consumes 600 tokens.               │
 │                                             │                                          │
-│ 4. Ảo giác đường dẫn (Phantom Anchor)       │ 4. Auto-Rehome & Auto-Purge ngăn chặn    │
-│    do file vừa bị đổi tên                   │    100% đường dẫn chết                   │
-│    -> Tốn 20,000 tokens thử lại.            │    -> Tốn 0 token sửa sai.               │
+│ 4. Path hallucination (Phantom Anchor)      │ 4. Auto-Rehome & Auto-Purge eliminate    │
+│    on a recently renamed file               │    100% of dead paths                    │
+│    -> Consumes 20,000 tokens retrying.      │    -> Consumes 0 retry tokens.           │
 ├─────────────────────────────────────────────┼──────────────────────────────────────────┤
-│ TỔNG TIÊU TỐN: ~106,500 TOKENS              │ TỔNG TIÊU TỐN: ~1,250 TOKENS             │
-│ (Chi phí API: ~$0.35 - $1.50 / session)     │ (Chi phí API: ~$0.003 - $0.015 / session)│
+│ TOTAL CONSUMPTION: ~106,500 TOKENS          │ TOTAL CONSUMPTION: ~1,250 TOKENS         │
+│ (Estimated API Cost: ~$0.35 - $1.50/session)│ (Estimated API Cost: ~$0.003 - $0.015)   │
 └─────────────────────────────────────────────┴──────────────────────────────────────────┘
-                      👉 TIẾT KIỆM ~98.8% LƯỢNG TOKEN PHÍ PHẠM!
+                      👉 NET TOKEN SAVINGS: ~98.8%!
 ```
 
 ---
 
-### 4. Hai Giá Trị Kinh Tế Lớn Nhất Trong Thực Tế
+### 4. Key Economic Benefits in Production
 
-1. **Giữ Context Window "Sạch" & Duy Trì Độ Sắc Bén Của LLM:**
-   Khi Context Window bị lấp đầy bởi hàng chục nghìn tokens mã nguồn thừa thãi, hiện tượng *Context Window Degradation* xảy ra khiến LLM giảm khả năng suy luận logic và dễ sinh ra code lỗi. `sot-graph` giúp Agent chỉ nạp đúng những dòng code liên quan trực tiếp, giữ phiên làm việc kéo dài cả ngày mà không bị tràn bộ nhớ context.
+1. **Context Window Hygiene & LLM Reasoning Preservation:**
+   Flooding the Context Window with tens of thousands of irrelevant code tokens causes *Context Window Degradation*, impairing LLM logical reasoning and increasing syntax errors. `sot-graph` feeds only physically grounded, relevant lines, enabling coding sessions to run productively all day without memory saturation.
 
-2. **Triệt Tiêu Chi Phí Vòng Lặp Sửa Sai (Debug Loop Elimination):**
-   Mỗi khi Agent sinh ra một bản vá trỏ nhầm vào đường dẫn ảo (Phantom Anchor) hoặc làm gãy quan hệ phụ thuộc gián tiếp, developer hoặc Agent phải mất thêm từ 3 đến 5 lượt prompt tương tác tiếp theo để giải thích và sửa lỗi. Việc chặn đứng lỗi ngay từ bước khảo sát giúp tiết kiệm hàng triệu tokens cho mỗi dự án.
+2. **Debug Loop Elimination:**
+   Whenever an agent generates a patch targeting a hallucinated path (Phantom Anchor) or breaks an indirect dependency, the developer or agent spends 3 to 5 extra prompt turns troubleshooting. Eliminating errors at the discovery stage saves millions of prompt tokens across an engineering organization.
 
 ---
 
 ## 📄 License
-MIT License. Bản quyền thuộc về Minh Giap (2026).
+MIT License. Copyright (c) 2026 Minh Giap.

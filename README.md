@@ -63,15 +63,15 @@ When an agent searches the knowledge base via `sot search "<query>"`, every cand
 
 ---
 
-## 📚 Q&A Guide & Knowledge Base (`docs/QA_GUIDE.md`)
+## 📚 Complete Documentation & Deep-Dive Guides
 
-To explore all real-world usage scenarios, edge cases, self-healing mechanics, and graph algorithms:
+Explore comprehensive architectural analyses, real-world agent integration guides, and operational comparisons:
 
-- 📖 **[Đọc Hướng Dẫn Hỏi Đáp Đầy Đủ Trên GitHub (docs/QA_GUIDE.md)](docs/QA_GUIDE.md)** (19 kịch bản chi tiết với Accordion đóng/mở).
-- 🚀 **[Cẩm Nang Ứng Dụng Trong 6 Giai Đoạn AI SDLC (docs/AI_SDLC_GUIDE.md)](docs/AI_SDLC_GUIDE.md)** (Phân tích chi tiết Cold Start, Blast Radius, CI/CD Gate, ADR).
-- ⚖️ **[So Sánh Chuyên Sâu Kiến Trúc: GitNexus vs sot-graph (docs/GITNEXUS_VS_SOT_GRAPH.md)](docs/GITNEXUS_VS_SOT_GRAPH.md)** (Thẩm định 8 chiều kiến trúc, ma trận rủi ro & mô hình lai).
-- ⚡ **[Xem Bản HTML Tương Tác Trực Tuyến (HTMLPreview)](https://htmlpreview.github.io/?https://github.com/minhgv/sot-graph/blob/main/sot_qa_guide.html)** (Tìm kiếm thời gian thực, lọc danh mục & copy code 1-click).
-- 💻 **Xem Offline Trên Trình Duyệt Cá Nhân**:
+- 📖 **[Comprehensive Q&A Guide (`docs/QA_GUIDE.md`)](docs/QA_GUIDE.md)** — 19 detailed real-world scenarios covering self-healing, anti-hallucination mechanics, and graph analytics.
+- 🚀 **[AI-Assisted SDLC Guide (`docs/AI_SDLC_GUIDE.md`)](docs/AI_SDLC_GUIDE.md)** — Deep-dive into applying `sot-graph` across all 6 phases of software development, eliminating Cold Start Redundancy and constraining Blast Radius.
+- ⚖️ **[Architectural Comparison: GitNexus vs sot-graph (`docs/GITNEXUS_VS_SOT_GRAPH.md`)](docs/GITNEXUS_VS_SOT_GRAPH.md)** — Independent 8-dimensional architectural appraisal, failure mode audit, and optimal two-tier hybrid architecture pattern.
+- ⚡ **[Interactive Standalone HTML Guide (Live Demo on GitHub)](https://htmlpreview.github.io/?https://github.com/minhgv/sot-graph/blob/main/sot_qa_guide.html)** — Instant search, category filters, and 1-click code copying.
+- 💻 **Offline Local Browser View**:
   ```bash
   open sot_qa_guide.html        # macOS
   xdg-open sot_qa_guide.html    # Linux

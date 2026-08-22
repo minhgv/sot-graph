@@ -1,64 +1,64 @@
-# 📚 SOT-Graph: Toàn Tập Hỏi Đáp & Kịch Bản Sử Dụng Thực Tế (Q&A Guide)
+# 📚 SOT-Graph: Complete Q&A & Real-World Implementation Guide (Q&A Guide)
 
-> **Kiến Trúc Tri Thức Tự Chữa Lành, Chống Ảo Giác & Vận Hành Cho AI Coding Agents.**  
-> *Filesystem là Nguồn Chân Lý Duy Nhất (Single Source of Truth) — Không Daemon — Độ Trễ Sub-Millisecond.*
-
----
-
-## 🌐 Các Cách Xem Tài Liệu Này:
-- 📖 **Đọc trực tiếp trên GitHub (Markdown UI)**: Đang xem tài liệu này (sử dụng các khối mở rộng bên dưới).
-- ⚡ **Xem bản HTML tương tác (Live Search & Filter)**: [Mở trên HTMLPreview (GitHub)](https://htmlpreview.github.io/?https://github.com/minhgv/sot-graph/blob/main/sot_qa_guide.html)
-- 💻 **Xem Offline trên máy cá nhân**: `open sot_qa_guide.html` (macOS) hoặc `xdg-open sot_qa_guide.html` (Linux).
+> **Self-Healing, Anti-Hallucination & Operational Knowledge Architecture for AI Coding Agents.**  
+> *Filesystem as the Single Source of Truth (SSOT) — Zero External Daemons — Sub-Millisecond Latency.*
 
 ---
 
-## 📑 Mục Lục Nhanh
-
-1. [Chủ Đề 1: Cơ Chế Cốt Lõi & Chống Ảo Giác (Core Architecture)](#-1-cơ-chế-cốt-lõi--chống-ảo-giác-core-architecture)
-2. [Chủ Đề 2: Tự Chữa Lành & Toàn Vẹn Dữ Liệu (Self-Healing)](#-2-tự-chữa-lành--toàn-vẹn-dữ-liệu-self-healing)
-3. [Chủ Đề 3: Tích Hợp AI Agent & Giao Thức MCP (AI Agent Integration)](#-3-tích-hợp-ai-agent--giao-thức-mcp-ai-agent-integration)
-4. [Chủ Đề 4: Phân Tích Đồ Thị & Trực Quan Hóa (Graph Analytics)](#-4-phân-tích-đồ-thị--trực-quan-hóa-graph-analytics)
-5. [Chủ Đề 5: Vận Hành, Bảo Trì & Hiệu Năng (Ops & Maintenance)](#-5-vận-hành-bảo-trì--hiệu-năng-ops--maintenance)
-6. [Chủ Đề 6: Xử Lý Sự Cố & Tình Huống Thực Tế (Edge Cases)](#-6-xử-lý-sự-cố--tình-huống-thực-tế-edge-cases)
+## 🌐 Ways to View This Document:
+- 📖 **Directly on GitHub (Markdown UI)**: Viewing this document (using the expandable accordions below).
+- ⚡ **Interactive Standalone HTML (Live Search & Filter)**: [Open on HTMLPreview (GitHub)](https://htmlpreview.github.io/?https://github.com/minhgv/sot-graph/blob/main/sot_qa_guide.html)
+- 💻 **Local Offline Browser**: `open sot_qa_guide.html` (macOS) or `xdg-open sot_qa_guide.html` (Linux).
 
 ---
 
-## 🛡️ 1. Cơ Chế Cốt Lõi & Chống Ảo Giác (Core Architecture)
+## 📑 Quick Navigation
+
+1. [Topic 1: Core Architecture & Anti-Hallucination](#-1-core-architecture--anti-hallucination)
+2. [Topic 2: Self-Healing & Data Integrity](#-2-self-healing--data-integrity)
+3. [Topic 3: AI Agent Integration & MCP Protocol](#-3-ai-agent-integration--mcp-protocol)
+4. [Topic 4: Graph Analytics & Visualizations](#-4-graph-analytics--visualizations)
+5. [Topic 5: Operations, Maintenance & Performance](#-5-operations-maintenance--performance)
+6. [Topic 6: Edge Cases & Incident Handling](#-6-edge-cases--incident-handling)
+
+---
+
+## 🛡️ 1. Core Architecture & Anti-Hallucination
 
 <details open>
-<summary><h3>Q1: Tại sao sot-graph gọi là "Single Source of Truth"? Sự khác biệt giữa Filesystem làm gốc và Vector/Graph RAG truyền thống là gì?</h3></summary>
+<summary><h3>Q1: Why is sot-graph called a "Single Source of Truth"? What is the difference between a Filesystem-first architecture and traditional Vector/Graph RAG?</h3></summary>
 
-Các hệ thống RAG và Agent Memory truyền thống (dùng Vector DB, Neo4j, Redis) lưu trữ tri thức như một **bản sao rời rạc (detached snapshot)**. Khi lập trình viên sửa code, đổi tên file hoặc xóa thư mục, database không hề biết sự thay đổi này cho đến khi được re-index thủ công, dẫn đến hiện tượng **Phantom Anchors (Đường dẫn ma)** — AI Agent đọc tri thức cũ và sinh mã cho file không còn tồn tại.
+Traditional RAG and Agent Memory systems (relying on Vector DBs, Neo4j, Redis) store knowledge as a **detached snapshot**. When a developer modifies code, renames a file, or deletes a directory, the database remains oblivious until a manual re-indexing occurs. This produces **Phantom Anchors (Dead Paths)** — where AI Agents retrieve stale paths and generate patches for non-existent files.
 
 > [!IMPORTANT]
-> **Nguyên tắc vàng của sot-graph:**  
+> **The Golden Rule of sot-graph:**  
 > *"Filesystem is the Single Source of Truth — The knowledge graph is an authoritative, verified projection of reality."*
 
-Mọi tín hiệu từ file watcher, git hook hay lệnh CLI chỉ được coi là lời gợi ý (*"hãy kiểm tra đường dẫn này"*). Hệ thống **không bao giờ tin tưởng mù quáng** vào bộ nhớ đệm mà luôn đối soát vật lý trên đĩa cứng trước khi trả kết quả cho Agent.
+Every signal from file watchers, git hooks, or CLI commands is treated merely as a hint (*"please inspect this path"*). The system **never blindly trusts cached records**; it physically verifies file existence and content on disk before delivering results to the Agent.
 
-| Đặc tính | Vector / Graph RAG Truyền Thống | sot-graph (Kiến trúc SSOT) |
+| Characteristic | Traditional Vector / Graph RAG | sot-graph (SSOT Architecture) |
 | :--- | :--- | :--- |
-| **Nguồn chân lý** | Vector Embeddings / Graph Nodes trong DB rời | **Tệp vật lý trên Filesystem** |
-| **Xử lý khi xóa file** | Vẫn trả về vector cũ (gây ảo giác đường dẫn) | **Tự động thanh trừng ngay khi tìm kiếm (Auto-Purge)** |
-| **Hạ tầng yêu cầu** | Cần Server nền (Neo4j, Qdrant, Chroma, Java/Node) | **Zero Daemon**: Nhúng trực tiếp SQLite WAL &lt; 25MB RAM |
-| **Độ trễ truy vấn** | 50ms - 500ms (qua mạng / RPC) | **&lt; 1.5ms (P95)** qua SQLite FTS5 BM25 |
+| **Source of Truth** | Vector Embeddings / Graph Nodes in external DB | **Physical Files on Filesystem** |
+| **Deleted File Handling** | Stale vectors remain (causing path hallucinations) | **Instant Auto-Purge at query time** |
+| **Infrastructure Overhead** | External servers required (Neo4j, Qdrant, Chroma, Java/Node) | **Zero Daemon**: Embedded SQLite WAL (< 25MB RAM) |
+| **Query Latency** | 50ms - 500ms (Network / RPC round-trips) | **< 1.5ms (P95)** via SQLite FTS5 BM25 |
 
 </details>
 
 ---
 
 <details>
-<summary><h3>Q2: Nếu tôi sửa đúng 1 dòng trong file, hệ thống có phát hiện được không và cơ chế đồng bộ diễn ra như thế nào?</h3></summary>
+<summary><h3>Q2: If I modify a single line in a file, does the system detect it, and how does reconciliation work?</h3></summary>
 
-**CÓ, CHẮC CHẮN BIẾT 100% VÀ BIẾT NGAY LẬP TỨC.**
+**YES, 100% DETECTED IMMEDIATELY.**
 
-Bộ điều phối `sot_graph.reconciler` sử dụng cơ chế bảo vệ 2 tầng để phát hiện mọi thay đổi dù là nhỏ nhất:
+The `sot_graph.reconciler` coordinator employs a two-tier defense mechanism to capture even the smallest file modification:
 
-1. **Tầng 1 - Fast Dirty Check qua Filesystem Metadata ($O(1)$):**
-   Khi sửa 1 dòng code, hệ điều hành lập tức cập nhật `st_mtime` (mili-giây) và thường làm đổi `st_size` (kích thước byte). Reconciler so sánh cặp `(size, mtime_ms)` với bản ghi trong bảng `file_journal`. Nếu khác, file được đánh dấu là bẩn (dirty) ngay trong micro-giây.
+1. **Tier 1 - Fast Dirty Check via Filesystem Metadata ($O(1)$):**
+   When modifying a line of code, the operating system instantly updates `st_mtime` (millisecond resolution) and typically alters `st_size` (byte length). The Reconciler compares the `(size, mtime_ms)` pair against the `file_journal` table. If different, the file is marked dirty in microseconds.
 
-2. **Tầng 2 - Bảo Vệ Toàn Vẹn Bằng SHA-256 Hash:**
-   Trong trường hợp bạn sửa 1 ký tự mà kích thước tệp giữ nguyên và metadata `mtime` bị trùng, hàm `_hash(path)` sẽ tính toán lại mã băm SHA-256 nội dung. Do hiệu ứng tuyết lở (*avalanche effect*), mã SHA-256 sẽ khác hoàn toàn giá trị lưu trong database, đảm bảo không một thay đổi nào bị bỏ sót.
+2. **Tier 2 - Integrity Guard via SHA-256 Hashing:**
+   If a single character is modified such that file size remains identical and timestamp collisions occur, `_hash(path)` re-computes the SHA-256 digest. Due to the cryptographic avalanche effect, the digest diverges completely from the stored database state, ensuring no mutation is missed.
 
 ```python
 # src/sot_graph/reconciler.py:270-281
@@ -66,62 +66,62 @@ prior = journal_cache.get(path)
 if prior and prior.get("size") == size and prior.get("mtime_ms") == mtime_ms:
     current_sha = self._hash(path)
     if prior.get("sha256") == current_sha:
-        continue  # Bỏ qua vì file thực sự không thay đổi
+        continue  # Skip cleanly: file has genuinely not changed
 jobs.append(ParseJob(path, self.root_dir, size, mtime_ms))
 ```
 
-Sau khi xác định file bị bẩn, Reconciler thực hiện **Thay thế nguyên tử (Atomic Batch Replacement)** trong SQLite: xóa toàn bộ node, edge cũ của riêng file đó và nạp lại AST mới trong một transaction duy nhất.
+Once flagged as dirty, the Reconciler executes an **Atomic Full-File Replacement** in SQLite: clearing old nodes and edges belonging to that path and inserting freshly extracted AST nodes within a single ACID transaction.
 
 </details>
 
 ---
 
 <details>
-<summary><h3>Q3: Trust Verdict System hoạt động ra sao? Ý nghĩa cụ thể của các nhãn [STRONG], [WEAK], [REBUILT], [REMOVED], [NOPATH]?</h3></summary>
+<summary><h3>Q3: How does the Trust Verdict System work? What are the exact meanings of [STRONG], [WEAK], [REBUILT], [REMOVED], [NOPATH]?</h3></summary>
 
-Khi Agent thực hiện `sot search "<query>"`, mọi kết quả trả về từ FTS5 đều phải đi qua `TrustVerifier.verify_hit` để kiểm tra tính xác thực trên đĩa cứng:
+When an Agent runs `sot search "<query>"`, all candidate hits from FTS5 pass through `TrustVerifier.verify_hit` for physical on-disk validation:
 
 ```
 [Agent Query] ──> [SQLite FTS5 (BM25)] ──> [Candidate Node]
                                     │
         ┌───────────────────────────┴───────────────────────────┐
         ▼                                                       ▼
-[File tồn tại trên đĩa?]                               [File KHÔNG tồn tại?]
-├── Có: Đọc 256KB đầu tệp                                           │
-│   ├── Token query khớp >= 50% ──> [STRONG]                        ▼
-│   └── Token query khớp < 50%  ──> [WEAK]                [find_rehome: Quét đĩa tìm basename]
-│                                                          ├── Tìm thấy duy nhất 1 file mới:
-│                                                          │   ├── db.update_node_path(...)
-│                                                          │   └── Trả về [REBUILT]
-│                                                          └── Không tìm thấy (đã xóa vĩnh viễn):
-│                                                              ├── db.delete_path(...)
-│                                                              └── Trả về [REMOVED]
+[File exists on disk?]                                  [File MISSING on disk?]
+├── Yes: Read first 256KB of file                                   │
+│   ├── Query keywords matched >= 50% ──> [STRONG]                  ▼
+│   └── Query keywords matched < 50%  ──> [WEAK]        [find_rehome: Scan disk by basename]
+│                                                       ├── Exactly 1 candidate found:
+│                                                       │   ├── db.update_node_path(...)
+│                                                       │   └── Returns [REBUILT]
+│                                                       └── No match (permanently deleted):
+│                                                           ├── db.delete_path(...)
+│                                                           └── Returns [REMOVED]
 ```
 
-| Nhãn Verdict | Điều Kiện Kích Hoạt | Hành Động Khuyến Nghị Cho AI Agent |
+| Verdict Label | Trigger Condition | Recommended Agent Action |
 | :--- | :--- | :--- |
-| `[STRONG]` | File tồn tại vật lý VÀ nội dung chứa **≥ 50%** từ khóa tìm kiếm. | **Tin cậy tuyệt đối**: Điều hướng thẳng tới file và số dòng code. |
-| `[WEAK]` | File có tồn tại nhưng độ phủ từ khóa **< 50%** (khớp ngữ nghĩa tiêu đề). | **Cẩn trọng**: Đọc lướt nội dung trước khi áp dụng logic. |
-| `[REBUILT]` | File bị đổi tên hoặc chuyển thư mục; đã được tự động định vị lại. | **Đã tự chữa lành**: Sử dụng đường dẫn mới nhất được báo cáo. |
-| `[REMOVED]` | File đã bị xóa vĩnh viễn khỏi ổ cứng. | **Đã thanh trừng**: Node bị xóa khỏi DB, bỏ qua kết quả này. |
-| `[NOPATH]` | Ghi chú tri thức ảo (Architecture Decision Record, quy ước, mẹo). | **Mỏ neo kiến thức**: Coi như tài liệu hướng dẫn chuẩn. |
+| `[STRONG]` | File physically exists AND contains **≥ 50%** of search query keywords. | **Absolute Trust**: Navigate directly to the reported file and line number. |
+| `[WEAK]` | File exists but keyword coverage is **< 50%** (e.g. title/symbol match only). | **Caution**: Skim file context before applying logic. |
+| `[REBUILT]` | File was renamed or moved; path has been automatically updated in SQLite. | **Auto-Healed**: Use the updated, relocated path immediately. |
+| `[REMOVED]` | File was permanently deleted from disk. | **Auto-Purged**: Node deleted from DB; ignore this search result. |
+| `[NOPATH]` | Virtual knowledge note (Architecture Decision Record, conventions, tips). | **Knowledge Anchor**: Treat as an authoritative engineering guideline. |
 
 </details>
 
 ---
 
 <details>
-<summary><h3>Q4: Pending Edge Resolution 2 chiều giải quyết bài toán import chéo (Circular / Out-of-order indexing) như thế nào?</h3></summary>
+<summary><h3>Q4: How does Two-Way Pending Edge Resolution solve circular imports and out-of-order indexing?</h3></summary>
 
-Trong một dự án thực tế, File A gọi hàm `AuthService.validate()` ở File B, nhưng File A có thể được Reconciler quét trước File B. Lúc này node `AuthService.validate` chưa tồn tại trong database.
+In real-world projects, File A calls `AuthService.validate()` in File B, but File A might be scanned by the Reconciler before File B. At that point, the symbol `AuthService.validate` does not yet exist in the database.
 
-**Cơ chế giải quyết của sot-graph:**
-1. **Bước 1:** Quan hệ chưa giải quyết được lưu tạm vào bảng `pending_edges (path, src, dst_symbol, relation, line)`.
-2. **Bước 2:** Khi File B được quét và định nghĩa symbol `AuthService.validate`, hàm `resolve_all_pending_edges()` chạy một câu lệnh SQL duy nhất:
+**sot-graph Resolution Mechanism:**
+1. **Step 1:** The unresolved dependency is staged in `pending_edges (path, src, dst_symbol, relation, line)`.
+2. **Step 2:** When File B is subsequently scanned and registers `AuthService.validate`, `resolve_all_pending_edges()` executes a single atomic SQL statement:
 
 ```sql
 -- src/sot_graph/db.py:263-273
--- Tự động thăng hạng pending edge thành graph_edges hoàn chỉnh
+-- Atomically promote pending edges to full graph_edges
 INSERT OR REPLACE INTO graph_edges(path, src, dst, relation, line)
 SELECT p.path, p.src, (
     SELECT n.id FROM graph_nodes n 
@@ -131,29 +131,29 @@ SELECT p.path, p.src, (
 FROM pending_edges p 
 WHERE EXISTS (SELECT 1 FROM graph_nodes n WHERE n.symbol = p.dst_symbol);
 
--- Dọn dẹp sạch bảng pending_edges
+-- Clean up resolved pending edges
 DELETE FROM pending_edges 
 WHERE EXISTS (SELECT 1 FROM graph_nodes n WHERE n.symbol = pending_edges.dst_symbol);
 ```
 
-Nhờ vậy, thứ tự duyệt file hoàn toàn độc lập, đồ thị luôn đạt trạng thái hội tụ (*deterministic convergence*).
+As a result, indexing order is completely decoupled, ensuring **deterministic graph convergence** regardless of file traversal sequence.
 
 </details>
 
 ---
 
-## 🩹 2. Tự Chữa Lành & Toàn Vẹn Dữ Liệu (Self-Healing)
+## 🩹 2. Self-Healing & Data Integrity
 
 <details>
-<summary><h3>Q5: Khi một file bị xóa vĩnh viễn bằng lệnh rm, database tự động xử lý như thế nào để Agent không đọc nhầm mã nguồn đã chết?</h3></summary>
+<summary><h3>Q5: When a file is permanently deleted via rm, how does the database handle it so the Agent doesn't read dead code?</h3></summary>
 
-Có 2 con đường để `sot-graph` phát hiện và thanh trừng file đã bị xóa:
+There are two distinct paths for `sot-graph` to detect and purge deleted files:
 
-1. **Đồng Bộ Chủ Động (`sot reconcile`):**  
-   Reconciler quét toàn bộ ổ đĩa, so sánh tập hợp đường dẫn hiện có trên đĩa với tập `_known_abs_paths()` trong DB. Bất kỳ file nào có trong DB nhưng mất trên đĩa sẽ lập tức bị xóa qua `db.delete_path(path)`.
+1. **Active Reconciliation (`sot reconcile`):**  
+   The Reconciler walks the disk tree and compares the current physical path set against `_known_abs_paths()` in the database. Any path present in the DB but absent from disk is pruned immediately via `db.delete_path(path)`.
 
-2. **Tự Chữa Lành Bị Động Tại Thời Điểm Truy Vấn (`sot search`):**  
-   Nếu bạn chưa kịp chạy `sot reconcile` mà Agent đã tìm kiếm từ khóa trúng vào file vừa xóa, `TrustVerifier.verify_hit` kiểm tra `os.path.exists(path) == False`. Nó quét tìm rehome nhưng không thấy, sau đó **tự động xóa bản ghi ngay trong lượt tìm kiếm đó** và trả về nhãn `[REMOVED]`:
+2. **Passive Self-Healing at Query Time (`sot search`):**  
+   If an Agent executes a search before `sot reconcile` is called, `TrustVerifier.verify_hit` encounters `os.path.exists(path) == False`. It attempts a rehome scan; upon finding no candidate, it **deletes the stale record immediately during the search call** and returns `[REMOVED]`:
 
 ```python
 # src/sot_graph/verifier.py:139-141
@@ -162,131 +162,131 @@ return "REMOVED", 0.0, requested
 ```
 
 > [!TIP]
-> **Kết quả:** Agent không bao giờ bị ảo giác vì node rác bị tiêu diệt ngay tại thời điểm chạm vào.
+> **Outcome:** Agents never suffer from Phantom Anchors because stale nodes are eliminated on first contact.
 
 </details>
 
 ---
 
 <details>
-<summary><h3>Q6: Khi một file bị di chuyển thư mục (mv src/utils.py src/helpers/utils.py), cơ chế Auto-Rehome diễn ra ra sao?</h3></summary>
+<summary><h3>Q6: When a file is moved (e.g., mv src/utils.py src/helpers/utils.py), how does Auto-Rehome work?</h3></summary>
 
-Khi một file bị di chuyển hoặc đổi tên thư mục cha, đường dẫn cũ trở thành không hợp lệ. Hàm `TrustVerifier.find_rehome` xử lý như sau:
+When a file is moved or its parent directory renamed, its prior path becomes invalid. The `TrustVerifier.find_rehome` routine handles this gracefully:
 
-1. Tách `basename = "utils.py"` từ đường dẫn cũ.
-2. Duyệt nhanh cây thư mục dự án (bỏ qua các thư mục `node_modules`, `.git`, `venv`).
-3. Nếu tìm thấy **DUY NHẤT 1 file** có tên `utils.py` tại vị trí mới `src/helpers/utils.py`:
-   - Hệ thống gọi `db.update_node_path(node_id, old_path, new_path)`.
-   - Cập nhật lại đường dẫn trong `graph_nodes` và nhãn `label`.
-   - Trả về nhãn `[REBUILT]` kèm đường dẫn mới nhất.
-4. Nếu tìm thấy **≥ 2 file** trùng tên (mơ hồ - *ambiguous match*): Hệ thống từ chối đoán bừa để đảm bảo an toàn tuyệt đối, xóa đường dẫn cũ và đợi lượt `reconcile` tiếp theo.
+1. Extracts `basename = "utils.py"` from the missing path.
+2. Performs a fast search across the project tree (skipping `node_modules`, `.git`, `venv`).
+3. If **EXACTLY 1 candidate file** named `utils.py` is found at `src/helpers/utils.py`:
+   - Invokes `db.update_node_path(node_id, old_path, new_path)`.
+   - Updates the path and label attributes in `graph_nodes`.
+   - Returns the verdict `[REBUILT]` alongside the new path.
+4. If **≥ 2 candidate files** match the basename (ambiguous match): The system refuses to guess, safely purges the stale path, and awaits the next `sot reconcile` run.
 
 </details>
 
 ---
 
 <details>
-<summary><h3>Q7: Tại sao database không bao giờ bị "dơ" hay chứa hàm rác khi lập trình viên xóa bớt hàm trong code?</h3></summary>
+<summary><h3>Q7: Why does the database never accumulate stale or dead functions when a developer deletes functions from a file?</h3></summary>
 
-Nhiều hệ thống đồ thị bị lỗi "tích tụ rác" vì chúng dùng câu lệnh `UPSERT` (chỉ cập nhật hoặc thêm mới, không xóa hàm cũ nếu trong file đã xóa định nghĩa hàm đó).
+Many graph databases accumulate dead records because they rely on `UPSERT` operations (updating existing rows and inserting new ones without removing functions deleted from the source file).
 
-`sot-graph` sử dụng mô hình **Toàn Quyền Theo Tệp (Atomic Full-File Replacement)** trong `Database.commit_file_batch`:
+`sot-graph` enforces **Atomic Full-File Replacement** inside `Database.commit_file_batch`:
 
 ```python
 # src/sot_graph/db.py:216-218
-# Xóa sạch toàn bộ node, quan hệ và pending edge cũ thuộc về tệp này
+# Purge all previous nodes, edges, and pending edges belonging to this file
 self.conn.execute("DELETE FROM graph_nodes WHERE path = ?", (path,))
 self.conn.execute("DELETE FROM graph_edges WHERE path = ?", (path,))
 self.conn.execute("DELETE FROM pending_edges WHERE path = ?", (path,))
 ```
 
-Sau đó mới chèn lại chính xác các hàm, class và lời gọi hàm vừa trích xuất được từ phiên bản hiện tại của tệp. Do đó, nếu bạn xóa 3 hàm trong `service.py`, 3 hàm đó lập tức biến mất khỏi database trong cùng 1 transaction ACID.
+It then inserts the newly extracted classes, functions, and call edges from the current file snapshot. If you delete 3 functions from `service.py`, those 3 symbols vanish from the database within the exact same ACID transaction.
 
 </details>
 
 ---
 
-## 🤖 3. Tích Hợp AI Agent & Giao Thức MCP (AI Agent Integration)
+## 🤖 3. AI Agent Integration & MCP Protocol
 
 <details>
-<summary><h3>Q8: Làm thế nào để tích hợp sot-graph vào Oh My Pi (OMP), Claude Code, Cursor, OpenCode?</h3></summary>
+<summary><h3>Q8: How do I integrate sot-graph into Oh My Pi (OMP), Claude Code, Cursor, and OpenCode?</h3></summary>
 
-`sot-graph` cung cấp sẵn 3 adapter chính thức trong thư mục `src/sot_graph/adapters/`:
+`sot-graph` provides 3 official adapters in `src/sot_graph/adapters/`:
 
-1. **Tích hợp Oh My Pi / OMP (`~/.omp`):**  
-   Copy file TypeScript extension vào thư mục extensions:
+1. **Oh My Pi / OMP Integration (`~/.omp`):**  
+   Copy the TypeScript extension to the OMP extensions directory:
    ```bash
    cp src/sot_graph/adapters/omp_extension.ts ~/.omp/agent/extensions/sot_graph.ts
    ```
-   Cung cấp cho Agent 4 tool tự động: `sot_search`, `sot_explore`, `sot_reconcile`, `sot_insert`.
+   Exposes 4 native agent tools: `sot_search`, `sot_explore`, `sot_reconcile`, `sot_insert`.
 
-2. **Tích hợp Claude Code / Cursor / Codex:**  
-   Thêm nội dung của `src/sot_graph/adapters/AGENTS.md` vào tệp `AGENTS.md` hoặc `.cursorrules` của repository để định hướng Agent tuân thủ quy trình tra cứu tri thức trước khi viết code mới.
+2. **Claude Code / Cursor / Codex Integration:**  
+   Add the contents of `src/sot_graph/adapters/AGENTS.md` to `AGENTS.md` or `.cursorrules` in your repository root to guide agents toward pre-code knowledge retrieval.
 
-3. **Tích hợp OpenCode:**  
-   Khai báo công cụ trong file cấu hình `.opencode.json` trỏ tới `src/sot_graph/adapters/opencode_tools.json`.
+3. **OpenCode Integration:**  
+   Configure tools in `.opencode.json` pointing to `src/sot_graph/adapters/opencode_tools.json`.
 
 </details>
 
 ---
 
 <details>
-<summary><h3>Q9: MCP (Model Context Protocol) Server cung cấp những công cụ gì cho LLM? Tại sao MCP lại là Read-Only?</h3></summary>
+<summary><h3>Q9: What tools does the MCP (Model Context Protocol) Server provide to LLMs? Why is the MCP server strictly Read-Only?</h3></summary>
 
-Lệnh `./bin/sot mcp` khởi chạy một MCP Stdio Server tiêu chuẩn cung cấp 5 công cụ và 2 tài nguyên cho LLM:
+Running `./bin/sot mcp` launches a standard MCP Stdio Server exposing 5 tools and 2 resources to LLMs:
 
-- `sot_search`: Tìm kiếm tri thức đã được xác minh đĩa cứng.
-- `sot_explore`: Duyệt đồ thị quan hệ phụ thuộc và lời gọi hàm đa tầng.
-- `sot_verify_drift`: Kiểm toán độ lệch giữa đồ thị và filesystem mà không sửa đổi DB.
-- `sot_architecture_report`: Sinh báo cáo kiến trúc Markdown tóm tắt kèm phát hiện God Nodes.
-- `sot_communities`: Liệt kê các cụm chức năng và điểm số Cohesion.
-- **Tài nguyên MCP:** `sot://stats` (thống kê tổng thể) và `sot://node/{id}` (chi tiết thực thể).
+- `sot_search`: Search on-disk verified codebase symbols and knowledge notes.
+- `sot_explore`: Multi-hop relationship traversal and call graph inspection.
+- `sot_verify_drift`: Non-mutating drift audit between graph state and filesystem.
+- `sot_architecture_report`: Generates a Markdown architectural report with God Node diagnostics.
+- `sot_communities`: Lists functional modules and cohesion metrics.
+- **MCP Resources:** `sot://stats` (global repository metrics) and `sot://node/{id}` (entity details).
 
 > [!WARNING]
-> **Tại sao MCP lại Read-Only?**  
-> Để đảm bảo tính *Deterministic* và không gây tranh chấp khóa SQLite (Database Lock contention) khi có hàng chục Subagent AI cùng truy vấn đồng thời. Mọi thao tác ghi chỉ diễn ra qua tiến trình Reconciler độc lập.
+> **Why is MCP strictly Read-Only?**  
+> To guarantee *Determinism* and eliminate SQLite database lock contention when dozens of concurrent AI subagents query the database simultaneously. All mutations are restricted to the standalone Reconciler process.
 
 </details>
 
 ---
 
 <details>
-<summary><h3>Q10: Quy trình làm việc chuẩn của AI Agent (Knowledge Reuse Protocol) khi bắt đầu một task lập trình là gì?</h3></summary>
+<summary><h3>Q10: What is the standard AI Agent workflow (Knowledge Reuse Protocol) when starting a coding task?</h3></summary>
 
-Để tối ưu token và tránh viết lại mã nguồn đã có trong dự án, Agent cần tuân thủ quy trình 4 bước:
+To optimize token consumption and prevent redundant code implementation, agents follow a 4-step protocol:
 
-1. **Bước 1 - Tra Cứu Tri Thức Đã Có:**  
-   `sot search "<tính năng hoặc hàm cần tìm>"`
-2. **Bước 2 - Đánh Giá Độ Tin Cậy (Trust Verdict):**  
-   Nếu là `[STRONG]`: Đọc thẳng vào file và tái sử dụng. Nếu là `[WEAK]`: Mở file kiểm tra nhanh.
-3. **Bước 3 - Khảo Sát Tác Động (Impact Analysis):**  
-   `sot explore "<tên_hàm_hoặc_class_sắp_sửa>"` để xem những module nào đang phụ thuộc vào nó.
-4. **Bước 4 - Lưu Lại Quyết Định (Knowledge Persistence):**  
-   Sau khi hoàn thành giải pháp phức tạp:  
-   `sot insert --title "Giải pháp X" --body "Chi tiết cách fix..." --keywords "tag1,tag2"`
+1. **Step 1 - Retrieve Existing Logic:**  
+   `sot search "<feature or utility to implement>"`
+2. **Step 2 - Evaluate Trust Verdict:**  
+   If `[STRONG]`: Open the reported file:line and reuse the logic. If `[WEAK]`: Skim the file first.
+3. **Step 3 - Analyze Blast Radius:**  
+   `sot explore "<function_or_class_name>"` to inspect all incoming and outgoing dependencies.
+4. **Step 4 - Persist Knowledge Decisions:**  
+   After completing complex bug fixes or architectural changes:  
+   `sot insert --title "Solution Title" --body "Fix details..." --keywords "tag1,tag2"`
 
 </details>
 
 ---
 
-## 📊 4. Phân Tích Đồ Thị & Trực Quan Hóa (Graph Analytics)
+## 📊 4. Graph Analytics & Visualizations
 
 <details>
-<summary><h3>Q11: "God Node" là gì? Thuật toán phát hiện God Node và tính toán 2-hop Blast Radius (bán kính ảnh hưởng) như thế nào?</h3></summary>
+<summary><h3>Q11: What is a "God Node"? How does the algorithm detect God Nodes and calculate the 2-hop Blast Radius?</h3></summary>
 
-**God Node (Nút Siêu Kết Nối / Hub Trung Tâm):** Là các class, module hoặc hàm có bậc kết nối (degree) vượt trội, tập trung quá nhiều phụ thuộc của hệ thống. Nếu một God Node bị lỗi hoặc thay đổi API, nó có thể làm gãy hàng loạt module khác.
+**God Node (Central Hub / High-Degree Symbol):** A class, function, or module possessing an unusually high degree of connectivity, concentrating system-wide dependencies. If a God Node breaks or its API changes, regressions cascade across distant modules.
 
-**Thuật toán phát hiện (`src/sot_graph/analytics/diagnostics.py`):**
-1. Tính giá trị trung bình **μ (Mean)** và độ lệch chuẩn **σ (Std)** của bậc kết nối toàn bộ đồ thị:
+**Detection Algorithm (`src/sot_graph/analytics/diagnostics.py`):**
+1. Computes the global degree mean **μ** and standard deviation **σ**:
    > **Cutoff** = μ + (threshold_sigma × σ)
-2. Bất kỳ nút nào có **Degree ≥ Cutoff** (mặc định `threshold_sigma = 1.5`) được phân loại là **God Node**.
-3. **2-hop Blast Radius:** Thuật toán duyệt BFS đúng 2 bước từ God Node để đếm số lượng thực thể chịu ảnh hưởng trực tiếp và gián tiếp:
-   - **Blast Radius ≥ 25**: Nguy cơ `[CRITICAL]`.
-   - **Blast Radius ≥ 15**: Nguy cơ `[HIGH]`.
-   - **Blast Radius ≥ 8**: Nguy cơ `[MEDIUM]`.
+2. Any node with **Degree ≥ Cutoff** (default `threshold_sigma = 1.5`) is classified as a **God Node**.
+3. **2-hop Blast Radius:** A bounded 2-step BFS traversal calculates the count of directly and indirectly impacted entities:
+   - **Blast Radius ≥ 25**: `[CRITICAL]` risk.
+   - **Blast Radius ≥ 15**: `[HIGH]` risk.
+   - **Blast Radius ≥ 8**: `[MEDIUM]` risk.
 
 ```bash
-# Lệnh phát hiện God Nodes và xuất báo cáo
+# Detect God Nodes and export full architecture report
 ./bin/sot report --sigma 1.5 --min-size 2 -o ARCHITECTURE_REPORT.md
 ```
 
@@ -295,18 +295,18 @@ Lệnh `./bin/sot mcp` khởi chạy một MCP Stdio Server tiêu chuẩn cung c
 ---
 
 <details>
-<summary><h3>Q12: Thuật toán phát hiện cộng đồng (Community Detection) và hệ số Modularity (Q) / Cohesion Score có ý nghĩa gì?</h3></summary>
+<summary><h3>Q12: What do Community Detection (Louvain), Modularity (Q), and the Cohesion Score mean?</h3></summary>
 
-Thuật toán `Label Propagation / Louvain` trong `sot_graph.analytics` tự động gom các file và hàm có tần suất gọi nhau dày đặc thành các **Cộng Đồng Chức Năng (Functional Communities)**:
+The `Label Propagation / Louvain` algorithm in `sot_graph.analytics` groups tightly coupled files and functions into **Functional Communities**:
 
-- **Hệ số Modularity (Q ∈ [-0.5, 1.0]):** Đo lường chất lượng phân rã kiến trúc. **Q > 0.3** thể hiện cấu trúc mã nguồn có tính module hóa cao, ranh giới rõ ràng.
-- **Điểm Số Cohesion (C ∈ [0.0, 1.0]):** Tỷ lệ liên kết nội bộ trong cụm so với tổng liên kết:
-  > **Cohesion (C)** = E_internal / (E_internal + E_external)
+- **Modularity Score ($Q \in [-0.5, 1.0]$):** Measures the quality of architectural decomposition. **$Q > 0.3$** indicates strong modular boundaries and clean interfaces.
+- **Cohesion Score ($C \in [0.0, 1.0]$):** Ratio of internal cluster connections to total connections:
+  > **Cohesion ($C$)** = $E_{\text{internal}} / (E_{\text{internal}} + E_{\text{external}})$
   
-  Nếu **C < 0.4**, cụm đó đang bị phụ thuộc quá nhiều vào bên ngoài (*Tightly Coupled*) và cần được xem xét tái cấu trúc (Refactoring).
+  If **$C < 0.4$**, the cluster is overly dependent on external packages (*Tightly Coupled*) and represents a candidate for refactoring.
 
 ```bash
-# Lệnh kiểm tra các cụm cộng đồng
+# Inspect detected architectural communities
 ./bin/sot cluster --min-size 3
 ```
 
@@ -315,21 +315,21 @@ Thuật toán `Label Propagation / Louvain` trong `sot_graph.analytics` tự đ�
 ---
 
 <details>
-<summary><h3>Q13: Làm thế nào để xuất đồ thị sang Interactive HTML D3.js, GraphRAG JSON, Obsidian Vault và GraphML?</h3></summary>
+<summary><h3>Q13: How do I export the knowledge graph to Interactive HTML D3.js, GraphRAG JSON, Obsidian Vault, and GraphML?</h3></summary>
 
-`sot-graph` tích hợp sẵn bộ xuất đa định dạng độc lập trong `src/sot_graph/export/`:
+`sot-graph` includes standalone multi-format exporters in `src/sot_graph/export/`:
 
 ```bash
-# 1. Trực quan hóa HTML D3.js tương tác và mở trên trình duyệt
+# 1. Interactive D3.js HTML visualization opened directly in browser
 ./bin/sot viz -o graph.html --open
 
-# 2. Xuất dữ liệu phân cấp cho các hệ thống GraphRAG
+# 2. Hierarchical dataset export for GraphRAG pipelines
 ./bin/sot export -f graphrag -o graphrag_dataset.json
 
-# 3. Xuất toàn bộ đồ thị thành Obsidian Vault (kèm Markdown Wikilinks [[Node]])
+# 3. Obsidian Vault export (with bidirectional [[Node]] Wikilinks)
 ./bin/sot export -f obsidian -o my_obsidian_vault/
 
-# 4. Xuất GraphML chuẩn XML cho Gephi, Cytoscape, NetworkX
+# 4. Standard GraphML XML export for Gephi, Cytoscape, NetworkX
 ./bin/sot export -f graphml -o graph.graphml
 ```
 
@@ -337,26 +337,26 @@ Thuật toán `Label Propagation / Louvain` trong `sot_graph.analytics` tự đ�
 
 ---
 
-## ⚙️ 5. Vận Hành, Bảo Trì & Hiệu Năng (Ops & Maintenance)
+## ⚙️ 5. Operations, Maintenance & Performance
 
 <details>
-<summary><h3>Q14: Khi nào cần chạy sot clean và sot vacuum? Điểm khác biệt giữa --dry-run và thực thi thật là gì?</h3></summary>
+<summary><h3>Q14: When should I run sot clean and sot vacuum? What is the difference between --dry-run and live execution?</h3></summary>
 
-Trong quá trình phát triển dài hạn, database có thể tích tụ không gian trống (freelist pages) hoặc các quan hệ mồ côi:
+Over prolonged active development, the SQLite database may accumulate freelist disk pages or orphaned relationship edges:
 
-- **`sot clean`:** Quét và xóa các đường dẫn không còn trên đĩa, các cạnh đồ thị mồ côi (orphaned edges), và pending edges không còn mục tiêu.
-  - `--dry-run`: Chỉ tính toán và báo cáo số lượng bản ghi sẽ bị xóa dưới dạng JSON, **tuyệt đối không chạm vào DB**.
-  - `--all --yes`: Xóa toàn bộ dữ liệu đồ thị để chuẩn bị index mới từ đầu.
-- **`sot vacuum`:** Thực hiện Checkpoint SQLite WAL (Write-Ahead Log) và chạy `VACUUM` để giải phóng dung lượng ổ cứng, chống phân mảnh trang dữ liệu.
+- **`sot clean`:** Prunes deleted file records, orphaned edges, and obsolete pending edges.
+  - `--dry-run`: Previews the count of removable records in JSON format **without altering the database**.
+  - `--all --yes`: Completely wipes all graph nodes and edges to prepare for a clean re-index.
+- **`sot vacuum`:** Checkpoints the SQLite WAL (Write-Ahead Log) and runs `VACUUM` to defragment B-Tree pages and reclaim disk space.
 
 ```bash
-# Kiểm tra trước số lượng rác
+# Preview cleanable stale records
 ./bin/sot clean --dry-run --json
 
-# Dọn dẹp an toàn
+# Execute safe pruning
 ./bin/sot clean --json
 
-# Thu gọn và giải phóng dung lượng đĩa
+# Defragment database and reclaim disk space
 ./bin/sot vacuum --analyze
 ```
 
@@ -365,17 +365,17 @@ Trong quá trình phát triển dài hạn, database có thể tích tụ không
 ---
 
 <details>
-<summary><h3>Q15: Làm thế nào để chạy kiểm tra độ lệch (Drift Verification) trong pipeline CI/CD mà không gây lỗi hoặc sửa DB?</h3></summary>
+<summary><h3>Q15: How do I run Drift Verification in CI/CD pipelines without modifying the database or failing builds?</h3></summary>
 
-Lệnh `sot verify` được thiết kế chuyên biệt cho các quy trình CI/CD và pre-commit hooks:
+The `sot verify` command is specifically engineered for CI/CD pipelines and pre-commit checks:
 
-- Hoạt động ở chế độ **Read-Only tuyệt đối**: Không sửa đổi tệp SQLite, không tạo lock ghi.
-- `sot verify`: Đối soát nhanh metadata (size, mtime) giữa database và filesystem.
-- `sot verify --deep`: Đọc toàn bộ nội dung tệp và băm lại SHA-256 để phát hiện mọi độ lệch ẩn.
-- **Mã trả về (Exit Code):** Trả về `0` nếu đồ thị hoàn toàn khớp với đĩa; trả về `1` nếu có độ lệch (drift) kèm danh sách tệp bị lệch.
+- Operates in **Strictly Read-Only Mode**: Never mutates SQLite files or acquires write locks.
+- `sot verify`: Rapidly cross-checks metadata (`size`, `mtime`) between database and filesystem.
+- `sot verify --deep`: Re-computes SHA-256 hashes for all physical files to catch hidden code mutations.
+- **Exit Code Convention:** Returns `0` if the knowledge graph is fully in sync with disk; returns `1` if drift is detected (with a JSON payload of anomalous paths).
 
 ```yaml
-# Bước kiểm tra trong GitHub Actions / CI workflow
+# GitHub Actions / CI workflow step
 - name: Verify Knowledge Graph Drift
   run: ./bin/sot verify --deep --json
 ```
@@ -385,69 +385,70 @@ Lệnh `sot verify` được thiết kế chuyên biệt cho các quy trình CI/
 ---
 
 <details>
-<summary><h3>Q16: Hiệu năng thực tế của sot-graph: Xử lý bao nhiêu file một giây? Tại sao đạt tốc độ dưới 25ms với RAM dưới 25MB?</h3></summary>
+<summary><h3>Q16: What is the real-world performance of sot-graph (reconciliation throughput, FTS5 latency, RAM footprint)?</h3></summary>
 
-Kết quả đo đạc thực tế từ bộ Benchmark chính thức (trên chip Apple M1 Max):
-- **Tốc độ Reconcile:** Xử lý và nạp đầy đủ AST cho **100 files trong ~24.1ms** (&gt; 4,000 files/giây đối với dirty-check).
-- **Độ trễ truy vấn FTS5 BM25:** **~1.17ms** (P95) cho các câu truy vấn phức tạp.
+Measured performance benchmarks (tested on Apple M1 Max):
+- **Reconcile Throughput:** Full AST parsing and ingestion of **100 files in ~24.1ms** (> 4,000 files/second for incremental dirty checks).
+- **FTS5 BM25 Query Latency:** **~1.17ms** (P95) across complex lexical queries.
+- **Memory Footprint (RAM RSS):** Consistently **< 25MB** under continuous operation.
 
-**Lý do đạt được hiệu năng ấn tượng:**
-1. **Adaptive Worker Threshold:** Các lô nhỏ (&lt; 16 tệp) chạy tuần tự trong tiến trình chính để loại bỏ 100% chi phí fork đa tiến trình (multiprocessing overhead); chỉ mở worker pool khi có khối lượng tệp lớn.
-2. **Zero External Memory Footprint:** Sử dụng SQLite nhúng cấu hình `PRAGMA journal_mode=WAL` và `PRAGMA synchronous=NORMAL`, bộ nhớ RAM duy trì ổn định dưới 25MB.
+**Key Architectural Performance Factors:**
+1. **Adaptive Worker Threshold:** Small file batches (< 16 files) execute sequentially in the main process to eliminate multiprocessing fork overhead; worker pools activate only for large file volumes.
+2. **Zero External Daemon Footprint:** Embedded SQLite configured with `PRAGMA journal_mode=WAL` and `PRAGMA synchronous=NORMAL` maximizes I/O efficiency without memory bloat.
 
 </details>
 
 ---
 
-## 🚨 6. Xử Lý Sự Cố & Tình Huống Thực Tế (Edge Cases)
+## 🚨 6. Edge Cases & Incident Handling
 
 <details>
-<summary><h3>Q17: Nếu có 2 file trùng tên (VD: models/user.py và controllers/user.py) bị di chuyển, hệ thống xử lý thế nào để tránh gán nhầm?</h3></summary>
+<summary><h3>Q17: If two files have the same name (e.g. models/user.py and controllers/user.py) and are moved, how does the system avoid false rehoming?</h3></summary>
 
-Đây là tình huống **Trùng tên cơ sở (Basename Collision)** khi di chuyển file.
+This represents a **Basename Collision** during file relocation.
 
 ```python
 # src/sot_graph/verifier.py:73-78
 if basename in files:
     cands.append(os.path.abspath(os.path.join(root, basename)))
     if len(cands) > 1:
-        return None  # Trùng lặp - từ chối đoán bừa (Ambiguity Guard)
+        return None  # Collision detected: reject ambiguous guessing
 return cands[0] if len(cands) == 1 else None
 ```
 
-Hàm `find_rehome` có cơ chế **Ambiguity Guard**: Nếu trong cây thư mục xuất hiện từ 2 file `user.py` trở lên, hệ thống lập tức trả về `None`. Nó **tuyệt đối không gán bừa**. Node cũ sẽ được thanh trừng an toàn và đợi lượt `sot reconcile` tiếp theo để nhận diện chính xác theo cấu trúc AST.
+The `find_rehome` routine enforces an **Ambiguity Guard**: If 2 or more files named `user.py` exist across the project tree, the function immediately returns `None`. It **refuses to guess**. The stale path is safely pruned and awaits the next `sot reconcile` cycle for deterministic AST-based re-indexing.
 
 </details>
 
 ---
 
 <details>
-<summary><h3>Q18: Nếu dự án có file mã nguồn bị lỗi cú pháp (Syntax Error), Reconciler có bị crash không?</h3></summary>
+<summary><h3>Q18: If a source file has a syntax error, will the Reconciler crash?</h3></summary>
 
-**KHÔNG BAO GIỜ CRASH.**
+**IT WILL NEVER CRASH.**
 
-Tất cả parser trong `src/sot_graph/extractor.py` và `_vendor/graphify/extract.py` đều được bọc trong các khối `try-except` phòng vệ:
-- Nếu file Python bị `SyntaxError` hoặc file TypeScript thiếu dấu ngoặc, parser sẽ ghi nhận lỗi vào trường `error` nhưng vẫn **bảo lưu node tệp gốc (file node)**.
-- Tiến trình Reconciler tiếp tục xử lý các file khác bình thường và trả về tổng kết số file `failed` trong `ReconcileSummary`.
+All parsers in `src/sot_graph/extractor.py` and `_vendor/graphify/extract.py` are wrapped in defensive `try-except` handlers:
+- If a Python file contains a `SyntaxError` or a TypeScript file is missing brackets, the parser captures the error in the `error` attribute while **preserving the parent file node**.
+- The Reconciler continues processing remaining files uninterrupted and summarizes failed files in `ReconcileSummary.failed`.
 
 </details>
 
 ---
 
 <details>
-<summary><h3>Q19: Làm thế nào để lưu trữ các quyết định kiến trúc (ADR) hoặc kinh nghiệm sửa bug phức tạp vào đồ thị tri thức?</h3></summary>
+<summary><h3>Q19: How do I store Architecture Decision Records (ADRs) or tricky bug-fixing notes in the knowledge graph?</h3></summary>
 
-Bạn hoặc AI Agent có thể chèn các ghi chú tri thức (Virtual Knowledge Notes) bằng lệnh `sot insert`:
+Developers or AI Agents can persist Virtual Knowledge Notes using `sot insert`:
 
 ```bash
 ./bin/sot insert \
-  --title "Quy tắc Transaction trong Database" \
-  --body "Mọi thay đổi trên nhiều bảng liên quan bắt buộc phải bọc trong 'with self.conn:' để đảm bảo ACID và chống leak lock." \
+  --title "Database Transaction Safety Guidelines" \
+  --body "All multi-table mutations must be wrapped inside 'with self.conn:' to guarantee ACID compliance and prevent lock leaks." \
   --path "src/sot_graph/db.py" \
   --keywords "sqlite,transaction,acid,concurrency"
 ```
 
-Các ghi chú này nhận nhãn `[NOPATH]` (hoặc liên kết với tệp nếu có `--path`) và được lập chỉ mục FTS5 BM25. Khi Agent hỏi *"Làm sao để viết transaction an toàn?"*, hệ thống sẽ trả về ngay mỏ neo kiến thức này.
+These records receive the `[NOPATH]` label (or bind to a specific path if `--path` is supplied) and are indexed into FTS5 BM25. When an agent queries *"How do I safely write database transactions?"*, this architectural anchor is returned at the top of the search results.
 
 </details>
 
