@@ -15,16 +15,14 @@ import time
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from sot_graph.db import Database
 from sot_graph.extractor import EXT_DISPATCH, parse_file_graph
+from sot_graph.ignore import DEFAULT_IGNORED_DIRS, GitIgnoreMatcher
 
 
-IGNORED_DIRS: Set[str] = {
-    ".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build",
-    "target", ".cache", ".idea", ".vscode", "coverage", ".next", ".turbo",
-}
+IGNORED_DIRS: Set[str] = set(DEFAULT_IGNORED_DIRS)
 TEXT_EXTENSIONS = {".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".sh", ".sql"}
 
 
@@ -148,12 +146,11 @@ def _parse_worker(job: ParseJob) -> ParseResult:
             _worker_error("parse", job),
         )
 
-
 class Reconciler:
-    def __init__(self, db: Database, root_dir: str):
+    def __init__(self, db: Database, root_dir: str, extra_ignored_dirs: Optional[Set[str]] = None):
         self.db = db
         self.root_dir = os.path.abspath(root_dir)
-
+        self.ignore_matcher = GitIgnoreMatcher(self.root_dir, extra_ignored_dirs=extra_ignored_dirs)
     def _normalise_path(self, path: str) -> Optional[str]:
         """Return an absolute root-contained path, or ``None`` if unsafe."""
         raw = os.fspath(path)
@@ -173,9 +170,14 @@ class Reconciler:
     def _walk(self, directory: str, explicit: bool = False) -> List[str]:
         paths: List[str] = []
         for root, dirs, files in os.walk(directory):
-            dirs[:] = sorted(d for d in dirs if d not in IGNORED_DIRS)
+            dirs[:] = sorted(
+                d for d in dirs
+                if not self.ignore_matcher.is_ignored(os.path.join(root, d), is_dir=True)
+            )
             for name in sorted(files):
                 path = os.path.abspath(os.path.join(root, name))
+                if not explicit and self.ignore_matcher.is_ignored(path, is_dir=False):
+                    continue
                 if explicit or self._supported(path):
                     paths.append(path)
         return paths
@@ -258,8 +260,7 @@ class Reconciler:
         disk_paths = self.scan(paths)
         jobs: List[ParseJob] = []
         failures = 0
-        all_journals = getattr(self.db, "get_all_file_journals", None)
-        journal_cache = all_journals() if callable(all_journals) else {}
+        journal_cache: Dict[str, Any] = self.db.get_all_file_journals() if hasattr(self.db, "get_all_file_journals") else {}
         for path in disk_paths:
             try:
                 stat = os.stat(path)
@@ -268,7 +269,7 @@ class Reconciler:
                 continue
             size = int(stat.st_size)
             mtime_ms = int(stat.st_mtime * 1000)
-            prior = journal_cache.get(path) if journal_cache else self.db.get_file_journal(path)
+            prior = journal_cache.get(path) or self.db.get_file_journal(path)
             if prior and prior.get("size") == size and prior.get("mtime_ms") == mtime_ms:
                 # Hash verification preserves v1 behavior for edits that retain
                 # both size and mtime.
@@ -306,12 +307,15 @@ class Reconciler:
         absolute = self._normalise_path(path)
         if absolute is None:
             return "error"
+        rel_path = _relative_path(absolute, self.root_dir)
+        if not os.path.exists(absolute) or not os.path.isfile(absolute):
+            self.db.delete_path(rel_path)
+            self.db.delete_path(absolute)
+            return "deleted"
         try:
             stat = os.stat(absolute)
         except OSError:
-            self.db.delete_path(absolute)
-            return "deleted"
-        if not os.path.isfile(absolute):
+            self.db.delete_path(rel_path)
             self.db.delete_path(absolute)
             return "deleted"
         job = ParseJob(
@@ -331,15 +335,12 @@ class Reconciler:
         if prior and prior.get("sha256") == result.sha256:
             return "unchanged"
         try:
-            self._commit_batch((result,))
+            self._commit_batch([result])
         except Exception:
             return "error"
         resolver = getattr(self.db, "resolve_all_pending_edges", None)
         if callable(resolver):
             resolver()
-        else:
-            symbols = [node["symbol"] for node in result.nodes if node.get("symbol")]
-            self.db.resolve_pending_edges(symbols, current_file_path=absolute)
         return "indexed"
 
     def _parallel_window(
@@ -483,13 +484,15 @@ class Reconciler:
                 ]
                 for result in parsed:
                     if result.error is not None or result.sha256 is None:
+                        abs_path = os.path.join(self.root_dir, result.path) if not os.path.isabs(result.path) else result.path
                         if (
                             result.error is not None
                             and result.error.startswith("missing:")
-                            and not os.path.exists(result.path)
+                            and not os.path.exists(abs_path)
                         ):
                             self.db.delete_path(result.path)
-                            deleted_during_parse.add(result.path)
+                            self.db.delete_path(abs_path)
+                            deleted_during_parse.add(abs_path)
                         else:
                             failed += 1
                 if successful:
@@ -562,7 +565,12 @@ class Reconciler:
                 drift.append({"path": path, "why": "missing"})
                 continue
 
-            st = os.stat(path)
+            try:
+                st = os.stat(path)
+            except OSError:
+                drift.append({"path": path, "why": "unreadable"})
+                continue
+
             prior = self.db.get_file_journal(path)
             if not prior:
                 drift.append({"path": path, "why": "unrecorded"})

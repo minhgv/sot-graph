@@ -6,10 +6,10 @@ and performs deterministic rehoming or auto-purging of dead paths.
 
 import os
 import re
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Optional, Set, Tuple
 
 from sot_graph.db import Database
+from sot_graph.ignore import DEFAULT_IGNORED_DIRS
 
 # Stop words ignored during lexical coverage calculation
 STOP_WORDS: Set[str] = {
@@ -20,10 +20,7 @@ STOP_WORDS: Set[str] = {
     "self", "class", "def", "function", "return", "import", "const", "let", "var",
 }
 
-IGNORED_DIRS: Set[str] = {
-    ".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build",
-    "target", ".cache", ".idea", ".vscode", "coverage", ".next", ".turbo",
-}
+IGNORED_DIRS: Set[str] = set(DEFAULT_IGNORED_DIRS)
 
 
 def tokenize(text: str) -> Set[str]:
