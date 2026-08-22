@@ -83,7 +83,10 @@ class MaintenanceTests(unittest.TestCase):
 
         deleted = db.apply_clean(plan)
         self.assertEqual(deleted["paths"], 1)
-        self.assertEqual(db.stats(), {"paths": 0, "nodes": 0, "edges": 0, "pending": 0})
+        self.assertEqual(db.stats()["paths"], 0)
+        self.assertEqual(db.stats()["nodes"], 0)
+        self.assertEqual(db.stats()["edges"], 0)
+        self.assertEqual(db.stats()["pending"], 0)
         db.close()
 
     def test_reset_preserves_notes_until_include_notes_is_requested(self) -> None:

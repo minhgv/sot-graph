@@ -191,11 +191,25 @@ def cmd_search(args: argparse.Namespace, db: Database, root: str) -> int:
 
 def cmd_explore(args: argparse.Namespace, db: Database) -> int:
     query = args.target.strip()
+    # Prefer real symbols over file/doc nodes whose labels merely mention
+    # the query text.
     cur = db.conn.execute(
-        "SELECT id, label, kind, path, line_start FROM graph_nodes WHERE symbol = ? OR label LIKE ? LIMIT 1",
-        (query, f"%{query}%")
+        "SELECT id, label, kind, path, line_start FROM graph_nodes "
+        "WHERE symbol = ? LIMIT 1", (query,)
     )
     row = cur.fetchone()
+    if not row:
+        cur = db.conn.execute(
+            "SELECT id, label, kind, path, line_start FROM graph_nodes "
+            "WHERE kind != 'file' AND (label LIKE ? OR fqn LIKE ?) "
+            "ORDER BY kind LIMIT 1", (f"%{query}%", f"%{query}%")
+        )
+        row = cur.fetchone()
+    if not row:
+        row = db.conn.execute(
+            "SELECT id, label, kind, path, line_start FROM graph_nodes "
+            "WHERE label LIKE ? LIMIT 1", (f"%{query}%",)
+        ).fetchone()
     if not row:
         print(f"❌ No symbol or node matching '{query}' found in graph.")
         return 1
@@ -263,14 +277,66 @@ def cmd_reconcile(args: argparse.Namespace, reconciler: Reconciler) -> int:
     if args.json:
         print(json.dumps(summary.as_dict(), sort_keys=True))
     else:
+        conflict_note = (
+            f", {summary.conflicts} conflicts (stale snapshots re-queued)"
+            if summary.conflicts else ""
+        )
         print(
             f"✅ Reconcile complete in {elapsed:.2f}s: "
             f"{summary.updated} indexed/updated, "
             f"{summary.unchanged} unchanged, "
             f"{summary.deleted} purged, "
-            f"{summary.failed} failed."
+            f"{summary.failed} failed{conflict_note}."
         )
     return 1 if summary.failed else 0
+
+
+def cmd_pack(args: argparse.Namespace, db: Database, root: str) -> int:
+    from sot_graph.pack import PackError, build_bundle, render_yaml
+
+    try:
+        bundle = build_bundle(
+            db, root, args.target,
+            max_hops=args.max_hops,
+            max_nodes=args.max_nodes,
+            max_bytes=args.max_bytes,
+        )
+    except PackError as exc:
+        detail = f" candidates: {', '.join(exc.candidates)}" if exc.candidates else ""
+        print(f"❌ pack failed [{exc.code}]: {exc}{detail}")
+        return 2
+    payload = render_yaml(bundle)
+    if args.output:
+        os.makedirs(os.path.dirname(os.path.abspath(args.output)) or ".", exist_ok=True)
+        with open(args.output, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+        print(
+            f"📦 ContextBundle {bundle['bundle_id']} -> {args.output} "
+            f"({bundle['limits']['returned_nodes']} nodes, "
+            f"truncated={str(bundle['limits']['truncated']).lower()})"
+        )
+    else:
+        print(payload, end="")
+    return 0
+
+
+def cmd_watch(args: argparse.Namespace, reconciler: Reconciler, root: str) -> int:
+    from sot_graph.watcher import run_watch
+
+    try:
+        run_watch(
+            reconciler, root,
+            debounce_ms=args.debounce_ms,
+            backend=args.backend,
+            interval_ms=args.interval_ms,
+        )
+    except KeyboardInterrupt:
+        print("\n👋 sot watch stopped.")
+        return 0
+    except RuntimeError as exc:
+        print(f"❌ {exc}")
+        return 2
+    return 0
 
 
 
@@ -639,6 +705,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_setup.add_argument("--workspace-only", action="store_true", help="Install to current workspace only")
     p_setup.add_argument("--list", action="store_true", help="List supported harnesses")
 
+    p_pack = subparsers.add_parser(
+        "pack", help="Package a k-hop ContextBundle (YAML) for AI agent prompt registers")
+    p_pack.add_argument("target", help="Target symbol or fully-qualified name")
+    p_pack.add_argument("-o", "--output", default=None,
+                        help="Write YAML to file (default: print to stdout)")
+    p_pack.add_argument("--max-hops", type=int, default=2, help="Hop depth (default: 2)")
+    p_pack.add_argument("--max-nodes", type=int, default=50, help="Node cap (default: 50)")
+    p_pack.add_argument("--max-bytes", type=int, default=65536, help="Byte cap (default: 64KB)")
+
+    p_watch = subparsers.add_parser(
+        "watch", help="Watch filesystem and reconcile in real time (daemon)")
+    p_watch.add_argument("--debounce-ms", type=int, default=200,
+                         help="Event folding window (default: 200ms)")
+    p_watch.add_argument("--backend", choices=("auto", "watchfiles", "poll"), default="auto",
+                         help="Watcher backend (default: auto = watchfiles if installed)")
+    p_watch.add_argument("--interval-ms", type=int, default=500,
+                         help="Polling interval for the poll backend (default: 500ms)")
+
     return parser
 
 
@@ -685,6 +769,10 @@ def main() -> int:
             return cmd_export(args, db)
         elif args.command == "bundle":
             return cmd_bundle(args, db, root)
+        elif args.command == "pack":
+            return cmd_pack(args, db, root)
+        elif args.command == "watch":
+            return cmd_watch(args, reconciler, root)
         return 0
     finally:
         db.close()

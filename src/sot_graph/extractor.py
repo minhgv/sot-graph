@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from sot_graph.db import Database
+from sot_graph.modutil import dotted_module, normalize_import
 
 # Suffix to extractor mapping
 EXT_DISPATCH = {
@@ -90,12 +91,14 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
     ns = hashlib.sha256(path.encode()).hexdigest()[:12]
     file_node_id = f"file:{ns}"
     lang = get_language(path)
+    module = dotted_module(rel_path)
 
     # 1. Base File Node
     file_node = {
         "id": file_node_id,
         "kind": "file",
         "symbol": p.name,
+        "fqn": module,
         "label": f"File: {rel_path}",
         "body": f"File {rel_path} ({lang}, {file_size} bytes)",
         "keywords": [p.name, lang, "file"],
@@ -167,10 +170,15 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
             "id": node_id,
             "kind": kind,
             "symbol": raw_id,
+            "fqn": f"{module}.{raw_id}" if module else raw_id,
+            "signature": rn.get("signature"),
             "label": f"{label} — {rel_path}:{line_no or 1}",
             "body": body,
             "keywords": [raw_id, kind, lang, p.name],
             "line_start": line_no,
+            "line_end": rn.get("line_end"),
+            "col_start": rn.get("col_start"),
+            "col_end": rn.get("col_end"),
         })
 
     # Intra-file vs Cross-file edges
@@ -193,13 +201,53 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
                 "relation": rel,
                 "line": line_no,
             })
-        else:
-            # Cross-file pending edge (target symbol lives in another file)
+            continue
+
+        # Cross-file pending edge (target symbol lives in another file)
+        if rel == "calls":
+            call_kind = re_edge.get("call_kind") or "UNKNOWN"
+            # Audit contract: only unshadowed BARE builtins may be pruned.
+            # Attribute/qualified calls (requests.get, db.execute) always
+            # survive with their receiver context for the resolver.
+            if call_kind == "BARE" and re_edge.get("builtin"):
+                continue
             pending.append({
                 "src": src_id,
                 "dst_symbol": dst_raw,
                 "relation": rel,
                 "line": line_no,
+                "language": lang,
+                "call_kind": call_kind,
+                "receiver": re_edge.get("receiver"),
+                "import_source": normalize_import(re_edge.get("import_source")) or None,
+            })
+        elif rel == "imports":
+            # Import targets are self-describing module paths: the module is
+            # the import source, letting the resolver prune externals.
+            pending.append({
+                "src": src_id,
+                "dst_symbol": dst_raw,
+                "relation": rel,
+                "line": line_no,
+                "language": lang,
+                "call_kind": "QUALIFIED" if "." in dst_raw else "BARE",
+                "receiver": None,
+                "import_source": normalize_import(
+                    re_edge.get("import_source") or dst_raw
+                ) or None,
+            })
+        else:
+            # 'extends' and other relations: legitimate project candidates
+            # without call syntax — keep with UNKNOWN context.
+            pending.append({
+                "src": src_id,
+                "dst_symbol": dst_raw,
+                "relation": rel,
+                "line": line_no,
+                "language": lang,
+                "call_kind": "UNKNOWN",
+                "receiver": None,
+                "import_source": normalize_import(re_edge.get("import_source")) or None,
             })
 
     return {

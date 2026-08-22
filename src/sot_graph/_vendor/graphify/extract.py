@@ -5,9 +5,135 @@ Optionally bridges to tree-sitter if tree_sitter and tree_sitter_languages are i
 """
 
 import ast
+import builtins as _builtins
 import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
+
+# Unshadowed bare calls to these names are language builtins, never project
+# symbols; callers prune them from pending edges (audit contract: only BARE
+# + unshadowed calls may be classified as BUILTIN).
+BUILTIN_NAMES = frozenset(dir(_builtins))
+
+
+def _collect_import_map(tree: ast.AST) -> Dict[str, str]:
+    """Map local binding name -> dotted module it was imported from."""
+    import_map: Dict[str, str] = {}
+    for stmt in ast.walk(tree):
+        if isinstance(stmt, ast.Import):
+            for alias in stmt.names:
+                top = alias.name.split(".")[0]
+                import_map.setdefault(alias.asname or top, alias.name)
+        elif isinstance(stmt, ast.ImportFrom):
+            module = ("." * stmt.level) + (stmt.module or "")
+            for alias in stmt.names:
+                if alias.name == "*":
+                    continue
+                import_map.setdefault(alias.asname or alias.name, module)
+    return import_map
+
+
+def _collect_bound_names(func: ast.AST) -> set:
+    """Names bound anywhere inside the function scope (params, assignments,
+    for/with/except/comprehension targets, local imports).
+
+    Deliberately an over-approximation: treating a name as shadowed only
+    *keeps* a pending edge, never deletes one.
+    """
+    bound: set = set()
+    for node in ast.walk(func):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            bound.add(node.id)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.asname:
+                    bound.add(alias.asname)
+                elif alias.name != "*":
+                    bound.add(alias.name.split(".")[0])
+    return bound
+
+
+def _dotted_expr(node: ast.AST) -> Optional[str]:
+    """Render a Name/Attribute chain ('self.db'), or None for complex exprs."""
+    parts: List[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
+def _classify_call(
+    call: ast.Call, bound: set, import_map: Dict[str, str]
+) -> Optional[Dict[str, Any]]:
+    """Classify one call site for the binding-aware resolver.
+
+    Returns None for self-recursion (already filtered by the caller).
+    Edge fields: call_kind (BARE|ATTRIBUTE|QUALIFIED|DYNAMIC), receiver,
+    import_source, builtin (True only for unshadowed bare builtins).
+    """
+    func = call.func
+    if isinstance(func, ast.Name):
+        name = func.id
+        import_source = import_map.get(name)
+        builtin = (
+            not import_source
+            and name not in bound
+            and name in BUILTIN_NAMES
+        )
+        return {
+            "call_kind": "BARE",
+            "receiver": None,
+            "import_source": import_source,
+            "builtin": builtin,
+        }
+    if isinstance(func, ast.Attribute):
+        receiver = _dotted_expr(func.value)
+        import_source = None
+        kind = "DYNAMIC"
+        if receiver:
+            root = receiver.split(".")[0]
+            import_source = import_map.get(root)
+            kind = "QUALIFIED" if import_source else "ATTRIBUTE"
+        return {
+            "call_kind": kind,
+            "receiver": receiver,
+            "import_source": import_source,
+            "builtin": False,
+        }
+    return None
+
+
+def _format_signature(node: Any, prefix: str, name: str) -> Optional[str]:
+    """Render 'def name(args) -> ret' / 'class Name(Base, ...)' contracts."""
+    try:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            args = ast.unparse(node.args)  # type: ignore[attr-defined]
+            sig = f"{prefix} {name}({args})"
+            if node.returns is not None:
+                sig += f" -> {ast.unparse(node.returns)}"
+            return sig
+        if isinstance(node, ast.ClassDef):
+            bases = [ast.unparse(b) for b in node.bases]  # type: ignore[arg-type]
+            return f"class {name}({', '.join(bases)})" if bases else f"class {name}"
+    except Exception:
+        return None
+    return None
+
+
+def _span_fields(node: ast.AST) -> Dict[str, Any]:
+    """Exact source spans; empty when the runtime AST lacks end positions."""
+    return {
+        "line_end": getattr(node, "end_lineno", None),
+        "col_start": getattr(node, "col_offset", None),
+        "col_end": getattr(node, "end_col_offset", None),
+    }
 
 
 def extract_python(path: Path) -> Dict[str, Any]:
@@ -19,6 +145,8 @@ def extract_python(path: Path) -> Dict[str, Any]:
         tree = ast.parse(content, filename=str(path))
     except Exception as e:
         return {"nodes": [], "edges": [], "error": str(e)}
+
+    import_map = _collect_import_map(tree)
 
     # Top-level file node
     nodes.append({
@@ -42,6 +170,8 @@ def extract_python(path: Path) -> Dict[str, Any]:
                 "kind": "class",
                 "source_location": f"L{node.lineno}",
                 "doc": doc,
+                "signature": _format_signature(node, "class", node.name),
+                **_span_fields(node),
             })
             # Edges: File contains class, or outer scope contains class
             edges.append({
@@ -90,6 +220,8 @@ def extract_python(path: Path) -> Dict[str, Any]:
                 "kind": kind,
                 "source_location": f"L{node.lineno}",
                 "doc": doc,
+                "signature": _format_signature(node, prefix, node.name),
+                **_span_fields(node),
             })
             edges.append({
                 "source": parent,
@@ -98,23 +230,28 @@ def extract_python(path: Path) -> Dict[str, Any]:
                 "source_location": f"L{node.lineno}",
             })
 
-            # Detect call expressions inside function
+            # Detect call expressions inside function with binding context
+            bound = _collect_bound_names(node)
             for child in ast.walk(node):
-                if isinstance(child, ast.Call):
-                    if isinstance(child.func, ast.Name) and child.func.id != node.name:
-                        edges.append({
-                            "source": func_id,
-                            "target": child.func.id,
-                            "relation": "calls",
-                            "source_location": f"L{getattr(child, 'lineno', node.lineno)}",
-                        })
-                    elif isinstance(child.func, ast.Attribute):
-                        edges.append({
-                            "source": func_id,
-                            "target": child.func.attr,
-                            "relation": "calls",
-                            "source_location": f"L{getattr(child, 'lineno', node.lineno)}",
-                        })
+                if not isinstance(child, ast.Call):
+                    continue
+                callee = None
+                if isinstance(child.func, ast.Name):
+                    if child.func.id == node.name:
+                        continue
+                    callee = child.func.id
+                elif isinstance(child.func, ast.Attribute):
+                    callee = child.func.attr
+                if callee is None:
+                    continue
+                context = _classify_call(child, bound, import_map) or {}
+                edges.append({
+                    "source": func_id,
+                    "target": callee,
+                    "relation": "calls",
+                    "source_location": f"L{getattr(child, 'lineno', node.lineno)}",
+                    **context,
+                })
 
             self.scope_stack.append(func_id)
             self.generic_visit(node)
@@ -127,6 +264,7 @@ def extract_python(path: Path) -> Dict[str, Any]:
                     "target": alias.name,
                     "relation": "imports",
                     "source_location": f"L{node.lineno}",
+                    "import_source": alias.name,
                 })
 
         def visit_ImportFrom(self, node: ast.ImportFrom):
@@ -138,6 +276,7 @@ def extract_python(path: Path) -> Dict[str, Any]:
                     "target": target_sym,
                     "relation": "imports",
                     "source_location": f"L{node.lineno}",
+                    "import_source": ("." * node.level) + mod,
                 })
 
     visitor = PythonVisitor()

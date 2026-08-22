@@ -35,3 +35,6 @@ GRAPH_REPORT.md
 sot_graphrag.json
 sot_graph.graphml
 sot_obsidian_vault/
+
+# macOS metadata
+.DS_Store

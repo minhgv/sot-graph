@@ -32,6 +32,7 @@ class ParseJob:
     root_dir: str
     size: int
     mtime_ms: int
+    base_generation: int = 0
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,7 @@ class ParseResult:
     edges: Tuple[dict, ...]
     pending: Tuple[dict, ...]
     error: Optional[str] = None
+    base_generation: int = 0
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,7 @@ class ReconcileSummary:
     deleted: int
     failed: int
     duration_ms: int
+    conflicts: int = 0
 
     def as_dict(self) -> Dict[str, int]:
         return asdict(self)
@@ -129,6 +132,7 @@ def _parse_worker(job: ParseJob) -> ParseResult:
             edges,
             pending,
             None,
+            job.base_generation,
         )
     except PermissionError:
         return ParseResult(
@@ -279,28 +283,66 @@ class Reconciler:
                     continue
                 if prior.get("sha256") == current_sha:
                     continue
-            jobs.append(ParseJob(path, self.root_dir, size, mtime_ms))
+            jobs.append(ParseJob(
+                path, self.root_dir, size, mtime_ms,
+                base_generation=int(prior.get("generation") or 0) if prior else 0,
+            ))
         return jobs, set(disk_paths), failures
 
 
-    def _commit_batch(self, records: Sequence[ParseResult]) -> None:
-        ordered = tuple(sorted(records, key=lambda r: _relative_path(r.path, self.root_dir)))
-        batch = getattr(self.db, "commit_file_batch", None)
-        if callable(batch):
-            batch(ordered)
-            return
-        # Kept solely for databases created by v1 callers during a rolling
-        # upgrade; the v2 Database always supplies commit_file_batch.
-        for record in ordered:
-            self.db.commit_file(
-                path=record.path,
-                sha256=record.sha256 or "",
-                size=record.size,
-                mtime_ms=record.mtime_ms,
-                nodes=list(record.nodes),
-                edges=list(record.edges),
-                pending=list(record.pending),
-            )
+    def _commit_batch(self, records: Sequence[ParseResult]) -> List[str]:
+        """Phase B of the 2-Phase Publication protocol.
+
+        Under the stable project lock, every parsed record is re-hashed on
+        disk; a file that changed since Phase A is a stale snapshot and is
+        reported as a conflict instead of overwriting the newer publication.
+        The database additionally compare-and-swaps the per-path journal
+        generation captured at parse time.
+        """
+        fresh: List[ParseResult] = []
+        conflicts: List[str] = []
+        for record in records:
+            disk_sha = self._hash(record.path) if record.error is None else None
+            if disk_sha is not None and disk_sha == (record.sha256 or ""):
+                fresh.append(record)
+            else:
+                conflicts.append(record.path)
+        if fresh:
+            expected = {record.path: record.base_generation for record in fresh}
+            batch = getattr(self.db, "commit_file_batch", None)
+            with self._publication_gate():
+                if callable(batch):
+                    outcome = batch(fresh, expected_generations=expected)
+                else:
+                    # Kept solely for databases created by v1 callers during a
+                    # rolling upgrade; no CAS data is available there.
+                    for record in fresh:
+                        self.db.commit_file(
+                            path=record.path,
+                            sha256=record.sha256 or "",
+                            size=record.size,
+                            mtime_ms=record.mtime_ms,
+                            nodes=list(record.nodes),
+                            edges=list(record.edges),
+                            pending=list(record.pending),
+                        )
+                    outcome = {"committed": len(fresh), "conflicts": []}
+            conflicts.extend(outcome.get("conflicts", []))
+        return conflicts
+
+    def _publication_gate(self):
+        """Serialize mutations behind the stable `.sot/write.lock`."""
+        from contextlib import contextmanager
+
+        lock_factory = getattr(self.db, "write_lock", None)
+        if callable(lock_factory):
+            return lock_factory()
+
+        @contextmanager
+        def _unlocked():
+            yield
+
+        return _unlocked()
 
     def reconcile_path(self, path: str) -> str:
         """Reconcile one path using the original v1 action vocabulary."""
@@ -308,39 +350,47 @@ class Reconciler:
         if absolute is None:
             return "error"
         rel_path = _relative_path(absolute, self.root_dir)
+        prior = self.db.get_file_journal(absolute)
+        base_generation = int(prior.get("generation") or 0) if prior else 0
         if not os.path.exists(absolute) or not os.path.isfile(absolute):
-            self.db.delete_path(rel_path)
-            self.db.delete_path(absolute)
+            with self._publication_gate():
+                self.db.delete_path(rel_path)
+                self.db.delete_path(absolute)
             return "deleted"
         try:
             stat = os.stat(absolute)
         except OSError:
-            self.db.delete_path(rel_path)
-            self.db.delete_path(absolute)
+            with self._publication_gate():
+                self.db.delete_path(rel_path)
+                self.db.delete_path(absolute)
             return "deleted"
         job = ParseJob(
             absolute,
             self.root_dir,
             int(stat.st_size),
             int(stat.st_mtime * 1000),
+            base_generation=base_generation,
         )
         result = _parse_worker(job)
         if result.error:
             # A file can disappear after the initial stat.
             if result.error.startswith("missing:") and not os.path.exists(absolute):
-                self.db.delete_path(absolute)
+                with self._publication_gate():
+                    self.db.delete_path(absolute)
                 return "deleted"
             return "error"
-        prior = self.db.get_file_journal(absolute)
         if prior and prior.get("sha256") == result.sha256:
             return "unchanged"
         try:
-            self._commit_batch([result])
+            conflicts = self._commit_batch([result])
         except Exception:
             return "error"
+        if conflicts:
+            return "conflict"
         resolver = getattr(self.db, "resolve_all_pending_edges", None)
         if callable(resolver):
-            resolver()
+            with self._publication_gate():
+                resolver()
         return "indexed"
 
     def _parallel_window(
@@ -449,6 +499,7 @@ class Reconciler:
         unchanged = len(current_paths) - len(jobs) - scan_failures
         updated = 0
         failed = scan_failures
+        conflicts_total = 0
         deleted_during_parse: Set[str] = set()
         interrupted = False
         pool_broken = False
@@ -490,15 +541,17 @@ class Reconciler:
                             and result.error.startswith("missing:")
                             and not os.path.exists(abs_path)
                         ):
-                            self.db.delete_path(result.path)
-                            self.db.delete_path(abs_path)
+                            with self._publication_gate():
+                                self.db.delete_path(result.path)
+                                self.db.delete_path(abs_path)
                             deleted_during_parse.add(abs_path)
                         else:
                             failed += 1
                 if successful:
                     try:
-                        self._commit_batch(successful)
-                        updated += len(successful)
+                        conflicts = self._commit_batch(successful)
+                        conflicts_total += len(conflicts)
+                        updated += len(successful) - len(conflicts)
                     except Exception:
                         # Database transaction rollback is owned by Database;
                         # no record in this window is counted as committed.
@@ -510,15 +563,16 @@ class Reconciler:
 
             deletion_scope = self._deletion_scope(paths, known_paths)
             dead_paths = (deletion_scope - current_paths) - deleted_during_parse
-            for dead_path in sorted(
-                dead_paths,
-                key=lambda p: _relative_path(p, self.root_dir),
-            ):
-                self.db.delete_path(dead_path)
-            deleted = len(dead_paths) + len(deleted_during_parse)
-            resolver = getattr(self.db, "resolve_all_pending_edges", None)
-            if callable(resolver):
-                resolver()
+            with self._publication_gate():
+                for dead_path in sorted(
+                    dead_paths,
+                    key=lambda p: _relative_path(p, self.root_dir),
+                ):
+                    self.db.delete_path(dead_path)
+                deleted = len(dead_paths) + len(deleted_during_parse)
+                resolver = getattr(self.db, "resolve_all_pending_edges", None)
+                if callable(resolver):
+                    resolver()
         except KeyboardInterrupt:
             interrupted = True
             if executor is not None:
@@ -539,6 +593,7 @@ class Reconciler:
             deleted=deleted,
             failed=failed,
             duration_ms=duration_ms,
+            conflicts=conflicts_total,
         )
 
     def scan_and_reconcile(

@@ -437,6 +437,44 @@ class McpService:
             })
         return self._run(op)
 
+    def pack_context_bundle(
+        self,
+        target: str,
+        *,
+        max_hops: int = 2,
+        max_nodes: int = 50,
+        max_bytes: int = 65_536,
+    ) -> Dict[str, Any]:
+        """Build a k-hop ContextBundle (read-only) for agent prompt registers."""
+        from sot_graph.pack import PackError, build_bundle, render_yaml
+
+        class _ConnView:
+            __slots__ = ("conn",)
+
+            def __init__(self, conn: sqlite3.Connection) -> None:
+                self.conn = conn
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            try:
+                bundle = build_bundle(
+                    _ConnView(conn), self.project_root, target,
+                    max_hops=max_hops, max_nodes=max_nodes, max_bytes=max_bytes,
+                )
+            except PackError as exc:
+                return {
+                    "ok": False,
+                    "status": "error",
+                    "code": exc.code,
+                    "error": str(exc),
+                    "candidates": exc.candidates,
+                }
+            return self._fits_response({
+                "ok": True,
+                "status": "success",
+                "yaml": render_yaml(bundle),
+                "limits": bundle["limits"],
+            })
+        return self._run(op)
 
     async def _async(self, method: Any, *args: Any, **kwargs: Any) -> Any:
         try:
@@ -461,6 +499,9 @@ class McpService:
 
     async def aget_architecture_report(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return await self._async(self.get_architecture_report, *args, **kwargs)
+
+    async def apack_context_bundle(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.pack_context_bundle, *args, **kwargs)
 
     async def aget_communities(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return await self._async(self.get_communities, *args, **kwargs)

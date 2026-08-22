@@ -15,6 +15,8 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, 
 from urllib.parse import quote
 
 
+SCHEMA_VERSION = 3
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS file_journal (
     path TEXT PRIMARY KEY, sha256 TEXT NOT NULL, size INTEGER NOT NULL,
@@ -22,39 +24,49 @@ CREATE TABLE IF NOT EXISTS file_journal (
 );
 CREATE TABLE IF NOT EXISTS graph_nodes (
     id TEXT PRIMARY KEY, path TEXT NOT NULL, kind TEXT NOT NULL, symbol TEXT,
-    label TEXT NOT NULL, body TEXT NOT NULL, keywords TEXT, line_start INTEGER,
+    fqn TEXT, signature TEXT,
+    label TEXT NOT NULL, body TEXT NOT NULL, keywords TEXT,
+    line_start INTEGER, line_end INTEGER, col_start INTEGER, col_end INTEGER,
     updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_nodes_path ON graph_nodes(path);
 CREATE INDEX IF NOT EXISTS idx_nodes_symbol ON graph_nodes(symbol);
+CREATE INDEX IF NOT EXISTS idx_nodes_fqn ON graph_nodes(fqn);
 CREATE TABLE IF NOT EXISTS graph_edges (
     path TEXT NOT NULL, src TEXT NOT NULL, dst TEXT NOT NULL, relation TEXT NOT NULL,
     line INTEGER, PRIMARY KEY (path, src, dst, relation)
 );
 CREATE INDEX IF NOT EXISTS idx_edges_src ON graph_edges(src);
 CREATE INDEX IF NOT EXISTS idx_edges_dst ON graph_edges(dst);
+CREATE INDEX IF NOT EXISTS idx_edges_relation ON graph_edges(relation);
 CREATE TABLE IF NOT EXISTS pending_edges (
     path TEXT NOT NULL, src TEXT NOT NULL, dst_symbol TEXT NOT NULL,
     relation TEXT NOT NULL, line INTEGER,
+    language TEXT NOT NULL DEFAULT '',
+    call_kind TEXT NOT NULL DEFAULT 'UNKNOWN',
+    receiver TEXT,
+    import_source TEXT,
+    resolution_state TEXT NOT NULL DEFAULT 'UNRESOLVED',
     PRIMARY KEY (path, src, dst_symbol, relation)
 );
 CREATE INDEX IF NOT EXISTS idx_pending_dst ON pending_edges(dst_symbol);
 CREATE VIRTUAL TABLE IF NOT EXISTS graph_fts USING fts5(
-    label, body, keywords, content='graph_nodes', content_rowid='rowid'
+    label, fqn, body, keywords, content='graph_nodes', content_rowid='rowid',
+    tokenize="unicode61 remove_diacritics 0 tokenchars '_-.:$@'"
 );
 CREATE TRIGGER IF NOT EXISTS trg_nodes_ai AFTER INSERT ON graph_nodes BEGIN
-    INSERT INTO graph_fts(rowid, label, body, keywords)
-    VALUES (new.rowid, new.label, new.body, new.keywords);
+    INSERT INTO graph_fts(rowid, label, fqn, body, keywords)
+    VALUES (new.rowid, new.label, new.fqn, new.body, new.keywords);
 END;
 CREATE TRIGGER IF NOT EXISTS trg_nodes_ad AFTER DELETE ON graph_nodes BEGIN
-    INSERT INTO graph_fts(graph_fts, rowid, label, body, keywords)
-    VALUES ('delete', old.rowid, old.label, old.body, old.keywords);
+    INSERT INTO graph_fts(graph_fts, rowid, label, fqn, body, keywords)
+    VALUES ('delete', old.rowid, old.label, old.fqn, old.body, old.keywords);
 END;
 CREATE TRIGGER IF NOT EXISTS trg_nodes_au AFTER UPDATE ON graph_nodes BEGIN
-    INSERT INTO graph_fts(graph_fts, rowid, label, body, keywords)
-    VALUES ('delete', old.rowid, old.label, old.body, old.keywords);
-    INSERT INTO graph_fts(rowid, label, body, keywords)
-    VALUES (new.rowid, new.label, new.body, new.keywords);
+    INSERT INTO graph_fts(graph_fts, rowid, label, fqn, body, keywords)
+    VALUES ('delete', old.rowid, old.label, old.fqn, old.body, old.keywords);
+    INSERT INTO graph_fts(rowid, label, fqn, body, keywords)
+    VALUES (new.rowid, new.label, new.fqn, new.body, new.keywords);
 END;
 CREATE TABLE IF NOT EXISTS graph_communities (
     community_id INTEGER PRIMARY KEY,
@@ -64,8 +76,19 @@ CREATE TABLE IF NOT EXISTS graph_communities (
     nodes_json TEXT NOT NULL,
     created_at INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_edges_relation ON graph_edges(relation);
 """
+
+# Ordered drop list for the disposable-index migration: the filesystem is the
+# source of truth, so a legacy schema is dropped and rebuilt by the next
+# reconcile instead of being migrated in place.
+_DROP_ON_RESET = (
+    "DROP TABLE IF EXISTS graph_fts",
+    "DROP TABLE IF EXISTS graph_communities",
+    "DROP TABLE IF EXISTS pending_edges",
+    "DROP TABLE IF EXISTS graph_edges",
+    "DROP TABLE IF EXISTS graph_nodes",
+    "DROP TABLE IF EXISTS file_journal",
+)
 
 
 @dataclass(frozen=True)
@@ -122,17 +145,59 @@ class Database:
 
         self.conn.execute(f"PRAGMA busy_timeout = {self.timeout_ms}")
         self.conn.execute("PRAGMA foreign_keys = ON")
+        self.schema_was_reset = False
         if read_only:
+            if self._user_version() != SCHEMA_VERSION:
+                self.conn.close()
+                raise RuntimeError(
+                    "database schema is outdated; run `sot reconcile` once to rebuild"
+                )
+            # Reader profile: bounded caches keep 50 concurrent agents well
+            # under 250MB RSS instead of relying on per-connection defaults.
             self.conn.execute("PRAGMA query_only = ON")
+            self.conn.execute("PRAGMA cache_size = -4000")   # 4MB page cache
+            self.conn.execute("PRAGMA temp_store = FILE")    # guard VPS RAM
         else:
+            # Writer profile: single-writer with a bounded 8MB page cache.
             self.conn.execute("PRAGMA journal_mode = WAL")
             self.conn.execute("PRAGMA synchronous = NORMAL")
+            self.conn.execute("PRAGMA cache_size = -8000")   # 8MB page cache
+            self.conn.execute("PRAGMA mmap_size = 67108864") # 64MB shared mmap
             if initialize:
                 self._init_schema()
 
+    def _user_version(self) -> int:
+        return int(self.conn.execute("PRAGMA user_version").fetchone()[0])
+
     def _init_schema(self) -> None:
-        with self.conn:
-            self.conn.executescript(SCHEMA)
+        version = self._user_version()
+        if version != SCHEMA_VERSION:
+            if version != 0 or self._schema_objects_present():
+                # Legacy database: the index is disposable, so drop and
+                # rebuild rather than migrate; the next reconcile refills it.
+                with self.conn:
+                    for statement in _DROP_ON_RESET:
+                        self.conn.execute(statement)
+                self.schema_was_reset = True
+            with self.conn:
+                self.conn.executescript(SCHEMA)
+                self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    def _schema_objects_present(self) -> bool:
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+            "AND name IN ('file_journal','graph_nodes','graph_edges',"
+            "'pending_edges','graph_fts','graph_communities')"
+        ).fetchone()
+        return int(row[0]) > 0
+
+    def write_lock(self):
+        """Stable project-wide publication lock (`.sot/write.lock`)."""
+        from sot_graph.locking import WriteLock
+        return WriteLock(
+            os.path.join(os.path.dirname(self.db_path), "write.lock"),
+            timeout_ms=self.timeout_ms,
+        )
 
     def close(self) -> None:
         self.conn.close()
@@ -199,17 +264,38 @@ class Database:
             return record[name]
         return getattr(record, name)
 
-    def commit_file_batch(self, records: Sequence[Any]) -> int:
-        """Atomically replace a deterministically sorted batch of parsed files."""
+    def commit_file_batch(
+        self,
+        records: Sequence[Any],
+        expected_generations: Optional[Mapping[str, int]] = None,
+    ) -> Dict[str, Any]:
+        """Atomically replace a deterministically sorted batch of parsed files.
+
+        When ``expected_generations`` maps a path to the ``file_journal``
+        generation observed at parse time, that record is only committed if
+        the stored generation still matches (compare-and-swap). A record that
+        loses the race is skipped and reported under ``conflicts`` instead of
+        silently overwriting the newer publication.
+        """
         ordered = sorted(records, key=lambda r: os.path.normcase(os.path.normpath(
             str(self._record_value(r, "path"))))
         )
         if not ordered:
-            return 0
+            return {"committed": 0, "conflicts": []}
         now = int(time.time())
+        conflicts: List[str] = []
         with self.conn:
             for record in ordered:
                 path = str(self._record_value(record, "path"))
+                if expected_generations is not None:
+                    row = self.conn.execute(
+                        "SELECT generation FROM file_journal WHERE path = ?", (path,)
+                    ).fetchone()
+                    current_gen = int(row[0]) if row else 0
+                    expected_gen = int(expected_generations.get(path, 0))
+                    if current_gen != expected_gen:
+                        conflicts.append(path)
+                        continue
                 nodes = self._record_value(record, "nodes")
                 edges = self._record_value(record, "edges")
                 pending = self._record_value(record, "pending")
@@ -219,20 +305,29 @@ class Database:
                 node_rows = []
                 for n in nodes:
                     kw = n.get("keywords", [])
-                    node_rows.append((n["id"], path, n["kind"], n.get("symbol"), n["label"],
-                                      n["body"], " ".join(kw) if kw else "", n.get("line_start"), now))
+                    node_rows.append((
+                        n["id"], path, n["kind"], n.get("symbol"),
+                        n.get("fqn"), n.get("signature"),
+                        n["label"], n["body"], " ".join(kw) if kw else "",
+                        n.get("line_start"), n.get("line_end"),
+                        n.get("col_start"), n.get("col_end"), now))
                 self.conn.executemany(
                     "INSERT OR REPLACE INTO graph_nodes "
-                    "(id,path,kind,symbol,label,body,keywords,line_start,updated_at) "
-                    "VALUES (?,?,?,?,?,?,?,?,?)", node_rows)
+                    "(id,path,kind,symbol,fqn,signature,label,body,keywords,"
+                    "line_start,line_end,col_start,col_end,updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", node_rows)
                 self.conn.executemany(
                     "INSERT OR REPLACE INTO graph_edges (path,src,dst,relation,line) VALUES (?,?,?,?,?)",
                     [(path, e["src"], e["dst"], e["relation"], e.get("line")) for e in edges],
                 )
                 self.conn.executemany(
                     "INSERT OR REPLACE INTO pending_edges "
-                    "(path,src,dst_symbol,relation,line) VALUES (?,?,?,?,?)",
-                    [(path, p["src"], p["dst_symbol"], p["relation"], p.get("line")) for p in pending],
+                    "(path,src,dst_symbol,relation,line,language,call_kind,receiver,"
+                    "import_source,resolution_state) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    [(path, p["src"], p["dst_symbol"], p["relation"], p.get("line"),
+                      p.get("language", ""), p.get("call_kind", "UNKNOWN"),
+                      p.get("receiver"), p.get("import_source"),
+                      p.get("resolution_state", "UNRESOLVED")) for p in pending],
                 )
                 sha = self._record_value(record, "sha256")
                 size = self._record_value(record, "size")
@@ -244,7 +339,7 @@ class Database:
                     "mtime_ms=excluded.mtime_ms,generation=generation+1,reconciled_at=excluded.reconciled_at",
                     (path, sha, size, mtime_ms, now),
                 )
-        return len(ordered)
+        return {"committed": len(ordered) - len(conflicts), "conflicts": conflicts}
 
     def commit_file(self, path: str, sha256: str, size: int, mtime_ms: int,
                     nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]],
@@ -253,69 +348,141 @@ class Database:
                                  "mtime_ms": mtime_ms, "nodes": nodes,
                                  "edges": edges, "pending": pending}])
 
-    def resolve_all_pending_edges(self) -> int:
-        """Promote all pending edges whose destination symbol is now indexed."""
+    def _resolve_pending_edges_pass(
+        self,
+        row_filter=None,
+    ) -> Dict[str, int]:
+        """Binding-aware pending-edge resolution.
+
+        Resolution precedence (audit contract — never ``ORDER BY id LIMIT 1``):
+        explicit import module -> module-qualified candidate -> unique symbol
+        candidate -> ambiguous candidate set (kept, never arbitrarily attached)
+        -> unresolved. Pending rows whose import source is a non-project
+        module are pruned as EXTERNAL; unshadowed bare builtins never reach
+        this table at all (pruned at extraction time).
+        """
+        from sot_graph.modutil import normalize_import, project_module_names
+
+        project_names = project_module_names(self.all_journal_paths())
+
+        symbol_index: Dict[str, List[Tuple[str, str]]] = {}
+        for node_id, node_path, symbol in self.conn.execute(
+            "SELECT id, path, symbol FROM graph_nodes WHERE symbol IS NOT NULL"
+        ):
+            symbol_index.setdefault(symbol, []).append((node_id, node_path))
+
+        file_nodes: List[Tuple[str, str]] = [
+            (row[0], row[1]) for row in self.conn.execute(
+                "SELECT id, path FROM graph_nodes WHERE kind = 'file'"
+            )
+        ]
+
+        rows = self.conn.execute(
+            "SELECT rowid, path, src, dst_symbol, relation, line, import_source "
+            "FROM pending_edges"
+        ).fetchall()
+
+        module_cache: Dict[str, Set[str]] = {}
+
+        def path_module_names(path: str) -> Set[str]:
+            names = module_cache.get(path)
+            if names is None:
+                names = project_module_names([path])
+                module_cache[path] = names
+            return names
+
+        promoted = external = ambiguous = unresolved = 0
+        edge_rows: List[Tuple[str, str, str, str, Optional[int]]] = []
+        promote_deletes: List[int] = []
+        external_deletes: List[int] = []
+        ambiguous_updates: List[int] = []
+
+        for rowid, path, src, dst_symbol, relation, line, import_source in rows:
+            if row_filter is not None and not row_filter(path, dst_symbol):
+                continue
+            imp = normalize_import(import_source)
+            if imp and imp not in project_names:
+                external_deletes.append(rowid)
+                external += 1
+                continue
+            candidates = symbol_index.get(dst_symbol, [])
+            chosen: Optional[Tuple[str, str]] = None
+            if imp:
+                matched = [
+                    (node_id, node_path) for node_id, node_path in candidates
+                    if imp in path_module_names(node_path)
+                ]
+                if len(matched) == 1:
+                    chosen = matched[0]
+                elif len(matched) > 1:
+                    ambiguous_updates.append(rowid)
+                    ambiguous += 1
+                    continue
+            if chosen is None and len(candidates) == 1:
+                chosen = candidates[0]
+            if chosen is None and relation == "imports" and imp:
+                # Project imports resolve to the file node of that module.
+                file_matches = [
+                    (node_id, node_path) for node_id, node_path in file_nodes
+                    if imp in path_module_names(node_path)
+                ]
+                if len(file_matches) == 1:
+                    chosen = file_matches[0]
+            if chosen is None:
+                if len(candidates) > 1:
+                    ambiguous_updates.append(rowid)
+                    ambiguous += 1
+                else:
+                    unresolved += 1
+                continue
+            edge_rows.append((path, src, chosen[0], relation, line))
+            promote_deletes.append(rowid)
+            promoted += 1
+
         with self.conn:
-            count = self.conn.execute(
-                "SELECT COUNT(*) FROM pending_edges p WHERE EXISTS "
-                "(SELECT 1 FROM graph_nodes n WHERE n.symbol = p.dst_symbol)"
-            ).fetchone()[0]
-            self.conn.execute(
-                "INSERT OR REPLACE INTO graph_edges(path,src,dst,relation,line) "
-                "SELECT p.path,p.src,(SELECT n.id FROM graph_nodes n "
-                "WHERE n.symbol=p.dst_symbol ORDER BY n.id LIMIT 1),p.relation,p.line "
-                "FROM pending_edges p WHERE EXISTS "
-                "(SELECT 1 FROM graph_nodes n WHERE n.symbol=p.dst_symbol)"
-            )
-            self.conn.execute(
-                "DELETE FROM pending_edges WHERE EXISTS "
-                "(SELECT 1 FROM graph_nodes n WHERE n.symbol=pending_edges.dst_symbol)"
-            )
-        return int(count)
+            if edge_rows:
+                self.conn.executemany(
+                    "INSERT OR REPLACE INTO graph_edges(path,src,dst,relation,line) "
+                    "VALUES (?,?,?,?,?)", edge_rows)
+            if promote_deletes:
+                self.conn.executemany(
+                    "DELETE FROM pending_edges WHERE rowid = ?",
+                    [(rid,) for rid in promote_deletes])
+            if external_deletes:
+                self.conn.executemany(
+                    "DELETE FROM pending_edges WHERE rowid = ?",
+                    [(rid,) for rid in external_deletes])
+            if ambiguous_updates:
+                self.conn.executemany(
+                    "UPDATE pending_edges SET resolution_state = 'AMBIGUOUS' "
+                    "WHERE rowid = ?", [(rid,) for rid in ambiguous_updates])
+
+        return {
+            "promoted": promoted,
+            "external": external,
+            "ambiguous": ambiguous,
+            "unresolved": unresolved,
+        }
+
+    def resolve_all_pending_edges(self) -> int:
+        """Promote resolvable pending edges; prune external imports.
+
+        Returns the number of edges promoted to ``graph_edges``.
+        """
+        return self._resolve_pending_edges_pass()["promoted"]
 
     def resolve_pending_edges(self, new_symbols: List[str], current_file_path: Optional[str] = None) -> int:
-        # Keep the old API's filtering semantics while using the all-pending set operation.
+        """Legacy v1 API: resolve only rows matching the new symbols or path."""
         if not new_symbols and not current_file_path:
             return 0
-        if new_symbols:
-            placeholders = ",".join("?" for _ in new_symbols)
-            with self.conn:
-                count = self.conn.execute(
-                    f"SELECT COUNT(*) FROM pending_edges p WHERE p.dst_symbol IN ({placeholders}) "
-                    "AND EXISTS (SELECT 1 FROM graph_nodes n WHERE n.symbol=p.dst_symbol)", new_symbols
-                ).fetchone()[0]
-                self.conn.execute(
-                    f"INSERT OR REPLACE INTO graph_edges(path,src,dst,relation,line) "
-                    f"SELECT p.path,p.src,(SELECT n.id FROM graph_nodes n WHERE n.symbol=p.dst_symbol "
-                    f"ORDER BY n.id LIMIT 1),p.relation,p.line FROM pending_edges p "
-                    f"WHERE p.dst_symbol IN ({placeholders}) AND EXISTS "
-                    f"(SELECT 1 FROM graph_nodes n WHERE n.symbol=p.dst_symbol)", new_symbols
-                )
-                self.conn.execute(
-                    f"DELETE FROM pending_edges WHERE dst_symbol IN ({placeholders}) AND EXISTS "
-                    f"(SELECT 1 FROM graph_nodes n WHERE n.symbol=pending_edges.dst_symbol)", new_symbols
-                )
-            resolved = int(count)
-        else:
-            resolved = 0
-        if current_file_path:
-            with self.conn:
-                count = self.conn.execute(
-                    "SELECT COUNT(*) FROM pending_edges p WHERE p.path=? AND EXISTS "
-                    "(SELECT 1 FROM graph_nodes n WHERE n.symbol=p.dst_symbol)", (current_file_path,)
-                ).fetchone()[0]
-                self.conn.execute(
-                    "INSERT OR REPLACE INTO graph_edges(path,src,dst,relation,line) "
-                    "SELECT p.path,p.src,(SELECT n.id FROM graph_nodes n WHERE n.symbol=p.dst_symbol "
-                    "ORDER BY n.id LIMIT 1),p.relation,p.line FROM pending_edges p WHERE p.path=? AND EXISTS "
-                    "(SELECT 1 FROM graph_nodes n WHERE n.symbol=p.dst_symbol)", (current_file_path,)
-                )
-                self.conn.execute(
-                    "DELETE FROM pending_edges WHERE path=? AND EXISTS "
-                    "(SELECT 1 FROM graph_nodes n WHERE n.symbol=pending_edges.dst_symbol)", (current_file_path,)
-                )
-            resolved += int(count)
-        return resolved
+        wanted = set(new_symbols)
+
+        def row_filter(path: str, dst_symbol: str) -> bool:
+            if wanted and dst_symbol in wanted:
+                return True
+            return bool(current_file_path) and path == current_file_path
+
+        return self._resolve_pending_edges_pass(row_filter=row_filter)["promoted"]
 
     def _path_inside(self, path: str, root_dir: str) -> bool:
         try:
@@ -517,7 +684,7 @@ class Database:
         if not clean_q or limit <= 0:
             return []
         tokens = [f'"{t}"*' for t in clean_q.split() if len(t) >= 2] or [f'"{t}"' for t in clean_q.split()]
-        sql = "SELECT k.id,k.path,k.kind,k.symbol,k.label,k.body,k.keywords,k.line_start,bm25(graph_fts) " \
+        sql = "SELECT k.id,k.path,k.kind,k.symbol,k.fqn,k.label,k.body,k.keywords,k.line_start,bm25(graph_fts) " \
               "FROM graph_fts f JOIN graph_nodes k ON f.rowid=k.rowid WHERE graph_fts MATCH ?"
         params: List[Any] = [" OR ".join(tokens)]
         if scope:
@@ -525,8 +692,8 @@ class Database:
             params.extend([f"%{scope}%", f"%{scope}%"])
         sql += " ORDER BY bm25(graph_fts) ASC LIMIT ?"
         params.append(limit * 3)
-        return [{"id": r[0], "path": r[1], "kind": r[2], "symbol": r[3], "label": r[4],
-                 "body": r[5], "keywords": r[6], "line_start": r[7], "score": abs(r[8])}
+        return [{"id": r[0], "path": r[1], "kind": r[2], "symbol": r[3], "fqn": r[4],
+                 "label": r[5], "body": r[6], "keywords": r[7], "line_start": r[8], "score": abs(r[9])}
                 for r in self.conn.execute(sql, params).fetchall()]
 
     def explore_node(self, node_id: str, depth: int = 1, limit: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -573,13 +740,17 @@ class Database:
             "(SELECT COUNT(*) FROM file_journal), "
             "(SELECT COUNT(*) FROM graph_nodes), "
             "(SELECT COUNT(*) FROM graph_edges), "
-            "(SELECT COUNT(*) FROM pending_edges)"
+            "(SELECT COUNT(*) FROM pending_edges), "
+            "(SELECT COUNT(*) FROM pending_edges WHERE resolution_state = 'AMBIGUOUS'), "
+            "(SELECT COUNT(*) FROM pending_edges WHERE resolution_state = 'UNRESOLVED')"
         ).fetchone()
         return {
             "paths": int(row[0]),
             "nodes": int(row[1]),
             "edges": int(row[2]),
             "pending": int(row[3]),
+            "pending_ambiguous": int(row[4]),
+            "pending_unresolved": int(row[5]),
         }
 
     def save_communities(self, communities_data: List[Dict[str, Any]]) -> None:
