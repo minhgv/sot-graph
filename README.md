@@ -9,6 +9,7 @@
 [![Tests: 31 passed](https://img.shields.io/badge/Tests-31%2F31%20Passed-brightgreen.svg)](tests/)
 [![Architecture: Zero--Daemon](https://img.shields.io/badge/Architecture-Zero--Daemon-purple.svg)](#-architecture-overview)
 [![Q&A Guide: 19 Scenarios](https://img.shields.io/badge/Q%26A%20Guide-19%20Scenarios%20Docs-blueviolet.svg)](docs/QA_GUIDE.md)
+[![AI SDLC Guide](https://img.shields.io/badge/AI%20SDLC%20Guide-6%20Phases-success.svg)](docs/AI_SDLC_GUIDE.md)
 
 ---
 
@@ -65,7 +66,8 @@ When an agent searches the knowledge base via `sot search "<query>"`, every cand
 
 To explore all real-world usage scenarios, edge cases, self-healing mechanics, and graph algorithms:
 
-- 📖 **[Đọc Hướng Dẫn Hỏi Đáp Đầy Đủ Trên GitHub (docs/QA_GUIDE.md)](docs/QA_GUIDE.md)** (Hỗ trợ đọc trực tiếp với các mục Accordion mở rộng).
+- 📖 **[Đọc Hướng Dẫn Hỏi Đáp Đầy Đủ Trên GitHub (docs/QA_GUIDE.md)](docs/QA_GUIDE.md)** (19 kịch bản chi tiết với Accordion đóng/mở).
+- 🚀 **[Cẩm Nang Ứng Dụng Trong 6 Giai Đoạn AI SDLC (docs/AI_SDLC_GUIDE.md)](docs/AI_SDLC_GUIDE.md)** (Phân tích chi tiết Cold Start, Blast Radius, CI/CD Gate, ADR).
 - ⚡ **[Xem Bản HTML Tương Tác Trực Tuyến (HTMLPreview)](https://htmlpreview.github.io/?https://github.com/minhgv/sot-graph/blob/main/sot_qa_guide.html)** (Tìm kiếm thời gian thực, lọc danh mục & copy code 1-click).
 - 💻 **Xem Offline Trên Trình Duyệt Cá Nhân**:
   ```bash
