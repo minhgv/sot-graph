@@ -1,0 +1,40 @@
+{
+  "tools": [
+    {
+      "name": "sot_search",
+      "description": "Search verified Source-of-Truth knowledge graph with Trust Verdicts ([STRONG], [WEAK], [REBUILT]) to locate existing code and prevent rebuilding duplicate work.",
+      "command": "sot search \"{query}\" -n {limit} --scope \"{scope}\" --json",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Search query or symbol name" },
+          "limit": { "type": "integer", "default": 6, "description": "Max results" },
+          "scope": { "type": "string", "default": "", "description": "Filter by directory or file path" }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "sot_explore",
+      "description": "Explore cross-file dependencies, callers, and callees for any AST function, class, or symbol.",
+      "command": "sot explore \"{target}\" --depth {depth}",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": { "type": "string", "description": "Function or class name" },
+          "depth": { "type": "integer", "default": 2, "description": "Traversal depth" }
+        },
+        "required": ["target"]
+      }
+    },
+    {
+      "name": "sot_reconcile",
+      "description": "Idempotently synchronize the knowledge graph with disk files. Call after heavy edits.",
+      "command": "sot reconcile",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# sot — executable launcher for sot-graph CLI
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${BASH_SOURCE[0]}")")" && pwd -P)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+
+export PYTHONPATH="$REPO_ROOT/src:$REPO_ROOT/vendor:${PYTHONPATH:-}"
+exec python3 -m sot_graph.cli "$@"
