@@ -48,6 +48,19 @@ def _append_claude_rules(claude_md_path: Path) -> None:
         claude_md_path.write_text(f"{content.rstrip()}\n\n{CLAUDE_SECTION}\n", encoding="utf-8")
 
 
+def _append_agents_rules(agents_md_path: Path) -> None:
+    """Append SOT-Graph protocol to AGENTS.md in workspace root."""
+    template_file = Path(__file__).parent / "AGENTS.md"
+    protocol_text = template_file.read_text(encoding="utf-8") if template_file.exists() else CLAUDE_SECTION
+    if not agents_md_path.exists():
+        agents_md_path.parent.mkdir(parents=True, exist_ok=True)
+        agents_md_path.write_text(f"# Agent Rules & Protocols\n\n{protocol_text}\n", encoding="utf-8")
+        return
+
+    content = agents_md_path.read_text(encoding="utf-8")
+    if "SOT-Graph Knowledge Reuse Protocol" not in content:
+        agents_md_path.write_text(f"{content.rstrip()}\n\n{protocol_text}\n", encoding="utf-8")
+
 def setup_claude(root: Path, global_install: bool = True, workspace_install: bool = True) -> list[str]:
     """Configure Claude Code and Cursor harness at workspace and/or global levels."""
     installed = []
@@ -69,6 +82,11 @@ def setup_claude(root: Path, global_install: bool = True, workspace_install: boo
         claude_md = root / ".claude" / "CLAUDE.md"
         _append_claude_rules(claude_md)
         installed.append(str(claude_md))
+
+        # 4. AGENTS.md (Root workspace agent instructions)
+        agents_md = root / "AGENTS.md"
+        _append_agents_rules(agents_md)
+        installed.append(str(agents_md))
 
     # Global level
     if global_install:
