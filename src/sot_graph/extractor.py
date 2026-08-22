@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from sot_graph.db import Database
-from sot_graph.modutil import dotted_module, normalize_import
+from sot_graph.modutil import dotted_module, normalize_import, resolve_relative
 
 # Suffix to extractor mapping
 EXT_DISPATCH = {
@@ -186,6 +186,25 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
         })
 
     # Intra-file vs Cross-file edges
+    is_package = p.name == "__init__.py"
+
+    def _pending_import_source(raw_imp, fallback=None):
+        """Absolutize relative imports ('.hooks' from pkg_a -> 'pkg_a.hooks')
+        so the resolver can match the exact package instead of every file
+        whose path ends in the same bare module name. The fallback (bound
+        name) is applied only by the imports branch, matching v1 semantics.
+        """
+        value = raw_imp if raw_imp else (fallback or "")
+        if re.match(r"^\.(?:\w|$)", value):
+            resolved = resolve_relative(value, module, is_package)
+            if not resolved:
+                return None
+            if not value.strip("."):
+                # 'from . import name': the bound name is itself the module.
+                resolved = f"{resolved}.{fallback}" if fallback else resolved
+            return resolved
+        return normalize_import(value) or None
+
     for re_edge in raw_edges:
         src_raw = re_edge.get("source")
         dst_raw = re_edge.get("target")
@@ -241,7 +260,9 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
                 "language": lang,
                 "call_kind": call_kind,
                 "receiver": re_edge.get("receiver"),
-                "import_source": normalize_import(re_edge.get("import_source")) or None,
+                "import_source": _pending_import_source(
+                    re_edge.get("import_source")
+                ),
             })
         elif rel == "imports":
             # Import targets are self-describing module paths: the module is
@@ -254,9 +275,9 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
                 "language": lang,
                 "call_kind": "QUALIFIED" if "." in dst_raw else "BARE",
                 "receiver": None,
-                "import_source": normalize_import(
-                    re_edge.get("import_source") or dst_raw
-                ) or None,
+                "import_source": _pending_import_source(
+                    re_edge.get("import_source"), dst_raw
+                ),
             })
         else:
             # 'extends' and other relations: legitimate project candidates
@@ -269,7 +290,9 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
                 "language": lang,
                 "call_kind": "UNKNOWN",
                 "receiver": None,
-                "import_source": normalize_import(re_edge.get("import_source")) or None,
+                "import_source": _pending_import_source(
+                    re_edge.get("import_source")
+                ),
             })
 
     return {

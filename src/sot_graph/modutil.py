@@ -16,6 +16,7 @@ __all__ = [
     "module_candidates",
     "normalize_import",
     "project_module_names",
+    "resolve_relative",
 ]
 
 # Common layout prefixes that are not importable package names.
@@ -72,6 +73,40 @@ def normalize_import(import_source: str | None) -> str:
     if not import_source:
         return ""
     return import_source.lstrip(".").strip()
+
+
+def resolve_relative(import_source: str | None, file_module: str, is_package: bool) -> str:
+    """Absolutize a relative import against the declaring file's module.
+
+    ``'.hooks'`` declared in package ``pkg_a`` (its ``__init__.py``) resolves
+    to ``'pkg_a.hooks'``; the same import in a plain module ``pkg_a.mod``
+    also resolves to ``'pkg_a.hooks'``. Absolute inputs are returned as-is so
+    callers can apply one code path. Returns ``''`` when the import climbs
+    past the project root (unresolvable).
+
+    ``file_module`` must come from :func:`dotted_module`; ``is_package`` is
+    True for ``__init__.py`` files, whose module already *is* the package.
+    """
+    if not import_source or not import_source.startswith("."):
+        return import_source or ""
+    level = len(import_source) - len(import_source.lstrip("."))
+    mod = import_source[level:].strip()
+    parts = [p for p in file_module.split(".") if p]
+    had_package = bool(parts)
+    if not is_package:
+        parts = parts[:-1]
+    for _ in range(level - 1):
+        if parts:
+            parts = parts[:-1]
+    base = ".".join(parts)
+    if not base:
+        # A non-empty file module that stripped to nothing climbed past the
+        # project root; an empty one means the repo root is itself a package
+        # and the bare module name is the absolute name.
+        return mod if not had_package else ""
+    if mod:
+        return f"{base}.{mod}"
+    return base
 
 
 def project_module_names(paths: Iterable[str]) -> Set[str]:

@@ -29,7 +29,13 @@ def _collect_import_map(tree: ast.AST) -> Dict[str, str]:
             for alias in stmt.names:
                 if alias.name == "*":
                     continue
-                import_map.setdefault(alias.asname or alias.name, module)
+                if not stmt.module and stmt.level:
+                    # 'from . import name': each binding is itself a submodule
+                    # of the current package, not the package root.
+                    binding_module = module + alias.name
+                else:
+                    binding_module = module
+                import_map.setdefault(alias.asname or alias.name, binding_module)
     return import_map
 
 
@@ -241,6 +247,21 @@ def extract_python(path: Path) -> Dict[str, Any]:
                         continue
                     callee = child.func.id
                 elif isinstance(child.func, ast.Attribute):
+                    attr_recv = child.func.value
+                    # super().x() dispatches to the *parent* class's method;
+                    # without inheritance resolution any target we pick would
+                    # be a guess (and x == own name degenerates to a self-loop).
+                    if (isinstance(attr_recv, ast.Call)
+                            and isinstance(attr_recv.func, ast.Name)
+                            and attr_recv.func.id == "super"):
+                        continue
+                    # A chained receiver ('user.sudo().write()' inside
+                    # 'write') targets another object; qualifying it to the
+                    # enclosing method fabricates a self-loop edge.
+                    if (child.func.attr == node.name
+                            and not (isinstance(attr_recv, ast.Name)
+                                     and attr_recv.id in ("self", "cls"))):
+                        continue
                     callee = child.func.attr
                 if callee is None:
                     continue
