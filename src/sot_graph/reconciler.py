@@ -258,6 +258,8 @@ class Reconciler:
         disk_paths = self.scan(paths)
         jobs: List[ParseJob] = []
         failures = 0
+        all_journals = getattr(self.db, "get_all_file_journals", None)
+        journal_cache = all_journals() if callable(all_journals) else {}
         for path in disk_paths:
             try:
                 stat = os.stat(path)
@@ -266,7 +268,7 @@ class Reconciler:
                 continue
             size = int(stat.st_size)
             mtime_ms = int(stat.st_mtime * 1000)
-            prior = self.db.get_file_journal(path)
+            prior = journal_cache.get(path) if journal_cache else self.db.get_file_journal(path)
             if prior and prior.get("size") == size and prior.get("mtime_ms") == mtime_ms:
                 # Hash verification preserves v1 behavior for edits that retain
                 # both size and mtime.
@@ -278,7 +280,6 @@ class Reconciler:
                     continue
             jobs.append(ParseJob(path, self.root_dir, size, mtime_ms))
         return jobs, set(disk_paths), failures
-
 
 
     def _commit_batch(self, records: Sequence[ParseResult]) -> None:
@@ -462,7 +463,7 @@ class Reconciler:
             use_pool = workers > 1 and len(jobs) > 1
             if use_pool:
                 executor = ProcessPoolExecutor(
-                    max_workers=workers,
+                    max_workers=min(workers, len(jobs)),
                     initializer=_worker_sigint_ignore,
                 )
             for window_index, window in enumerate(windows):

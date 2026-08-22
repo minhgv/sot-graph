@@ -55,6 +55,20 @@ class TestMcpService(unittest.TestCase):
         self.assertEqual(len(drift_report["drift"]), 0)
         self.assertFalse(drift_report["truncated"])
 
+    def test_mcp_service_architecture_report(self):
+        report = self.service.get_architecture_report()
+        self.assertIn("report_markdown", report)
+        self.assertIn("metrics", report)
+        self.assertIn("communities", report)
+        self.assertIn("god_nodes", report)
+        self.assertIn("# Architectural Knowledge Graph Report", report["report_markdown"])
+
+    def test_mcp_service_communities(self):
+        comm_res = self.service.get_communities()
+        self.assertIn("communities", comm_res)
+        self.assertIn("community_count", comm_res)
+        self.assertGreaterEqual(comm_res["community_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

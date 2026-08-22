@@ -4,6 +4,7 @@ sot_graph.db — SQLite schema and storage for the Source-of-Truth Knowledge Gra
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sqlite3
@@ -12,7 +13,6 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 from urllib.parse import quote
-
 
 
 SCHEMA = """
@@ -56,6 +56,15 @@ CREATE TRIGGER IF NOT EXISTS trg_nodes_au AFTER UPDATE ON graph_nodes BEGIN
     INSERT INTO graph_fts(rowid, label, body, keywords)
     VALUES (new.rowid, new.label, new.body, new.keywords);
 END;
+CREATE TABLE IF NOT EXISTS graph_communities (
+    community_id INTEGER PRIMARY KEY,
+    label TEXT NOT NULL,
+    cohesion_score REAL DEFAULT 0.0,
+    node_count INTEGER DEFAULT 0,
+    nodes_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_edges_relation ON graph_edges(relation);
 """
 
 
@@ -143,6 +152,21 @@ class Database:
             return None
         return {"sha256": row[0], "size": row[1], "mtime_ms": row[2],
                 "generation": row[3], "reconciled_at": row[4]}
+
+    def get_all_file_journals(self) -> Dict[str, Dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT path, sha256, size, mtime_ms, generation, reconciled_at FROM file_journal"
+        ).fetchall()
+        return {
+            r[0]: {
+                "sha256": r[1],
+                "size": r[2],
+                "mtime_ms": r[3],
+                "generation": r[4],
+                "reconciled_at": r[5],
+            }
+            for r in rows
+        }
 
     def all_journal_paths(self) -> List[str]:
         return [r[0] for r in self.conn.execute("SELECT path FROM file_journal ORDER BY path")]
@@ -333,38 +357,55 @@ class Database:
             }
             return CleanPlan("reset", tuple(), counts, tuple(errors), include_notes)
 
-        if stale:
-            placeholders = ",".join("?" for _ in stale)
-            path_clause = f" IN ({placeholders})"
-            path_params: List[Any] = list(stale)
-        else:
-            path_clause = " IN (NULL)"
-            path_params = []
-        counts = {
-            "paths": len(stale),
-            "nodes": int(self.conn.execute(
-                f"SELECT COUNT(*) FROM graph_nodes WHERE path{path_clause} "
-                "AND NOT (kind='note' OR id LIKE 'note:%')", path_params
-            ).fetchone()[0]),
-            # Notes are intentionally preserved by stale cleanup.
-            "notes": 0,
-        }
+        batch_size = 500
+        stale_nodes = 0
+        for i in range(0, len(stale), batch_size):
+            chunk = stale[i:i + batch_size]
+            placeholders = ",".join("?" for _ in chunk)
+            stale_nodes += int(self.conn.execute(
+                f"SELECT COUNT(*) FROM graph_nodes WHERE path IN ({placeholders}) "
+                "AND NOT (kind='note' OR id LIKE 'note:%')", list(chunk)
+            ).fetchone()[0])
+
         edge_orphan = (
             "NOT EXISTS (SELECT 1 FROM graph_nodes n WHERE n.id=e.src) "
             "OR NOT EXISTS (SELECT 1 FROM graph_nodes n WHERE n.id=e.dst)"
         )
-        counts["edges"] = int(self.conn.execute(
-            f"SELECT COUNT(*) FROM graph_edges e WHERE e.path{path_clause} OR {edge_orphan}",
-            path_params,
+        orphan_edges = int(self.conn.execute(
+            f"SELECT COUNT(*) FROM graph_edges e WHERE {edge_orphan}"
         ).fetchone()[0])
+        stale_edges = 0
+        for i in range(0, len(stale), batch_size):
+            chunk = stale[i:i + batch_size]
+            placeholders = ",".join("?" for _ in chunk)
+            stale_edges += int(self.conn.execute(
+                f"SELECT COUNT(*) FROM graph_edges e WHERE e.path IN ({placeholders}) AND NOT ({edge_orphan})",
+                list(chunk)
+            ).fetchone()[0])
+
         pending_orphan = (
             "NOT EXISTS (SELECT 1 FROM graph_nodes n WHERE n.id=p.src) "
             "OR NOT EXISTS (SELECT 1 FROM file_journal j WHERE j.path=p.path)"
         )
-        counts["pending"] = int(self.conn.execute(
-            f"SELECT COUNT(*) FROM pending_edges p WHERE p.path{path_clause} OR {pending_orphan}",
-            path_params,
+        orphan_pending = int(self.conn.execute(
+            f"SELECT COUNT(*) FROM pending_edges p WHERE {pending_orphan}"
         ).fetchone()[0])
+        stale_pending = 0
+        for i in range(0, len(stale), batch_size):
+            chunk = stale[i:i + batch_size]
+            placeholders = ",".join("?" for _ in chunk)
+            stale_pending += int(self.conn.execute(
+                f"SELECT COUNT(*) FROM pending_edges p WHERE p.path IN ({placeholders}) AND NOT ({pending_orphan})",
+                list(chunk)
+            ).fetchone()[0])
+
+        counts = {
+            "paths": len(stale),
+            "nodes": stale_nodes,
+            "edges": orphan_edges + stale_edges,
+            "pending": orphan_pending + stale_pending,
+            "notes": 0,
+        }
         return CleanPlan("stale", tuple(sorted(stale)), counts, tuple(errors), False)
 
     def apply_clean(self, plan: CleanPlan) -> Dict[str, int]:
@@ -494,45 +535,114 @@ class Database:
         visited: Set[str] = set()
         result: List[Dict[str, Any]] = []
         queue: List[Tuple[str, int]] = [(node_id, 0)]
+        sql = (
+            "SELECT 'outward' AS dir, e.relation, n.id, n.label, n.path, n.line_start, n.kind "
+            "FROM graph_edges e JOIN graph_nodes n ON e.dst=n.id WHERE e.src=? "
+            "UNION ALL "
+            "SELECT 'inward' AS dir, e.relation, n.id, n.label, n.path, n.line_start, n.kind "
+            "FROM graph_edges e JOIN graph_nodes n ON e.src=n.id WHERE e.dst=? "
+            "ORDER BY dir DESC, n.id"
+        )
         while queue and (limit is None or len(result) < limit):
             current, current_depth = queue.pop(0)
             if current in visited or current_depth > depth:
                 continue
             visited.add(current)
-            remaining = "" if limit is None else f" LIMIT {max(0, limit - len(result))}"
-            rows = self.conn.execute(
-                "SELECT e.relation,n.id,n.label,n.path,n.line_start,n.kind FROM graph_edges e "
-                "JOIN graph_nodes n ON e.dst=n.id WHERE e.src=? ORDER BY n.id" + remaining, (current,)
-            ).fetchall()
-            for rel, target, label, path, line, kind in rows:
-                result.append({"direction": "outward", "relation": rel, "target_id": target,
-                               "label": label, "path": path, "line": line, "kind": kind,
-                               "depth": current_depth + 1})
+            rows = self.conn.execute(sql, (current, current)).fetchall()
+            for direction, rel, target, label, path, line, kind in rows:
+                rel_label = rel if direction == "outward" else f"used_by ({rel})"
+                result.append({
+                    "direction": direction,
+                    "relation": rel_label,
+                    "target_id": target,
+                    "label": label,
+                    "path": path,
+                    "line": line,
+                    "kind": kind,
+                    "depth": current_depth + 1,
+                })
                 if target not in visited and current_depth + 1 <= depth:
                     queue.append((target, current_depth + 1))
-                if limit is not None and len(result) >= limit:
-                    break
-            if limit is not None and len(result) >= limit:
-                break
-            remaining = "" if limit is None else f" LIMIT {max(0, limit - len(result))}"
-            rows = self.conn.execute(
-                "SELECT e.relation,n.id,n.label,n.path,n.line_start,n.kind FROM graph_edges e "
-                "JOIN graph_nodes n ON e.src=n.id WHERE e.dst=? ORDER BY n.id" + remaining, (current,)
-            ).fetchall()
-            for rel, source, label, path, line, kind in rows:
-                result.append({"direction": "inward", "relation": f"used_by ({rel})", "target_id": source,
-                               "label": label, "path": path, "line": line, "kind": kind,
-                               "depth": current_depth + 1})
-                if source not in visited and current_depth + 1 <= depth:
-                    queue.append((source, current_depth + 1))
                 if limit is not None and len(result) >= limit:
                     break
         return result
 
     def stats(self) -> Dict[str, int]:
-        def count(sql: str) -> int:
-            return int(self.conn.execute(sql).fetchone()[0])
-        return {"paths": count("SELECT COUNT(*) FROM file_journal"),
-                "nodes": count("SELECT COUNT(*) FROM graph_nodes"),
-                "edges": count("SELECT COUNT(*) FROM graph_edges"),
-                "pending": count("SELECT COUNT(*) FROM pending_edges")}
+        row = self.conn.execute(
+            "SELECT "
+            "(SELECT COUNT(*) FROM file_journal), "
+            "(SELECT COUNT(*) FROM graph_nodes), "
+            "(SELECT COUNT(*) FROM graph_edges), "
+            "(SELECT COUNT(*) FROM pending_edges)"
+        ).fetchone()
+        return {
+            "paths": int(row[0]),
+            "nodes": int(row[1]),
+            "edges": int(row[2]),
+            "pending": int(row[3]),
+        }
+
+    def save_communities(self, communities_data: List[Dict[str, Any]]) -> None:
+        """Persist detected communities to SQLite."""
+        now = int(time.time())
+        with self.conn:
+            self.conn.execute("DELETE FROM graph_communities")
+            for c in communities_data:
+                nodes = c.get("nodes", [])
+                nodes_json = json.dumps(nodes) if not isinstance(nodes, str) else nodes
+                self.conn.execute(
+                    "INSERT INTO graph_communities (community_id, label, cohesion_score, node_count, nodes_json, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        int(c["community_id"]),
+                        str(c["label"]),
+                        float(c.get("cohesion_score", 0.0)),
+                        int(c.get("node_count", len(nodes))),
+                        nodes_json,
+                        now,
+                    ),
+                )
+
+    def get_communities(self) -> List[Dict[str, Any]]:
+        """Retrieve all stored communities."""
+        rows = self.conn.execute(
+            "SELECT community_id, label, cohesion_score, node_count, nodes_json, created_at "
+            "FROM graph_communities ORDER BY node_count DESC, community_id ASC"
+        ).fetchall()
+        result = []
+        for r in rows:
+            try:
+                nodes = json.loads(r[4])
+            except Exception:
+                nodes = []
+            result.append({
+                "community_id": r[0],
+                "label": r[1],
+                "cohesion_score": r[2],
+                "node_count": r[3],
+                "nodes": nodes,
+                "created_at": r[5],
+            })
+        return result
+
+    def get_community(self, community_id: int) -> Optional[Dict[str, Any]]:
+        """Retrieve a specific community by ID."""
+        row = self.conn.execute(
+            "SELECT community_id, label, cohesion_score, node_count, nodes_json, created_at "
+            "FROM graph_communities WHERE community_id = ?",
+            (community_id,),
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            nodes = json.loads(row[4])
+        except Exception:
+            nodes = []
+        return {
+            "community_id": row[0],
+            "label": row[1],
+            "cohesion_score": row[2],
+            "node_count": row[3],
+            "nodes": nodes,
+            "created_at": row[5],
+        }

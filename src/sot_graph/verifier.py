@@ -59,20 +59,23 @@ class TrustVerifier:
             return None
 
     @staticmethod
-    def find_rehome(project_root: str, basename: str) -> Optional[str]:
+    def find_rehome(project_root: str, basename: str, max_scanned_files: int = 10000) -> Optional[str]:
         """
         Scans project_root for a single unambiguous file with the given basename.
         Used to heal moved/renamed files automatically.
         """
         cands = []
+        scanned = 0
         for root, dirs, files in os.walk(project_root):
             dirs[:] = [d for d in dirs if d not in IGNORED_DIRS]
+            scanned += len(files)
             if basename in files:
                 cands.append(os.path.abspath(os.path.join(root, basename)))
                 if len(cands) > 1:
                     return None  # Ambiguous match, do not guess
+            if scanned >= max_scanned_files:
+                break
         return cands[0] if len(cands) == 1 else None
-
     @classmethod
     def verify_hit(
         cls,

@@ -133,8 +133,20 @@ chmod +x bin/sot
 
 # 6. View database statistics
 ./bin/sot doctor
-```
 
+# 7. Generate architectural markdown report (God nodes, surprising connections, communities)
+./bin/sot report -o GRAPH_REPORT.md
+
+# 8. Inspect detected modular communities and cohesion scores
+./bin/sot cluster
+
+# 9. Launch standalone interactive HTML graph visualizer
+./bin/sot viz -o graph.html --open
+
+# 10. Export graph to GraphRAG JSON, Obsidian Vault, or GraphML
+./bin/sot export --format graphrag -o graphrag.json
+./bin/sot export --format obsidian -o obsidian_vault/
+./bin/sot export --format graphml -o graph.graphml
 ---
 
 ## 🤖 Agent Harness Integrations
@@ -153,6 +165,18 @@ Include `src/sot_graph/adapters/opencode_tools.json` in your `.opencode.json` co
 Embed `src/sot_graph/adapters/AGENTS.md` into your workspace's `AGENTS.md` or `.cursorrules` to force the agent to consult existing code before generating redundant implementations.
 
 ---
+
+### 4. Model Context Protocol (MCP) Stdio Server
+`sot-graph` exposes 5 read-only tools and resources over stdio for Claude Desktop, Cursor, and IDEs:
+- `sot_search`: Trust-verified search with disk validation.
+- `sot_explore`: Bounded AST exploration and cross-file relations.
+- `sot_verify_drift`: Read-only drift audit between graph and disk.
+- `sot_architecture_report`: Complete architectural analysis with God Node detection.
+- `sot_communities`: Cluster detection with modularity and cohesion metrics.
+
+```bash
+./bin/sot mcp
+```
 
 ### Maintenance and parallel reconciliation
 
@@ -213,6 +237,44 @@ python3 -m benchmarks.bench_reconcile \
   --files 5000 --workers 1,2,4,8 --repeat 5 --json results.json
 python3 -m benchmarks.bench_query --files 5000 --repeat 5 --json query-results.json
 ```
+
+
+---
+
+## ⚖️ So Sánh Kiến Trúc: `sot-graph` vs `graphify` vs `gitnexus` (Architectural Comparison)
+
+| Tiêu chí / Capability | `sot-graph` (Dự án này) | `graphify` | `gitnexus` |
+| :--- | :--- | :--- | :--- |
+| **Mục tiêu cốt lõi (Core Purpose)** | Lớp tri thức **Single Source of Truth** tự chữa lành cho AI Coding Agents trong vòng lặp lập trình thực tế (*Active filesystem loop*). | Xây dựng đồ thị tri thức đa phương tiện sâu (Code, Docs, Papers) kèm báo cáo kiến trúc và phân tích suy luận ngữ nghĩa qua LLM. | Công cụ Code Intelligence & MCP client-side chạy trong trình duyệt / zero-server, lập bản đồ AST & Git repository. |
+| **Nguồn Chân Lý (Source of Truth)** | **Filesystem là chân lý tuyệt đối**. Mọi hint chỉ là gợi ý, dữ liệu luôn được xác minh đối chiếu trực tiếp từ đĩa trước khi trả về. | **Tệp đầu vào + Suy luận LLM**. Lấy snapshot cây thư mục tại thời điểm quét và lưu đồ thị JSON tĩnh. | **Git Repository + Tree-sitter AST**. Lập chỉ mục cây Git và các quan hệ cuộc gọi (*call graph*) trong bộ nhớ. |
+| **Cơ chế Chống Ảo Giác (Anti-Hallucination)** | **Trust Verdict Engine** (`[STRONG]`, `[WEAK]`, `[REBUILT]`, `[REMOVED]`): Kiểm tra vật lý file tồn tại và độ phủ token trên đĩa trước khi trả kết quả. | Phân loại liên kết minh bạch (`EXTRACTED` vs `INFERRED` vs `AMBIGUOUS`) kèm audit trail và cảnh báo token cost. | Dựa vào phân tích cú pháp tĩnh Tree-sitter; không có cơ chế đối soát độ phủ token hay kiểm tra thay đổi vật lý runtime. |
+| **Cơ chế Tự Chữa Lành (Self-Healing)** | **Tự động & Tức thì**: Tự nhận diện file bị di chuyển/đổi tên (`[REBUILT]`), tự động xóa các đường dẫn chết (`[REMOVED]`) và dọn dẹp quan hệ mồ côi. | **Không tự động**: Cần chạy lại `/graphify --update` hoặc tái tạo toàn bộ đồ thị tri thức khi codebase thay đổi. | **Theo phiên / Manual**: Đòi hỏi re-indexing lại kho mã nguồn khi có commit hoặc nhánh mới. |
+| **Engine Lưu trữ & Truy vấn (Storage & State)** | **SQLite WAL + FTS5 (BM25)**: Hỗ trợ giao dịch ACID, dirty tracking theo SHA-256 generation, độ trễ truy vấn sub-millisecond ($< 1.5\text{ms}$). | **JSON (`graph.json`) + Markdown Reports**: Không dùng DB quan hệ nhúng; lưu đồ thị dưới dạng tệp phẳng. | **In-memory / IndexedDB / WASM Browser Cache**: Dữ liệu lưu trong RAM trình duyệt hoặc tiến trình Node.js tạm thời. |
+| **Hiệu năng & Tài nguyên (Footprint)** | Cực kỳ nhẹ ($< 25\text{MB}$ RAM), **Zero external dependencies**, xử lý song song đa tiến trình (~$20\text{ms}$ / 100 files). | Tốn token LLM khi chạy chế độ `--mode deep`; thích hợp chạy định kỳ / tài liệu hóa thay vì chạy theo từng lệnh code. | Phụ thuộc runtime trình duyệt/Node.js và bộ nhớ RAM khi xử lý các kho mã nguồn lớn (*monorepo*). |
+| **Phân tích Cụm & God Nodes** | Tích hợp sẵn thuật toán **Louvain / Modularity ($Q$)**, Cohesion score, và **God Node Detection (2-hop blast radius)** không cần daemon ngoài. | Tích hợp thuật toán **Leiden / Louvain community detection**, chấm điểm Cohesion, và phát hiện các kết nối bất thường (*Surprising connections*). | Tập trung vào biểu diễn quan hệ kế thừa, import và call-chain trực quan; không tập trung vào phân tích cụm kiến trúc. |
+| **Trực quan hóa (Visualization)** | Trực quan hóa tương tác Standalone HTML D3.js v7 (*force-directed graph*) kèm bộ lọc cộng đồng và chi tiết nút/cạnh. | Trực quan hóa tương tác HTML D3.js + Hỗ trợ xuất Obsidian Canvas / Vault và GraphML. | Giao diện đồ họa Web UI hiện đại chạy trực tiếp trên trình duyệt (*client-side interactive map*). |
+| **Định dạng Xuất (Exports)** | **GraphRAG JSON**, **Obsidian Markdown Vault**, **GraphML XML**, và **Markdown Report**. | **GraphRAG JSON**, **Obsidian Markdown Vault**, **GRAPH_REPORT.md**. | Chủ yếu phục vụ MCP server và Web UI nội bộ. |
+| **Giao thức MCP (Model Context Protocol)** | **5 MCP Tools stdio** (`sot_search`, `sot_explore`, `sot_verify_drift`, `sot_architecture_report`, `sot_communities`). | Tích hợp qua cấu hình CLAUDE.md hoặc MCP server mở rộng. | **MCP-Native stdio/SSE server** với các công cụ tra cứu cấu trúc mã nguồn. |
+
+---
+
+### 📌 Khi Nào Nên Sử Dụng Công Cụ Nào? (Selection Guide)
+
+1. **Chọn `sot-graph` khi:**
+   - Bạn đang xây dựng hoặc sử dụng **AI Coding Agents (OMP, Claude Code, Cursor, Agy)** cần một lớp tri thức **cực nhanh, tự chữa lành, và không bao giờ bị lỗi đường dẫn chết (dead paths / phantom anchors)**.
+   - Cần một công cụ **Zero-Daemon, Zero-External-Dependencies** chạy bằng Python tiêu chuẩn + SQLite với độ trễ truy vấn sub-millisecond ($< 1.5\text{ms}$).
+   - Bạn muốn có đầy đủ từ tìm kiếm trust-verified, phân tích kiến trúc (God Nodes, Communities), đến xuất GraphRAG / Obsidian / HTML visualizer trong cùng một CLI duy nhất.
+
+2. **Chọn `graphify` khi:**
+   - Bạn cần phân tích **toàn diện một kho tài liệu hỗn hợp** (bao gồm cả mã nguồn, tài liệu Markdown/PDF, bài báo nghiên cứu, hình ảnh/video).
+   - Bạn muốn tận dụng **sức mạnh suy luận ngữ nghĩa của LLM** để trích xuất các liên kết tiềm ẩn (`INFERRED` edges) và tạo báo cáo kiểm toán chi phí token chi tiết.
+   - Bạn muốn tạo Obsidian Vault tri thức sâu để con người đọc và nghiên cứu tài liệu hệ thống.
+
+3. **Chọn `gitnexus` khi:**
+   - Bạn muốn **khảo sát nhanh kiến trúc mã nguồn ngay trên trình duyệt web** (Zero-Server Web App) chỉ bằng cách kéo thả file ZIP hoặc paste URL GitHub.
+   - Bạn cần một giao diện đồ họa web client-side trực quan để lập trình viên tự duyệt call-chains và cây quan hệ Git mà không cần cài đặt môi trường backend.
+
+---
 
 ## 🧪 Testing
 

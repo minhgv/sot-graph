@@ -63,6 +63,12 @@ def create_server(service: McpService) -> Any:
             types.Tool(name="sot_verify_drift", description="Read-only bounded filesystem drift audit.", inputSchema={
                 "type": "object", "properties": {"deep": {"type": "boolean"}, "limit": {"type": "integer", "minimum": 1}}, "additionalProperties": False,
             }),
+            types.Tool(name="sot_architecture_report", description="Read-only architectural analysis and markdown report generation.", inputSchema={
+                "type": "object", "properties": {"scope": {"type": "string"}, "min_size": {"type": "integer", "minimum": 1}, "sigma": {"type": "number", "minimum": 0.5}}, "additionalProperties": False,
+            }),
+            types.Tool(name="sot_communities", description="Read-only architectural community/cluster detection with cohesion scores.", inputSchema={
+                "type": "object", "properties": {"scope": {"type": "string"}, "min_size": {"type": "integer", "minimum": 1}}, "additionalProperties": False,
+            }),
         ]
 
     @server.call_tool()
@@ -75,12 +81,22 @@ def create_server(service: McpService) -> Any:
                 result = await service.aexplore(args.get("node_id", ""), depth=args.get("depth", 1), limit=args.get("limit", 100))
             elif name == "sot_verify_drift":
                 result = await service.averify_drift(deep=args.get("deep", False), limit=args.get("limit", 100))
+            elif name == "sot_architecture_report":
+                result = await service.aget_architecture_report(
+                    scope=args.get("scope"),
+                    min_community_size=args.get("min_size", 1),
+                    sigma=args.get("sigma", 1.5),
+                )
+            elif name == "sot_communities":
+                result = await service.aget_communities(
+                    scope=args.get("scope"),
+                    min_community_size=args.get("min_size", 1),
+                )
             else:
                 result = {"error": {"code": "unknown_tool", "message": "unknown MCP tool"}}
             return [types.TextContent(type="text", text=_json(result))]
         except Exception as exc:
             return [types.TextContent(type="text", text=_json(_error(exc)))]
-
     @server.list_resources()
     async def list_resources() -> list[Any]:
         return [types.Resource(uri="sot://stats", name="sot stats", description="Graph statistics", mimeType="application/json")]

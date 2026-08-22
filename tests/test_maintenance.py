@@ -123,6 +123,33 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(db.conn.execute("PRAGMA quick_check").fetchone()[0], "ok")
         db.close()
 
+    def test_clean_large_stale_path_count_chunks_safely(self) -> None:
+        db = self._database()
+        # Insert 1200 stale entries directly into DB (exceeds default SQLITE_MAX_VARIABLE_NUMBER in legacy sqlite)
+        now = int(time.time())
+        with db.conn:
+            for i in range(1200):
+                p = f"{self.root}/stale_file_{i}.py"
+                nid = f"file:stale_{i}"
+                db.conn.execute(
+                    "INSERT INTO file_journal VALUES (?,?,?,?,?,?)",
+                    (p, "hash", 10, now, 1, now),
+                )
+                db.conn.execute(
+                    "INSERT INTO graph_nodes (id,path,kind,symbol,label,body,keywords,line_start,updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?)",
+                    (nid, p, "file", f"stale_{i}", f"Stale {i}", "body", "stale", 1, now),
+                )
+        plan = db.plan_clean(str(self.root))
+        self.assertEqual(plan.counts["paths"], 1200)
+        self.assertEqual(plan.counts["nodes"], 1200)
+        deleted = db.apply_clean(plan)
+        self.assertEqual(deleted["paths"], 1200)
+        self.assertEqual(deleted["nodes"], 1200)
+        self.assertEqual(db.stats()["paths"], 0)
+        self.assertEqual(db.stats()["nodes"], 0)
+        db.close()
+
 
 if __name__ == "__main__":
     unittest.main()

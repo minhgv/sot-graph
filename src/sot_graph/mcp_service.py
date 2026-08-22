@@ -224,19 +224,35 @@ class McpService:
             relations: List[Dict[str, Any]] = []
             visited = {row["id"]}
             queue = [(row["id"], 0)]
+            sql = (
+                "SELECT 'outward' AS dir, e.relation, n.id, n.label, n.path, n.line_start, n.kind "
+                "FROM graph_edges e JOIN graph_nodes n ON e.dst=n.id WHERE e.src=? "
+                "UNION ALL "
+                "SELECT 'inward' AS dir, e.relation, n.id, n.label, n.path, n.line_start, n.kind "
+                "FROM graph_edges e JOIN graph_nodes n ON e.src=n.id WHERE e.dst=? "
+                "ORDER BY dir DESC, n.id"
+            )
             while queue and len(relations) < limit:
                 current, current_depth = queue.pop(0)
                 if current_depth >= depth:
                     continue
-                for direction, sql in (("outward", "SELECT e.relation,n.id,n.label,n.path,n.line_start,n.kind FROM graph_edges e JOIN graph_nodes n ON e.dst=n.id WHERE e.src=?"), ("inward", "SELECT e.relation,n.id,n.label,n.path,n.line_start,n.kind FROM graph_edges e JOIN graph_nodes n ON e.src=n.id WHERE e.dst=?")):
-                    for rel, target, label, path, line, kind in conn.execute(sql, (current,)).fetchall():
-                        if len(relations) >= limit:
-                            break
-                        item = {"direction": direction, "relation": rel if direction == "outward" else f"used_by ({rel})", "target_id": target, "label": label, "path": self._relative_path(path), "line": line, "kind": kind, "depth": current_depth + 1}
-                        relations.append(item)
-                        if target not in visited:
-                            visited.add(target)
-                            queue.append((target, current_depth + 1))
+                for direction, rel, target, label, path, line, kind in conn.execute(sql, (current, current)).fetchall():
+                    if len(relations) >= limit:
+                        break
+                    item = {
+                        "direction": direction,
+                        "relation": rel if direction == "outward" else f"used_by ({rel})",
+                        "target_id": target,
+                        "label": label,
+                        "path": self._relative_path(path),
+                        "line": line,
+                        "kind": kind,
+                        "depth": current_depth + 1,
+                    }
+                    relations.append(item)
+                    if target not in visited:
+                        visited.add(target)
+                        queue.append((target, current_depth + 1))
             return self._fits_response({"node": node, "relations": relations, "truncated": len(relations) >= limit})
 
         return self._run(op)
@@ -293,6 +309,108 @@ class McpService:
             return {key: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]) for key, table in counts.items()}
         return self._run(op)
 
+    def get_architecture_report(
+        self,
+        *,
+        scope: Optional[str] = None,
+        min_community_size: int = 1,
+        sigma: float = 1.5,
+        format: str = "markdown",
+    ) -> Dict[str, Any]:
+        from sot_graph.analytics.graph import AnalyticsGraph
+        from sot_graph.analytics.diagnostics import analyze_graph
+        from sot_graph.analytics.report import generate_markdown_report
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            graph = AnalyticsGraph.from_connection(conn, scope=scope)
+            analysis = analyze_graph(
+                graph,
+                min_community_size=min_community_size,
+                threshold_sigma=sigma,
+            )
+            report_md = generate_markdown_report(
+                analysis,
+                project_name=os.path.basename(self.project_root),
+            )
+            comms_summary = [
+                {
+                    "id": cid,
+                    "label": c.label,
+                    "cohesion_score": c.cohesion_score,
+                    "node_count": len(c.nodes),
+                    "sample_nodes": c.nodes[:5],
+                }
+                for cid, c in sorted(
+                    analysis.community_result.community_info.items(),
+                    key=lambda x: len(x[1].nodes),
+                    reverse=True,
+                )
+            ]
+            gods_summary = [
+                {
+                    "node_id": g.node_id,
+                    "label": g.label,
+                    "path": g.path,
+                    "kind": g.kind,
+                    "total_degree": g.total_degree,
+                    "blast_radius": g.blast_radius,
+                    "risk_level": g.risk_level,
+                }
+                for g in analysis.god_nodes
+            ]
+            surprises = [
+                {
+                    "source_id": s.source_id,
+                    "target_id": s.target_id,
+                    "relation": s.relation,
+                    "source_community": s.source_community,
+                    "target_community": s.target_community,
+                    "explanation": s.explanation,
+                }
+                for s in analysis.surprising_connections
+            ]
+            return self._fits_response({
+                "report_markdown": report_md,
+                "metrics": {
+                    "node_count": analysis.metrics.node_count,
+                    "edge_count": analysis.metrics.edge_count,
+                    "community_count": analysis.metrics.community_count,
+                    "density": analysis.metrics.density,
+                    "modularity": analysis.metrics.modularity,
+                },
+                "communities": comms_summary,
+                "god_nodes": gods_summary,
+                "surprising_connections": surprises,
+            })
+        return self._run(op)
+
+    def get_communities(
+        self,
+        *,
+        scope: Optional[str] = None,
+        min_community_size: int = 1,
+    ) -> Dict[str, Any]:
+        from sot_graph.analytics.graph import AnalyticsGraph
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            graph = AnalyticsGraph.from_connection(conn, scope=scope)
+            res = graph.detect_communities(min_community_size=min_community_size)
+            comm_list = []
+            for cid, cinfo in res.community_info.items():
+                comm_list.append({
+                    "community_id": cid,
+                    "label": cinfo.label,
+                    "cohesion_score": cinfo.cohesion_score,
+                    "node_count": len(cinfo.nodes),
+                    "nodes": cinfo.nodes,
+                })
+            return self._fits_response({
+                "modularity": res.modularity,
+                "community_count": len(comm_list),
+                "communities": comm_list,
+            })
+        return self._run(op)
+
     async def _async(self, method: Any, *args: Any, **kwargs: Any) -> Any:
         try:
             return await asyncio.wait_for(asyncio.to_thread(method, *args, **kwargs), self.timeout_ms / 1000.0)
@@ -313,6 +431,12 @@ class McpService:
 
     async def astats(self) -> Dict[str, Any]:
         return await self._async(self.stats)
+
+    async def aget_architecture_report(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.get_architecture_report, *args, **kwargs)
+
+    async def aget_communities(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.get_communities, *args, **kwargs)
 
 
 __all__ = ["McpService", "McpServiceError", "ServiceLimits"]

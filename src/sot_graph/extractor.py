@@ -114,7 +114,10 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
 
     # 2. Invoke Extractor from vendored graphify
     try:
-        from graphify import extract as gx
+        try:
+            from sot_graph._vendor.graphify import extract as gx
+        except ImportError:
+            from graphify import extract as gx
         extractor_fn = getattr(gx, fn_name, None)
         if not extractor_fn:
             raise AttributeError(f"No extractor function {fn_name}")

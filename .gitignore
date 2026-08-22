@@ -24,3 +24,13 @@ build/
 # Testing
 .coverage
 htmlcov/
+
+# Generated analysis & benchmark artifacts
+graphify-out/
+.graphify*
+*.json
+sot_knowledge_graph.html
+sot_architecture_report.md
+sot_graphrag.json
+sot_graph.graphml
+sot_obsidian_vault/

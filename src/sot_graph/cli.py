@@ -300,6 +300,184 @@ def cmd_doctor(db: Database) -> int:
     print("=" * 40)
     return 0
 
+def cmd_report(args: argparse.Namespace, db: Database, root: str) -> int:
+    from sot_graph.analytics.graph import AnalyticsGraph
+    from sot_graph.analytics.diagnostics import analyze_graph
+    from sot_graph.analytics.report import generate_markdown_report, save_markdown_report
+
+    graph = AnalyticsGraph.from_database(db, scope=args.scope)
+    analysis = analyze_graph(
+        graph,
+        min_community_size=args.min_size,
+        threshold_sigma=args.sigma,
+    )
+
+    if args.save_communities:
+        comm_list = []
+        for cid, cinfo in analysis.community_result.community_info.items():
+            comm_list.append({
+                "community_id": cid,
+                "label": cinfo.label,
+                "cohesion_score": cinfo.cohesion_score,
+                "node_count": len(cinfo.nodes),
+                "nodes": cinfo.nodes,
+            })
+        db.save_communities(comm_list)
+
+    if args.json:
+        payload = {
+            "metrics": {
+                "node_count": analysis.metrics.node_count,
+                "edge_count": analysis.metrics.edge_count,
+                "file_count": analysis.metrics.file_count,
+                "symbol_count": analysis.metrics.symbol_count,
+                "community_count": analysis.metrics.community_count,
+                "density": analysis.metrics.density,
+                "avg_degree": analysis.metrics.avg_degree,
+                "modularity": analysis.metrics.modularity,
+                "isolated_nodes": analysis.metrics.isolated_nodes,
+            },
+            "communities": [
+                {
+                    "id": cid,
+                    "label": c.label,
+                    "nodes_count": len(c.nodes),
+                    "cohesion": c.cohesion_score,
+                    "internal_edges": c.internal_edges,
+                    "external_edges": c.external_edges,
+                }
+                for cid, c in analysis.community_result.community_info.items()
+            ],
+            "god_nodes": [
+                {
+                    "node_id": g.node_id,
+                    "label": g.label,
+                    "kind": g.kind,
+                    "path": g.path,
+                    "line_start": g.line_start,
+                    "total_degree": g.total_degree,
+                    "in_degree": g.in_degree,
+                    "out_degree": g.out_degree,
+                    "risk_level": g.risk_level,
+                    "blast_radius": g.blast_radius,
+                    "score": g.score,
+                }
+                for g in analysis.god_nodes
+            ],
+            "surprising_connections": [
+                {
+                    "src": s.src_label,
+                    "dst": s.dst_label,
+                    "relation": s.relation,
+                    "weight": s.weight,
+                }
+                for s in analysis.surprising_connections
+            ],
+            "suggested_focus_areas": analysis.suggested_focus_areas,
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    project_name = os.path.basename(os.path.abspath(root))
+    report_md = generate_markdown_report(analysis, project_name=project_name, scope=args.scope)
+
+    out_path = args.output
+    if out_path:
+        save_markdown_report(report_md, out_path)
+        print(f"✅ Architectural report saved to: {out_path}")
+    else:
+        print(report_md)
+    return 0
+
+
+def cmd_cluster(args: argparse.Namespace, db: Database) -> int:
+    from sot_graph.analytics.graph import AnalyticsGraph
+
+    graph = AnalyticsGraph.from_database(db, scope=args.scope)
+    res = graph.detect_communities(min_community_size=args.min_size)
+
+    comm_list = []
+    for cid, cinfo in res.community_info.items():
+        comm_list.append({
+            "community_id": cid,
+            "label": cinfo.label,
+            "cohesion_score": cinfo.cohesion_score,
+            "node_count": len(cinfo.nodes),
+            "nodes": cinfo.nodes,
+        })
+
+    if not args.no_save:
+        db.save_communities(comm_list)
+
+    if args.json:
+        print(json.dumps({
+            "communities_count": len(comm_list),
+            "modularity": res.modularity,
+            "communities": comm_list,
+        }, indent=2))
+        return 0
+
+    print(f"\n🧩 Detected {len(comm_list)} Architectural Communities (Modularity Q={res.modularity:.4f}):")
+    print("=" * 80)
+    print(f"{'ID':<4} {'Domain / Community Label':<35} {'Nodes':<8} {'Cohesion':<10} {'Sample Symbols'}")
+    print("-" * 80)
+    for c in sorted(comm_list, key=lambda x: x["node_count"], reverse=True):
+        sample = ", ".join([n.split(":")[-1] for n in c["nodes"][:3]])
+        if len(c["nodes"]) > 3:
+            sample += f" (+{len(c['nodes'])-3})"
+        print(f"{c['community_id']:<4} {c['label']:<35} {c['node_count']:<8} {int(c['cohesion_score']*100)}%{'':<6} {sample}")
+    print("=" * 80)
+    if not args.no_save:
+        print("💾 Communities saved to SQLite database.")
+    return 0
+
+def cmd_viz(args: argparse.Namespace, db: Database, root: str) -> int:
+    from sot_graph.analytics.graph import AnalyticsGraph
+    from sot_graph.export.html import generate_html_visualizer, save_html_visualizer
+
+    project_name = os.path.basename(os.path.abspath(root))
+    graph = AnalyticsGraph.from_database(db, scope=args.scope)
+    html_content = generate_html_visualizer(
+        graph,
+        title=f"SOT-Graph: {project_name}",
+    )
+    out_path = save_html_visualizer(
+        html_content,
+        output_path=args.output,
+        open_browser=args.open,
+    )
+    print(f"🎨 Interactive knowledge graph visualization generated at: {out_path}")
+    return 0
+
+
+def cmd_export(args: argparse.Namespace, db: Database) -> int:
+    from sot_graph.analytics.graph import AnalyticsGraph
+    from sot_graph.export.exporter import (
+        export_graphrag_json,
+        export_obsidian_vault,
+        export_graphml,
+    )
+
+    graph = AnalyticsGraph.from_database(db, scope=args.scope)
+    fmt = args.format.lower()
+
+    if fmt in ("graphrag", "json"):
+        out_file = args.output or "graphrag.json"
+        export_graphrag_json(graph, output_path=out_file)
+        print(f"📦 GraphRAG JSON exported to: {out_file}")
+    elif fmt == "obsidian":
+        out_dir = args.output or "obsidian_vault"
+        count = export_obsidian_vault(graph, output_dir=out_dir)
+        print(f"📓 Obsidian Vault exported to: {out_dir}/ ({count} files created)")
+    elif fmt in ("graphml", "xml"):
+        out_file = args.output or "graph.graphml"
+        export_graphml(graph, output_path=out_file)
+        print(f"🕸️  GraphML XML exported to: {out_file}")
+    else:
+        print(f"❌ Unknown export format: {fmt}. Supported: graphrag, obsidian, graphml")
+        return 1
+    return 0
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -370,8 +548,37 @@ def build_parser() -> argparse.ArgumentParser:
 
     # mcp (optional dependency is imported only when this command is selected)
     subparsers.add_parser("mcp", help="Run the optional MCP stdio server")
+    # report
+    p_rep = subparsers.add_parser("report", help="Generate comprehensive architectural markdown report")
+    p_rep.add_argument("-o", "--output", default="GRAPH_REPORT.md", help="Output file path (default: GRAPH_REPORT.md)")
+    p_rep.add_argument("--scope", default=None, help="Scope analysis to path or subdirectory")
+    p_rep.add_argument("--min-size", type=int, default=1, help="Minimum community size (default: 1)")
+    p_rep.add_argument("--sigma", type=float, default=1.5, help="Standard deviation threshold for God nodes (default: 1.5)")
+    p_rep.add_argument("--no-save-communities", dest="save_communities", action="store_false", default=True, help="Do not persist communities to SQLite")
+    p_rep.add_argument("--json", action="store_true", help="Output structured analysis JSON")
+
+    # cluster
+    p_clu = subparsers.add_parser("cluster", help="Detect and inspect architectural communities/clusters")
+    p_clu.add_argument("--scope", default=None, help="Scope clustering to path or subdirectory")
+    p_clu.add_argument("--min-size", type=int, default=1, help="Minimum community size (default: 1)")
+    p_clu.add_argument("--no-save", action="store_true", help="Do not persist communities to SQLite")
+    p_clu.add_argument("--json", action="store_true", help="Output communities JSON")
+
+    # viz
+    p_viz = subparsers.add_parser("viz", help="Generate standalone interactive HTML graph visualizer")
+    p_viz.add_argument("-o", "--output", default="graph.html", help="HTML output path (default: graph.html)")
+    p_viz.add_argument("--scope", default=None, help="Scope visualization to path or subdirectory")
+    p_viz.add_argument("--open", action="store_true", help="Automatically open visualizer in default web browser")
+
+    # export
+    p_expo = subparsers.add_parser("export", help="Export knowledge graph to GraphRAG JSON, Obsidian, or GraphML")
+    p_expo.add_argument("-f", "--format", default="graphrag", choices=["graphrag", "json", "obsidian", "graphml"], help="Export format (default: graphrag)")
+    p_expo.add_argument("-o", "--output", default=None, help="Output file or directory path")
+    p_expo.add_argument("--scope", default=None, help="Scope export to path or subdirectory")
 
     return parser
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -403,6 +610,14 @@ def main() -> int:
             return cmd_verify(args, reconciler)
         elif args.command == "doctor":
             return cmd_doctor(db)
+        elif args.command == "report":
+            return cmd_report(args, db, root)
+        elif args.command == "cluster":
+            return cmd_cluster(args, db)
+        elif args.command == "viz":
+            return cmd_viz(args, db, root)
+        elif args.command == "export":
+            return cmd_export(args, db)
         return 0
     finally:
         db.close()
