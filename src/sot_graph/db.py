@@ -237,11 +237,71 @@ class Database:
         return [r[0] for r in self.conn.execute("SELECT path FROM file_journal ORDER BY path")]
 
     def delete_path(self, path: str) -> None:
+        """Remove a file's rows.
+
+        Inbound edges from OTHER files that point at this file's nodes would
+        dangle once the nodes are gone; re-queue them as pending rows so the
+        next resolution pass can re-attach them wherever the symbols now live
+        (e.g. after the file is moved or renamed).
+        """
         with self.conn:
+            requeued = self.conn.execute(
+                "SELECT e.path, e.src, e.relation, e.line, n.symbol, n.fqn, n.kind "
+                "FROM graph_edges e JOIN graph_nodes n ON e.dst = n.id "
+                "WHERE n.path = ? AND e.path != ?",
+                (path, path),
+            ).fetchall()
+            if requeued:
+                self.conn.executemany(
+                    "INSERT OR REPLACE INTO pending_edges"
+                    "(path, src, dst_symbol, relation, line, call_kind, import_source) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    [
+                        (e_path, src, self._requeue_symbol(row), relation, line,
+                         "UNKNOWN", self._requeue_import_source(row))
+                        for e_path, src, relation, line, *row in requeued
+                    ],
+                )
             self.conn.execute("DELETE FROM graph_nodes WHERE path = ?", (path,))
             self.conn.execute("DELETE FROM graph_edges WHERE path = ?", (path,))
             self.conn.execute("DELETE FROM pending_edges WHERE path = ?", (path,))
             self.conn.execute("DELETE FROM file_journal WHERE path = ?", (path,))
+
+    @staticmethod
+    def _requeue_symbol(dst_node: list) -> str:
+        """Bare reference name for a re-queued edge: the symbol itself, or the
+        module's last segment when the edge pointed at a file node."""
+        symbol, fqn, kind = dst_node
+        if kind == "file":
+            return (fqn or "").rsplit(".", 1)[-1] or (symbol or "")
+        return symbol or ""
+
+    @staticmethod
+    def _requeue_import_source(dst_node: list) -> Optional[str]:
+        """File-node targets keep their dotted module as the import hint so
+        the resolver can find the module's new file; symbol targets resolve by
+        name (unique candidate) instead of a stale module path."""
+        symbol, fqn, kind = dst_node
+        return fqn if kind == "file" else None
+
+    def cleanup_orphan_edges(self) -> Dict[str, int]:
+        """Delete edge rows whose endpoint nodes no longer exist.
+
+        Mirrors the integrity statements of apply_clean for callers that need
+        a standalone sweep (e.g. after reconcile).
+        """
+        with self.conn:
+            edges = self.conn.execute(
+                "DELETE FROM graph_edges WHERE NOT EXISTS "
+                "(SELECT 1 FROM graph_nodes n WHERE n.id=graph_edges.src) "
+                "OR NOT EXISTS (SELECT 1 FROM graph_nodes n WHERE n.id=graph_edges.dst)"
+            ).rowcount
+            pending = self.conn.execute(
+                "DELETE FROM pending_edges WHERE NOT EXISTS "
+                "(SELECT 1 FROM graph_nodes n WHERE n.id=pending_edges.src) "
+                "OR NOT EXISTS (SELECT 1 FROM file_journal j WHERE j.path=pending_edges.path)"
+            ).rowcount
+        return {"edges": int(edges), "pending": int(pending)}
 
     def delete_node_by_id(self, node_id: str) -> None:
         with self.conn:

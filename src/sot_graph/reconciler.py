@@ -391,6 +391,10 @@ class Reconciler:
         if callable(resolver):
             with self._publication_gate():
                 resolver()
+        janitor = getattr(self.db, "cleanup_orphan_edges", None)
+        if callable(janitor):
+            with self._publication_gate():
+                janitor()
         return "indexed"
 
     def _parallel_window(
@@ -573,6 +577,9 @@ class Reconciler:
                 resolver = getattr(self.db, "resolve_all_pending_edges", None)
                 if callable(resolver):
                     resolver()
+                janitor = getattr(self.db, "cleanup_orphan_edges", None)
+                if callable(janitor):
+                    janitor()
         except KeyboardInterrupt:
             interrupted = True
             if executor is not None:
