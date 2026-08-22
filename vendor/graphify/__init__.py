@@ -13,8 +13,8 @@ from .extract import (
     extract_ruby,
     extract_php,
     extract_swift,
+    extract_dart,
 )
-
 __all__ = [
     "extract_python",
     "extract_js",
@@ -26,4 +26,5 @@ __all__ = [
     "extract_ruby",
     "extract_php",
     "extract_swift",
+    "extract_dart",
 ]

@@ -23,7 +23,7 @@ from sot_graph.ignore import DEFAULT_IGNORED_DIRS, GitIgnoreMatcher
 
 
 IGNORED_DIRS: Set[str] = set(DEFAULT_IGNORED_DIRS)
-TEXT_EXTENSIONS = {".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".sh", ".sql"}
+TEXT_EXTENSIONS = {".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".sh", ".sql", ".arb"}
 
 
 @dataclass(frozen=True)

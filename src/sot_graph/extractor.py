@@ -32,6 +32,7 @@ EXT_DISPATCH = {
     ".rb": "extract_ruby",
     ".php": "extract_php",
     ".swift": "extract_swift",
+    ".dart": "extract_dart",
 }
 
 LANGUAGE_MAP = {
@@ -52,6 +53,8 @@ LANGUAGE_MAP = {
     ".rb": "ruby",
     ".php": "php",
     ".swift": "swift",
+    ".dart": "dart",
+    ".arb": "json",
     ".md": "markdown",
     ".json": "json",
     ".yaml": "yaml",

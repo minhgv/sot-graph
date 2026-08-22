@@ -222,7 +222,7 @@ class Database:
                     node_rows.append((n["id"], path, n["kind"], n.get("symbol"), n["label"],
                                       n["body"], " ".join(kw) if kw else "", n.get("line_start"), now))
                 self.conn.executemany(
-                    "INSERT INTO graph_nodes "
+                    "INSERT OR REPLACE INTO graph_nodes "
                     "(id,path,kind,symbol,label,body,keywords,line_start,updated_at) "
                     "VALUES (?,?,?,?,?,?,?,?,?)", node_rows)
                 self.conn.executemany(

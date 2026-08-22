@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](pyproject.toml)
 [![SQLite: WAL + FTS5](https://img.shields.io/badge/SQLite-FTS5%20%2B%20WAL-orange.svg)](src/sot_graph/db.py)
-[![Tests: 48 passed](https://img.shields.io/badge/Tests-48%2F48%20Passed-brightgreen.svg)](tests/)
+[![Tests: 64 passed](https://img.shields.io/badge/Tests-64%2F64%20Passed-brightgreen.svg)](tests/)
 [![Architecture: Zero--Daemon](https://img.shields.io/badge/Architecture-Zero--Daemon-purple.svg)](#-architecture-overview)
 [![Q&A Guide: 19 Scenarios](https://img.shields.io/badge/Q%26A%20Guide-19%20Scenarios%20Docs-blueviolet.svg)](docs/QA_GUIDE.md)
 [![AI SDLC Guide](https://img.shields.io/badge/AI%20SDLC%20Guide-6%20Phases-success.svg)](docs/AI_SDLC_GUIDE.md)
@@ -113,7 +113,8 @@ Explore comprehensive architectural analyses, real-world agent integration guide
 │ • Python (native ast)     │  │ • Louvain & Modularity(Q) │  │ • Standalone D3.js HTML   │
 │ • TS/JS, Go, Rust, C/C++  │  │ • Community cohesion score│  │ • GraphRAG JSON format    │
 │ • Java, Ruby, PHP, Swift  │  │ • God Node (2-hop blast)  │  │ • Obsidian Markdown Vault │
-│ • Shell, SQL, Markdown    │  │ • Surprising connections  │  │ • GraphML XML (Gephi/Cyto)│
+│ • Dart & Flutter (.arb)   │  │ • Surprising connections  │  │ • GraphML XML (Gephi/Cyto)│
+│ • Shell, SQL, Markdown    │  │                           │                              │
 └───────────────────────────┘  └───────────────────────────┘  └───────────────────────────┘
       │                                                                             │
       └──────────────────────────────────────┬──────────────────────────────────────┘
@@ -413,11 +414,26 @@ PYTHONPATH="src" python3 -m unittest discover -s tests -p "test_*.py" -v
 ```
 
 ```
-Ran 31 tests in 0.98s
-OK (31/31 passed)
-```
+Ran 64 tests in 3.74s
+OK (64/64 passed)
 
 ---
+## 📜 Attribution & Third-Party Credits
+
+`sot-graph` stands on the shoulders of the open-source community. We gratefully acknowledge the following projects:
+
+1. **[Graphify](https://github.com/voidshard/graphify)** (MIT License):
+   - `sot-graph` vendors, adapts, and enhances AST extraction logic from Graphify (`src/sot_graph/_vendor/graphify/`).
+   - We extend this foundation with level-triggered parallel synchronization, SQLite WAL + FTS5 indexing, live disk Trust Verification, Dart/Flutter language support, and single-writer atomic commit architecture.
+
+2. **[D3.js](https://d3js.org/)** (ISC / BSD-3-Clause License):
+   - Powers the standalone, zero-server interactive force-directed graph visualizer (`sot viz`).
+
+3. **[SQLite](https://www.sqlite.org/)** (Public Domain):
+   - Core relational, FTS5 full-text indexing, and Write-Ahead Logging (WAL) engine.
+
+---
+
 
 ## 📄 License
 
