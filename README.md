@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](pyproject.toml)
 [![SQLite: WAL + FTS5](https://img.shields.io/badge/SQLite-FTS5%20%2B%20WAL-orange.svg)](src/sot_graph/db.py)
-[![Tests: 31 passed](https://img.shields.io/badge/Tests-31%2F31%20Passed-brightgreen.svg)](tests/)
+[![Tests: 48 passed](https://img.shields.io/badge/Tests-48%2F48%20Passed-brightgreen.svg)](tests/)
 [![Architecture: Zero--Daemon](https://img.shields.io/badge/Architecture-Zero--Daemon-purple.svg)](#-architecture-overview)
 [![Q&A Guide: 19 Scenarios](https://img.shields.io/badge/Q%26A%20Guide-19%20Scenarios%20Docs-blueviolet.svg)](docs/QA_GUIDE.md)
 [![AI SDLC Guide](https://img.shields.io/badge/AI%20SDLC%20Guide-6%20Phases-success.svg)](docs/AI_SDLC_GUIDE.md)
@@ -119,12 +119,13 @@ Explore comprehensive architectural analyses, real-world agent integration guide
       └──────────────────────────────────────┬──────────────────────────────────────┘
                                              ▼
                       ┌─────────────────────────────────────────────┐
-                      │    7. Agent Protocols & Integrations        │
+                      │    7. Multi-Harness Adapters & Integrations │
+                      │ • Unified Setup CLI: ./bin/sot setup        │
+                      │ • Oh My Pi / OMP Native Extension (10 tools)│
+                      │ • OpenCode Skill, Plugin & JSON Auto-Merge  │
+                      │ • Google Antigravity & Gemini CLI Adapter   │
                       │ • Read-Only MCP Stdio Server (5 tools)      │
-                      │ • Oh My Pi / OMP Extension (sot_graph.ts)   │
-                      │ • OpenCode Tool Config (opencode_tools.json)│
-                      │ • System Prompt Guidance (AGENTS.md)        │
-                      │ • Maintenance: sot clean, vacuum, doctor    │
+                      │ • Claude Code, Cursor & Universal MCP       │
                       └─────────────────────────────────────────────┘
 ```
 
@@ -302,40 +303,52 @@ usage: sot [-h] [--root ROOT] [--db DB] {search,explore,insert,reconcile,verify,
 
 # Compact and optimize SQLite database and checkpoint WAL
 ./bin/sot vacuum --analyze
+
+### 8. Automated AI Harness Provisioning (setup)
+```bash
+# View supported AI coding harnesses
+./bin/sot setup --list
+
+# Provision all harnesses at once (OMP, OpenCode, Antigravity, Claude)
+./bin/sot setup --harness all
+
+# Provision a specific harness
+./bin/sot setup --harness opencode
+./bin/sot setup --harness antigravity
+./bin/sot setup --harness omp
+
+# Scope configuration to current workspace only
+./bin/sot setup --harness all --workspace-only
 ```
 
 ---
 
-## 🤖 AI Agent Harness Integrations
+## 🤖 Multi-Harness AI Agent Integrations
 
-### 1. Oh My Pi / OMP Extension (`omp` / `pi`)
-Copy the native TypeScript extension to your local agent configuration:
-```bash
-cp src/sot_graph/adapters/omp_extension.ts ~/.omp/agent/extensions/sot_graph.ts
-```
-Exposes 4 native agent tools: `sot_search`, `sot_explore`, `sot_reconcile`, `sot_insert`.
-
-### 2. Model Context Protocol (MCP) Stdio Server
-Exposes 5 read-only tools and resources over stdio for Claude Desktop, Cursor, and MCP-compatible agents:
-- `sot_search`: Trust-verified search with disk validation.
-- `sot_explore`: Bounded AST exploration and cross-file relations.
-- `sot_verify_drift`: Read-only drift audit between graph and disk.
-- `sot_architecture_report`: Complete architectural analysis with God Node detection.
-- `sot_communities`: Cluster detection with modularity and cohesion metrics.
-- Resources: `sot://stats`, `sot://node/{node_id}`.
+`sot-graph` features a native **Multi-Harness Adapter Layer** (`src/sot_graph/adapters/`) allowing instant provisioning across all major AI agent harnesses with a single command:
 
 ```bash
-# Run MCP stdio server
-./bin/sot mcp
+./bin/sot setup --harness all
 ```
 
-### 3. OpenCode & OpenCode V2 (`opencode`)
-Include `src/sot_graph/adapters/opencode_tools.json` in your `.opencode.json` configuration to provide subagent workers with direct knowledge tools.
+### 1. Oh My Pi (OMP) Native Extension
+- **10 Native Agent Tools**: `sot_search`, `sot_explore`, `sot_reconcile`, `sot_verify`, `sot_insert`, `sot_cluster`, `sot_report`, `sot_viz`, `sot_export`, `sot_doctor`.
+- **Project Rules (`RULES.md`)**: Enforces the Filesystem SSOT and Knowledge Reuse Protocol before agent code mutations.
+- **Extension File**: Deployed to `~/.omp/agent/extensions/sot-graph.ts` and `.omp/extensions/sot-graph.ts`.
 
-### 4. Claude Code, Cursor, and System Prompts
-Include `src/sot_graph/adapters/AGENTS.md` in your workspace's `AGENTS.md` or `.cursorrules` to instruct agents to consult existing verified code before creating redundant files.
+### 2. OpenCode (Skill, Plugin & Auto-Merge)
+- **JSON Configuration Auto-Merge**: Safely registers the `sot-graph` local MCP server and configures skill permissions in `opencode.json` without overriding existing providers.
+- **Background Sync Plugin (`opencode_plugin.ts`)**: Automatically re-indexes the project on `session.created` and `file.edited` events.
+- **Skill Definition**: Deployed to `~/.config/opencode/skill/sot-graph/SKILL.md` and `.opencode/skills/sot-graph/SKILL.md`.
 
----
+### 3. Google Antigravity & Gemini CLI
+- **MCP Server Integration**: Automatically configures `mcpServers.sot-graph` in `~/.gemini/settings.json` and `.gemini/settings.json`.
+- **Agent Rules (`GEMINI.md`)**: Appends the SOT-Graph Knowledge Reuse Protocol to ensure agents check existing implementations before writing new code.
+- **Skill Definition**: Deployed to `~/.gemini/skills/sot-graph/SKILL.md` and `~/.gemini/antigravity/skills/sot-graph/SKILL.md`.
+
+### 4. Claude Code, Cursor & Universal MCP
+- **MCP Stdio Server**: Exposes 5 verified read-only tools (`sot_search`, `sot_explore`, `sot_verify_drift`, `sot_architecture_report`, `sot_communities`).
+- **Configuration Files**: Deployed to `.mcp.json`, `.cursor/mcp.json`, and `.claude/CLAUDE.md`.
 
 ## ⚡ Benchmarks & Performance
 
