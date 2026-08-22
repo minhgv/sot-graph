@@ -704,15 +704,20 @@ class Database:
         queue: List[Tuple[str, int]] = [(node_id, 0)]
         sql = (
             "SELECT 'outward' AS dir, e.relation, n.id, n.label, n.path, n.line_start, n.kind "
-            "FROM graph_edges e JOIN graph_nodes n ON e.dst=n.id WHERE e.src=? "
+            "FROM graph_edges e JOIN graph_nodes n ON e.dst=n.id "
+            "WHERE e.src=? AND e.relation != 'defines' "
             "UNION ALL "
             "SELECT 'inward' AS dir, e.relation, n.id, n.label, n.path, n.line_start, n.kind "
-            "FROM graph_edges e JOIN graph_nodes n ON e.src=n.id WHERE e.dst=? "
+            "FROM graph_edges e JOIN graph_nodes n ON e.src=n.id "
+            "WHERE e.dst=? AND e.relation != 'defines' "
             "ORDER BY dir DESC, n.id"
         )
         while queue and (limit is None or len(result) < limit):
             current, current_depth = queue.pop(0)
-            if current in visited or current_depth > depth:
+            if current in visited or current_depth >= depth:
+                # Nodes already at the requested depth are terminal: expanding
+                # their edges would leak reversed, depth+1 relations into the
+                # flat result (displayed as phantom self-loops).
                 continue
             visited.add(current)
             rows = self.conn.execute(sql, (current, current)).fetchall()

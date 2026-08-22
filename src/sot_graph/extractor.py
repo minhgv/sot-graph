@@ -192,6 +192,7 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
         src_id = symbol_to_node_id.get(src_raw, file_node_id)
         loc = str(re_edge.get("source_location", ""))
         line_no = int(re.search(r"L(\d+)", loc).group(1)) if re.search(r"L(\d+)", loc) else None
+        receiver = re_edge.get("receiver")
 
         if dst_raw in symbol_to_node_id:
             # Resolved intra-file edge
@@ -202,6 +203,22 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
                 "line": line_no,
             })
             continue
+
+        # Method-call qualification: a call on `self`/`cls` (or the enclosing
+        # class name) targets the class-scoped symbol 'Class.method', while
+        # the raw call target is only the bare attribute name.
+        if rel == "calls" and "." in src_raw:
+            parent = src_raw.rsplit(".", 1)[0]
+            if receiver in ("self", "cls", parent):
+                qualified_id = symbol_to_node_id.get(f"{parent}.{dst_raw}")
+                if qualified_id:
+                    edges.append({
+                        "src": src_id,
+                        "dst": qualified_id,
+                        "relation": rel,
+                        "line": line_no,
+                    })
+                    continue
 
         # Cross-file pending edge (target symbol lives in another file)
         if rel == "calls":

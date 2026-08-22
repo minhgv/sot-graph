@@ -170,6 +170,24 @@ class BindingResolverTests(TempProject):
         self.reconciler = Reconciler(self.db, str(self.root))
         self.reconciler.reconcile(workers=1)
 
+    def test_self_method_calls_resolve_to_class_qualified_symbol(self):
+        # Regression: `self.b()` inside a class used to fall to pending as
+        # bare 'b' (never matching symbol 'Svc.b'), leaving method nodes
+        # without inbound edges for explore/pack.
+        path = self.write("src/app/svc.py",
+                          "class Svc:\n"
+                          "    def a(self):\n"
+                          "        return self.b()\n"
+                          "\n"
+                          "    def b(self) -> int:\n"
+                          "        return 1\n")
+        parsed = parse_file_graph(path, str(self.root))
+        calls = [e for e in parsed["edges"] if e["relation"] == "calls"]
+        self.assertEqual(len(calls), 1)
+        self.assertIn("Svc.b", calls[0]["dst"])
+        self.assertEqual(
+            [p for p in parsed["pending"] if p["dst_symbol"] == "b"], [])
+
     def pending(self, dst=None):
         sql = "SELECT src, dst_symbol, call_kind, receiver, import_source, resolution_state" \
               " FROM pending_edges"
