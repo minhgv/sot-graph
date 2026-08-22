@@ -100,8 +100,8 @@ Khi Agent thực hiện `sot search "<query>"`, mọi kết quả trả về t�
 
 | Nhãn Verdict | Điều Kiện Kích Hoạt | Hành Động Khuyến Nghị Cho AI Agent |
 | :--- | :--- | :--- |
-| `[STRONG]` | File tồn tại vật lý VÀ nội dung chứa $\ge 50\%$ từ khóa tìm kiếm. | **Tin cậy tuyệt đối**: Điều hướng thẳng tới file và số dòng code. |
-| `[WEAK]` | File có tồn tại nhưng độ phủ từ khóa $&lt; 50\%$ (khớp ngữ nghĩa tiêu đề). | **Cẩn trọng**: Đọc lướt nội dung trước khi áp dụng logic. |
+| `[STRONG]` | File tồn tại vật lý VÀ nội dung chứa **≥ 50%** từ khóa tìm kiếm. | **Tin cậy tuyệt đối**: Điều hướng thẳng tới file và số dòng code. |
+| `[WEAK]` | File có tồn tại nhưng độ phủ từ khóa **< 50%** (khớp ngữ nghĩa tiêu đề). | **Cẩn trọng**: Đọc lướt nội dung trước khi áp dụng logic. |
 | `[REBUILT]` | File bị đổi tên hoặc chuyển thư mục; đã được tự động định vị lại. | **Đã tự chữa lành**: Sử dụng đường dẫn mới nhất được báo cáo. |
 | `[REMOVED]` | File đã bị xóa vĩnh viễn khỏi ổ cứng. | **Đã thanh trừng**: Node bị xóa khỏi DB, bỏ qua kết quả này. |
 | `[NOPATH]` | Ghi chú tri thức ảo (Architecture Decision Record, quy ước, mẹo). | **Mỏ neo kiến thức**: Coi như tài liệu hướng dẫn chuẩn. |
@@ -179,7 +179,7 @@ Khi một file bị di chuyển hoặc đổi tên thư mục cha, đường d�
    - Hệ thống gọi `db.update_node_path(node_id, old_path, new_path)`.
    - Cập nhật lại đường dẫn trong `graph_nodes` và nhãn `label`.
    - Trả về nhãn `[REBUILT]` kèm đường dẫn mới nhất.
-4. Nếu tìm thấy $\ge 2$ file trùng tên (mơ hồ - *ambiguous match*): Hệ thống từ chối đoán bừa để đảm bảo an toàn tuyệt đối, xóa đường dẫn cũ và đợi lượt `reconcile` tiếp theo.
+4. Nếu tìm thấy **≥ 2 file** trùng tên (mơ hồ - *ambiguous match*): Hệ thống từ chối đoán bừa để đảm bảo an toàn tuyệt đối, xóa đường dẫn cũ và đợi lượt `reconcile` tiếp theo.
 
 </details>
 
@@ -277,13 +277,13 @@ Lệnh `./bin/sot mcp` khởi chạy một MCP Stdio Server tiêu chuẩn cung c
 **God Node (Nút Siêu Kết Nối / Hub Trung Tâm):** Là các class, module hoặc hàm có bậc kết nối (degree) vượt trội, tập trung quá nhiều phụ thuộc của hệ thống. Nếu một God Node bị lỗi hoặc thay đổi API, nó có thể làm gãy hàng loạt module khác.
 
 **Thuật toán phát hiện (`src/sot_graph/analytics/diagnostics.py`):**
-1. Tính giá trị trung bình $\mu$ và độ lệch chuẩn $\sigma$ của bậc kết nối toàn bộ đồ thị:
-   $$\text{Cutoff} = \mu + \text{threshold\_sigma} \times \sigma$$
-2. Bất kỳ nút nào có $\text{Degree} \ge \text{Cutoff}$ (mặc định $\text{sigma} = 1.5$) được phân loại là **God Node**.
+1. Tính giá trị trung bình **μ (Mean)** và độ lệch chuẩn **σ (Std)** của bậc kết nối toàn bộ đồ thị:
+   > **Cutoff** = μ + (threshold_sigma × σ)
+2. Bất kỳ nút nào có **Degree ≥ Cutoff** (mặc định `threshold_sigma = 1.5`) được phân loại là **God Node**.
 3. **2-hop Blast Radius:** Thuật toán duyệt BFS đúng 2 bước từ God Node để đếm số lượng thực thể chịu ảnh hưởng trực tiếp và gián tiếp:
-   - $\text{Blast} \ge 25$: Nguy cơ `[CRITICAL]`.
-   - $\text{Blast} \ge 15$: Nguy cơ `[HIGH]`.
-   - $\text{Blast} \ge 8$: Nguy cơ `[MEDIUM]`.
+   - **Blast Radius ≥ 25**: Nguy cơ `[CRITICAL]`.
+   - **Blast Radius ≥ 15**: Nguy cơ `[HIGH]`.
+   - **Blast Radius ≥ 8**: Nguy cơ `[MEDIUM]`.
 
 ```bash
 # Lệnh phát hiện God Nodes và xuất báo cáo
@@ -299,10 +299,11 @@ Lệnh `./bin/sot mcp` khởi chạy một MCP Stdio Server tiêu chuẩn cung c
 
 Thuật toán `Label Propagation / Louvain` trong `sot_graph.analytics` tự động gom các file và hàm có tần suất gọi nhau dày đặc thành các **Cộng Đồng Chức Năng (Functional Communities)**:
 
-- **Hệ số Modularity ($Q \in [-0.5, 1.0]$):** Đo lường chất lượng phân rã kiến trúc. $Q > 0.3$ thể hiện cấu trúc mã nguồn có tính module hóa cao, ranh giới rõ ràng.
-- **Điểm Số Cohesion ($C \in [0.0, 1.0]$):** Tỷ lệ liên kết nội bộ trong cụm so với tổng liên kết:
-  $$C = \frac{E_{\text{internal}}}{E_{\text{internal}} + E_{\text{external}}}$$
-  Nếu $C < 0.4$, cụm đó đang bị phụ thuộc quá nhiều vào bên ngoài (*Tightly Coupled*) và cần được xem xét tái cấu trúc (Refactoring).
+- **Hệ số Modularity (Q ∈ [-0.5, 1.0]):** Đo lường chất lượng phân rã kiến trúc. **Q > 0.3** thể hiện cấu trúc mã nguồn có tính module hóa cao, ranh giới rõ ràng.
+- **Điểm Số Cohesion (C ∈ [0.0, 1.0]):** Tỷ lệ liên kết nội bộ trong cụm so với tổng liên kết:
+  > **Cohesion (C)** = E_internal / (E_internal + E_external)
+  
+  Nếu **C < 0.4**, cụm đó đang bị phụ thuộc quá nhiều vào bên ngoài (*Tightly Coupled*) và cần được xem xét tái cấu trúc (Refactoring).
 
 ```bash
 # Lệnh kiểm tra các cụm cộng đồng

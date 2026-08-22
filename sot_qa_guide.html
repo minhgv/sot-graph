@@ -476,6 +476,23 @@
       margin: 14px 0;
     }
 
+    /* Formula Display */
+    .formula-box {
+      background: #06090e;
+      border: 1px solid rgba(88, 166, 255, 0.35);
+      border-radius: var(--radius-sm);
+      padding: 12px 18px;
+      margin: 12px 0;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.95rem;
+      color: #79c0ff;
+      text-align: center;
+      box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.4);
+    }
+    .formula-box strong {
+      color: #f0f6fc;
+    }
+
     /* Comparison Table */
     .data-table {
       width: 100%;
@@ -718,7 +735,7 @@
             <p>Bộ điều phối <code>sot_graph.reconciler</code> sử dụng cơ chế bảo vệ 2 tầng để phát hiện mọi thay đổi dù là nhỏ nhất:</p>
             <ol>
               <li>
-                <strong>Tầng 1 - Fast Dirty Check qua Filesystem Metadata ($O(1)$):</strong>
+                <strong>Tầng 1 - Fast Dirty Check qua Filesystem Metadata (O(1)):</strong>
                 Khi sửa 1 dòng code, hệ điều hành lập tức cập nhật <code>st_mtime</code> (mili-giây) và thường làm đổi <code>st_size</code> (kích thước byte). Reconciler so sánh cặp <code>(size, mtime_ms)</code> với bản ghi trong bảng <code>file_journal</code>. Nếu khác, file được đánh dấu là bẩn (dirty) ngay trong micro-giây.
               </li>
               <li>
@@ -784,12 +801,12 @@ jobs.append(ParseJob(path, self.root_dir, size, mtime_ms))</code></pre>
               <tbody>
                 <tr>
                   <td><span class="badge badge-agent" style="background: rgba(63, 185, 80, 0.2); color: #3fb950;">[STRONG]</span></td>
-                  <td>File tồn tại vật lý VÀ nội dung chứa $\ge 50\%$ từ khóa tìm kiếm.</td>
+                  <td>File tồn tại vật lý VÀ nội dung chứa <strong>≥ 50%</strong> từ khóa tìm kiếm.</td>
                   <td><strong>Tin cậy tuyệt đối</strong>: Điều hướng thẳng tới file và số dòng code.</td>
                 </tr>
                 <tr>
                   <td><span class="badge badge-cli" style="background: rgba(210, 153, 34, 0.2); color: #d29922;">[WEAK]</span></td>
-                  <td>File có tồn tại nhưng độ phủ từ khóa $&lt; 50\%$ (khớp ngữ nghĩa tiêu đề).</td>
+                  <td>File có tồn tại nhưng độ phủ từ khóa <strong>&lt; 50%</strong> (khớp ngữ nghĩa tiêu đề).</td>
                   <td><strong>Cẩn trọng</strong>: Đọc lướt nội dung trước khi áp dụng logic.</td>
                 </tr>
                 <tr>
@@ -935,7 +952,7 @@ return "REMOVED", 0.0, requested</code></pre>
                   <li>Trả về nhãn <code>[REBUILT]</code> kèm đường dẫn mới nhất.</li>
                 </ul>
               </li>
-              <li>Nếu tìm thấy $\ge 2$ file trùng tên (mơ hồ - <em>ambiguous match</em>): Hệ thống từ chối đoán bừa để đảm bảo an toàn tuyệt đối, xóa đường dẫn cũ và đợi lượt <code>reconcile</code> tiếp theo.</li>
+              <li>Nếu tìm thấy <strong>≥ 2 file</strong> trùng tên (mơ hồ - <em>ambiguous match</em>): Hệ thống từ chối đoán bừa để đảm bảo an toàn tuyệt đối, xóa đường dẫn cũ và đợi lượt <code>reconcile</code> tiếp theo.</li>
             </ol>
           </div>
         </div>
@@ -1121,16 +1138,18 @@ self.conn.execute("DELETE FROM pending_edges WHERE path = ?", (path,))</code></p
             </p>
             <p><strong>Thuật toán phát hiện (`src/sot_graph/analytics/diagnostics.py`):</strong></p>
             <ol>
-              <li>Tính giá trị trung bình $\mu$ và độ lệch chuẩn $\sigma$ của bậc kết nối toàn bộ đồ thị:
-                $$\text{Cutoff} = \mu + \text{threshold\_sigma} \times \sigma$$
+              <li>Tính giá trị trung bình <strong>μ (Mean)</strong> và độ lệch chuẩn <strong>σ (Std)</strong> của bậc kết nối toàn bộ đồ thị:
+                <div class="formula-box">
+                  <strong>Cutoff</strong> = μ + (threshold_sigma × σ)
+                </div>
               </li>
-              <li>Bất kỳ nút nào có $\text{Degree} \ge \text{Cutoff}$ (mặc định $\text{sigma} = 1.5$) được phân loại là <strong>God Node</strong>.</li>
+              <li>Bất kỳ nút nào có <strong>Degree ≥ Cutoff</strong> (mặc định <code>threshold_sigma = 1.5</code>) được phân loại là <strong>God Node</strong>.</li>
               <li>
                 <strong>2-hop Blast Radius:</strong> Thuật toán duyệt BFS đúng 2 bước từ God Node để đếm số lượng thực thể chịu ảnh hưởng trực tiếp và gián tiếp:
                 <ul>
-                  <li>$\text{Blast} \ge 25$: Nguy cơ <span class="badge badge-p0">CRITICAL</span>.</li>
-                  <li>$\text{Blast} \ge 15$: Nguy cơ <span class="badge badge-cli">HIGH</span>.</li>
-                  <li>$\text{Blast} \ge 8$: Nguy cơ <span class="badge badge-algo">MEDIUM</span>.</li>
+                  <li><strong>Blast Radius ≥ 25</strong>: Nguy cơ <span class="badge badge-p0">CRITICAL</span>.</li>
+                  <li><strong>Blast Radius ≥ 15</strong>: Nguy cơ <span class="badge badge-cli">HIGH</span>.</li>
+                  <li><strong>Blast Radius ≥ 8</strong>: Nguy cơ <span class="badge badge-algo">MEDIUM</span>.</li>
                 </ul>
               </li>
             </ol>
@@ -1160,12 +1179,14 @@ self.conn.execute("DELETE FROM pending_edges WHERE path = ?", (path,))</code></p
             <p>Thuật toán <code>Label Propagation / Louvain</code> trong <code>sot_graph.analytics</code> tự động gom các file và hàm có tần suất gọi nhau dày đặc thành các <strong>Cộng Đồng Chức Năng (Functional Communities)</strong>:</p>
             <ul>
               <li>
-                <strong>Hệ số Modularity ($Q \in [-0.5, 1.0]$):</strong> Đo lường chất lượng phân rã kiến trúc. $Q &gt; 0.3$ thể hiện cấu trúc mã nguồn có tính module hóa cao, ranh giới rõ ràng.
+                <strong>Hệ số Modularity (Q ∈ [-0.5, 1.0]):</strong> Đo lường chất lượng phân rã kiến trúc. <strong>Q &gt; 0.3</strong> thể hiện cấu trúc mã nguồn có tính module hóa cao, ranh giới rõ ràng.
               </li>
               <li>
-                <strong>Điểm Số Cohesion ($C \in [0.0, 1.0]$):</strong> Tỷ lệ liên kết nội bộ trong cụm so với tổng liên kết:
-                $$C = \frac{E_{\text{internal}}}{E_{\text{internal}} + E_{\text{external}}}$$
-                Nếu $C &lt; 0.4$, cụm đó đang bị phụ thuộc quá nhiều vào bên ngoài (<em>Tightly Coupled</em>) và cần được xem xét tái cấu trúc (Refactoring).
+                <strong>Điểm Số Cohesion (C ∈ [0.0, 1.0]):</strong> Tỷ lệ liên kết nội bộ trong cụm so với tổng liên kết:
+                <div class="formula-box">
+                  <strong>Cohesion (C)</strong> = E<sub>internal</sub> / (E<sub>internal</sub> + E<sub>external</sub>)
+                </div>
+                Nếu <strong>C &lt; 0.4</strong>, cụm đó đang bị phụ thuộc quá nhiều vào bên ngoài (<em>Tightly Coupled</em>) và cần được xem xét tái cấu trúc (Refactoring).
               </li>
             </ul>
             <div class="code-block">

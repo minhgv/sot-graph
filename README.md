@@ -53,7 +53,7 @@ When an agent searches the knowledge base via `sot search "<query>"`, every cand
 
 | Verdict | Meaning | Agent Action |
 | :--- | :--- | :--- |
-| `[STRONG]` | **Path physically exists on disk AND actual content contains $\ge 50\%$ query tokens.** | **High Confidence**: Go straight to the referenced file and line number. |
+| `[STRONG]` | **Path physically exists on disk AND actual content contains ≥ 50% query tokens.** | **High Confidence**: Go straight to the referenced file and line number. |
 | `[WEAK]` | **Semantic/Title match only; low lexical overlap in file content.** | **Caution**: Plausible hit; verify file context manually before editing. |
 | `[REBUILT]` | **File was moved/renamed in project.** | **Auto-Healed**: Discovered by basename scan; path automatically updated in database. |
 | `[REMOVED]` | **Path permanently deleted from disk.** | **Auto-Purged**: Node deleted from database so it never ranks again. |
@@ -74,10 +74,10 @@ To explore all real-world usage scenarios, edge cases, self-healing mechanics, a
   ```
 
 ### 🌟 6 Nhóm Chủ Đề Chính Được Giải Đáp Chi Tiết:
-1. **Cơ Chế Cốt Lõi & Chống Ảo Giác**: Filesystem SSOT, Fast Dirty Check metadata ($O(1)$) + SHA-256 hash, phân loại Trust Verdict (`[STRONG]`, `[WEAK]`, `[REBUILT]`, `[REMOVED]`), và SQL pending edge resolution 2 chiều.
+1. **Cơ Chế Cốt Lõi & Chống Ảo Giác**: Filesystem SSOT, Fast Dirty Check metadata (O(1)) + SHA-256 hash, phân loại Trust Verdict (`[STRONG]`, `[WEAK]`, `[REBUILT]`, `[REMOVED]`), và SQL pending edge resolution 2 chiều.
 2. **Tự Chữa Lành & Toàn Vẹn Dữ Liệu**: Tự động thanh trừng khi xóa file (`rm`), tự động định vị lại khi đổi tên/chuyển thư mục (`mv`), và Atomic Full-File Replacement chống tích tụ node rác.
 3. **Tích Hợp AI Agent & MCP**: Cài đặt extension cho Oh My Pi (`omp_extension.ts`), cấu hình Claude Code/Cursor (`AGENTS.md`), 5 công cụ Read-Only MCP Stdio Server và quy trình 4 bước Knowledge Reuse Protocol.
-4. **Phân Tích Đồ Thị & Trực Quan Hóa**: Thuật toán nhận diện God Nodes ($\mu + \sigma \cdot \text{std}$) kèm 2-hop Blast Radius, phân cụm Louvain / Modularity $Q$, và bộ xuất Interactive HTML D3.js, GraphRAG JSON, Obsidian Vault, GraphML.
+4. **Phân Tích Đồ Thị & Trực Quan Hóa**: Thuật toán nhận diện God Nodes (μ + threshold_sigma × σ) kèm 2-hop Blast Radius, phân cụm Louvain / Modularity (Q), và bộ xuất Interactive HTML D3.js, GraphRAG JSON, Obsidian Vault, GraphML.
 5. **Vận Hành, Bảo Trì & Hiệu Năng**: Lệnh `sot clean` & `sot vacuum` (chế độ an toàn `--dry-run`), CI/CD drift audits (`sot verify --deep`), và benchmark hiệu năng (< 25ms / 100 files, RAM < 25MB).
 6. **Xử Lý Sự Cố & Tình Huống Thực Tế**: Ambiguity Guard chống gán nhầm file trùng tên, khả năng chịu lỗi khi gặp Syntax Error, và lưu trữ quyết định kiến trúc (ADR) với `sot insert`.
 ---
@@ -141,8 +141,8 @@ In monorepos or multi-file projects, File A often imports a symbol from File B b
 3. Variable batching is chunked to a maximum of 500 parameters to guarantee compatibility across all SQLite versions.
 
 ### 3. Graph Analytics & Community Detection (`src/sot_graph/analytics/`)
-- **Label Propagation / Louvain Community Detection**: Pure Python graph clustering calculating modularity ($Q$) and cohesion scores without heavy C-extensions.
-- **God Node Detection**: Automatically flags hub nodes exceeding distribution thresholds ($\mu + \sigma \cdot \text{std}$) and calculates their **2-hop Blast Radius**.
+- **Label Propagation / Louvain Community Detection**: Pure Python graph clustering calculating modularity (Q) and cohesion scores without heavy C-extensions.
+- **God Node Detection**: Automatically flags hub nodes exceeding distribution thresholds (μ + threshold_sigma × σ) and calculates their **2-hop Blast Radius**.
 - **Surprising Connections**: Identifies cross-cutting architectural relationships spanning across distant modules.
 - **Automated Reporting**: Generates a clean, comprehensive `GRAPH_REPORT.md` architecture review.
 
