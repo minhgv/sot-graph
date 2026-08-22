@@ -5,6 +5,7 @@ Supported Harnesses:
 - OpenCode
 - Google Antigravity / Gemini CLI
 - Claude Code / Cursor / Universal MCP
+- ZCode
 """
 
 from sot_graph.adapters.installer import install_harnesses, list_supported_harnesses

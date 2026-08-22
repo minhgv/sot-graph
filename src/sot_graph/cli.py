@@ -699,8 +699,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
     # setup
-    p_setup = subparsers.add_parser("setup", help="Configure AI coding harnesses (OMP, OpenCode, Antigravity, Claude)")
-    p_setup.add_argument("--harness", default="all", choices=["all", "omp", "opencode", "antigravity", "claude"], help="Target harness (default: all)")
+    p_setup = subparsers.add_parser("setup", help="Configure AI coding harnesses (OMP, OpenCode, Antigravity, Claude, ZCode)")
+    p_setup.add_argument("--harness", default="all", choices=["all", "omp", "opencode", "antigravity", "claude", "zcode"], help="Target harness (default: all)")
     p_setup.add_argument("--global-only", action="store_true", help="Install to user home directory only")
     p_setup.add_argument("--workspace-only", action="store_true", help="Install to current workspace only")
     p_setup.add_argument("--list", action="store_true", help="List supported harnesses")

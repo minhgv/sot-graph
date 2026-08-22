@@ -15,6 +15,7 @@ from sot_graph.adapters.omp import setup_omp
 from sot_graph.adapters.opencode import setup_opencode
 from sot_graph.adapters.antigravity import setup_antigravity
 from sot_graph.adapters.claude import setup_claude
+from sot_graph.adapters.zcode import setup_zcode
 from sot_graph.cli import build_parser, cmd_setup
 
 
@@ -36,6 +37,7 @@ class TestHarnessAdapters(unittest.TestCase):
         self.assertIn("opencode", harnesses)
         self.assertIn("antigravity", harnesses)
         self.assertIn("claude", harnesses)
+        self.assertIn("zcode", harnesses)
 
     def test_omp_adapter_workspace_and_global(self):
         with patch.object(Path, "home", return_value=self.mock_home):
@@ -103,14 +105,68 @@ class TestHarnessAdapters(unittest.TestCase):
             mcp_data = json.loads(ws_mcp.read_text())
             self.assertIn("sot-graph", mcp_data["mcpServers"])
 
+    def test_zcode_adapter_setup(self):
+        with patch.object(Path, "home", return_value=self.mock_home):
+            installed = setup_zcode(self.root, global_install=True, workspace_install=True)
+            self.assertTrue(len(installed) >= 4)
+
+            # Workspace artifacts: nested MCP config, skill, slash commands
+            ws_cfg = self.root / ".zcode" / "config.json"
+            ws_skill = self.root / ".zcode" / "skills" / "sot-graph" / "SKILL.md"
+            self.assertTrue(ws_cfg.exists())
+            self.assertTrue(ws_skill.exists())
+            for cmd in ("sot-search.md", "sot-explore.md", "sot-pack.md"):
+                self.assertTrue((self.root / ".zcode" / "commands" / cmd).exists())
+
+            cfg = json.loads(ws_cfg.read_text())
+            server = cfg["mcp"]["servers"]["sot-graph"]
+            self.assertEqual(server["args"], ["-m", "sot_graph.cli", "mcp"])
+            self.assertEqual(server["env"]["PYTHONPATH"], str(self.root / "src"))
+            self.assertEqual(server["cwd"], str(self.root))
+            self.assertIn("name: sot-graph", ws_skill.read_text())
+
+            # Global assertions
+            self.assertTrue((self.mock_home / ".zcode" / "config.json").exists())
+            self.assertTrue((self.mock_home / ".zcode" / "skills" / "sot-graph" / "SKILL.md").exists())
+
+    def test_zcode_config_merge_preserves_foreign_keys(self):
+        with patch.object(Path, "home", return_value=self.mock_home):
+            # Pre-seed existing .zcode/config.json with foreign keys
+            ws_cfg = self.root / ".zcode" / "config.json"
+            ws_cfg.parent.mkdir(parents=True, exist_ok=True)
+            ws_cfg.write_text(json.dumps({
+                "mcp": {"servers": {"other": {"command": "foo"}}, "transport": "stdio"},
+                "theme": "dark",
+            }))
+
+            setup_zcode(self.root, global_install=False, workspace_install=True)
+
+            merged = json.loads(ws_cfg.read_text())
+            self.assertEqual(merged["theme"], "dark")
+            self.assertEqual(merged["mcp"]["transport"], "stdio")
+            self.assertEqual(merged["mcp"]["servers"]["other"]["command"], "foo")
+            self.assertIn("sot-graph", merged["mcp"]["servers"])
+
+    def test_zcode_setup_idempotent(self):
+        with patch.object(Path, "home", return_value=self.mock_home):
+            setup_zcode(self.root, global_install=False, workspace_install=True)
+            first_cfg = (self.root / ".zcode" / "config.json").read_text()
+            first_skill = (self.root / ".zcode" / "skills" / "sot-graph" / "SKILL.md").read_text()
+
+            setup_zcode(self.root, global_install=False, workspace_install=True)
+
+            self.assertEqual(first_cfg, (self.root / ".zcode" / "config.json").read_text())
+            self.assertEqual(first_skill, (self.root / ".zcode" / "skills" / "sot-graph" / "SKILL.md").read_text())
+
     def test_unified_installer_all(self):
         with patch.object(Path, "home", return_value=self.mock_home):
             results = install_harnesses(["all"], root=self.root, global_install=True, workspace_install=True)
-            self.assertEqual(len(results), 4)
+            self.assertEqual(len(results), 5)
             self.assertIn("omp", results)
             self.assertIn("opencode", results)
             self.assertIn("antigravity", results)
             self.assertIn("claude", results)
+            self.assertIn("zcode", results)
 
     def test_cli_setup_command(self):
         with patch.object(Path, "home", return_value=self.mock_home):
@@ -124,6 +180,7 @@ class TestHarnessAdapters(unittest.TestCase):
             self.assertTrue((self.root / ".opencode" / "skills" / "sot-graph" / "SKILL.md").exists())
             self.assertTrue((self.root / ".gemini" / "settings.json").exists())
             self.assertTrue((self.root / ".mcp.json").exists())
+            self.assertTrue((self.root / ".zcode" / "config.json").exists())
 
 
 if __name__ == "__main__":

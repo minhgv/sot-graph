@@ -1,6 +1,6 @@
 """
 sot_graph.adapters.installer - Unified Multi-Harness Installer.
-Configures OMP, OpenCode, Antigravity, and Claude harnesses seamlessly.
+Configures OMP, OpenCode, Antigravity, Claude, and ZCode harnesses seamlessly.
 """
 
 from pathlib import Path
@@ -10,12 +10,14 @@ from sot_graph.adapters.omp import setup_omp
 from sot_graph.adapters.opencode import setup_opencode
 from sot_graph.adapters.antigravity import setup_antigravity
 from sot_graph.adapters.claude import setup_claude
+from sot_graph.adapters.zcode import setup_zcode
 
 SUPPORTED_HARNESSES = {
     "omp": ("Oh My Pi (OMP) Native Extension, Skill & Rules", setup_omp),
     "opencode": ("OpenCode Skill, Plugin & MCP Server", setup_opencode),
     "antigravity": ("Google Antigravity / Gemini CLI MCP & Skill", setup_antigravity),
     "claude": ("Claude Code & Cursor Universal MCP", setup_claude),
+    "zcode": ("ZCode Workspace MCP, Skill & Slash Commands", setup_zcode),
 }
 
 
@@ -34,7 +36,7 @@ def install_harnesses(
     Install and configure adapters for selected harnesses.
     
     Args:
-        harnesses: List of harness identifiers ('omp', 'opencode', 'antigravity', 'claude', 'all').
+        harnesses: List of harness identifiers ('omp', 'opencode', 'antigravity', 'claude', 'zcode', 'all').
         root: Target workspace root directory (defaults to current working directory).
         global_install: Whether to write user-level global configurations.
         workspace_install: Whether to write workspace-level configurations.
