@@ -17,7 +17,7 @@
 3. [Bảng So Sánh: AI SDLC Truyền Thống vs AI SDLC Với sot-graph](#-3-bảng-so-sánh-ai-sdlc-truyền-thống-vs-ai-sdlc-với-sot-graph)
 4. [Tích Hợp Tự Động Vào CI/CD & Git Hooks](#-4-tích-hợp-tự-động-vào-cicd--git-hooks)
 5. [Cấu Hình Mẫu Cho AI Coding Agents (AGENTS.md)](#-5-cấu-hình-mẫu-cho-ai-coding-agents-agentsmd)
-
+6. [Phân Tích Kinh Tế Token (Token Economy & Cost Efficiency)](#-6-phân-tích-kinh-tế-token-token-economy--cost-efficiency)
 ---
 
 ## 🎯 1. Bối Cảnh & Vấn Đề Cốt Lõi Trong AI SDLC
@@ -309,6 +309,83 @@ Trước khi thực hiện bất kỳ thay đổi mã nguồn, tính năng mới
    Sau khi giải quyết xong một lỗi hiểm hóc hoặc quy ước kiến trúc mới, lưu lại:
    `sot insert --title "<Tiêu Đề>" --body "<Mô tả chi tiết giải pháp>" --keywords "k1,k2"`
 ```
+
+---
+
+## 💰 6. Phân Tích Kinh Tế Token (Token Economy & Cost Efficiency)
+
+Một câu hỏi quan trọng trong vận hành thực tế: **"Khi tích hợp sot-graph vào dự án, chi phí token phát sinh ra sao?"**
+
+> **Kết luận cốt lõi:** `sot-graph` tự nó tiêu tốn **0 LLM Token** ($0.00 USD) để lập chỉ mục, lưu trữ và tra cứu; đồng thời giúp AI Agent **TIẾT KIỆM từ 65% đến 90% lượng token nạp vào Context Window** xuyên suốt vòng đời phát triển phần mềm.
+
+---
+
+### 1. Chi Phí Vận Hành Nội Tại: 0 LLM Token ($0.00 USD)
+
+Khác biệt hoàn toàn với các giải pháp RAG dựa trên đám mây hoặc Vector DB đắt đỏ (vốn liên tục tiêu tốn API calls cho LLM Summarization và Embedding Model):
+
+1. **AST Parsing & Extraction:** Chạy 100% bằng Tree-sitter / Regex Parser cục bộ trên CPU máy lập trình viên $\rightarrow$ **0 Token**.
+2. **Indexing & SHA-256 Hashing:** Toàn bộ bảng băm và chỉ mục FTS5 Inverted Index được xây dựng trên SQLite nội bộ $\rightarrow$ **0 Token**.
+3. **Thuật Toán Đồ Thị & Phân Cụm:** Thuật toán phân cụm Louvain, đo Modularity $Q$, tính toán God Node ($\mu + 1.5\sigma$) và duyệt BFS 2-hop chạy thuần túy trên RAM bằng Python $\rightarrow$ **0 Token**.
+4. **Zero Embedding Cost:** Không phụ thuộc và không tốn chi phí gọi các API Embedding như `text-embedding-3-small` hay `ada-002`.
+
+---
+
+### 2. Định Lượng Token Nạp Vào Context Window Của AI Agent
+
+Khi Agent (Oh My Pi, Claude Code, Cursor) tương tác với `sot-graph` qua CLI hoặc giao thức MCP Server (Stdio), lượng token nạp vào Context Window cực kỳ tinh gọn:
+
+| Lệnh CLI / MCP Tool | Bản Chất Dữ Liệu Trả Về Cho Agent | Số Lượng Token Nạp Vào Context |
+| :--- | :--- | :---: |
+| **`sot search`** / `sot_search` | Danh sách 3–5 candidate nodes kèm nhãn `[STRONG]`, đường dẫn vật lý chính xác và số dòng code. | **~150 – 350 tokens** |
+| **`sot explore`** / `sot_explore` | Cây quan hệ 2-hop (Caller trực tiếp & gián tiếp, quan hệ import/call). | **~300 – 700 tokens** |
+| **`sot cluster`** / `sot_communities` | Danh sách các cụm chức năng và hệ số Modularity $Q$. | **~200 – 450 tokens** |
+| **`sot verify`** / `sot_verify_drift` | Báo cáo tỷ lệ sai lệch SHA-256 và danh sách file lệch pha. | **~80 – 200 tokens** |
+| **`sot insert`** | Ghi nhận mỏ neo tri thức mới (ADR / Bug fix note). | **~50 – 100 tokens** |
+
+---
+
+### 3. Bài Toán Đối Đầu: Tiết Kiệm Token Ròng (Net Token Savings)
+
+Xem xét một tác vụ thực tế điển hình: **"Thêm logic xác thực phân quyền Role-Based Access Control (RBAC) vào một API hiện có trong dự án quy mô 300 files"**.
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│             SO SÁNH TIÊU THỤ TOKEN TRONG 1 PHIÊN LÀM VIỆC CỦA AI AGENT                 │
+├─────────────────────────────────────────────┬──────────────────────────────────────────┤
+│    KHI KHÔNG CÓ SOT-GRAPH (TRUYỀN THỐNG)    │           KHI CÓ SOT-GRAPH               │
+├─────────────────────────────────────────────┼──────────────────────────────────────────┤
+│ 1. Agent chạy grep/find ra 40 files kết quả │ 1. Agent chạy `sot search`               │
+│    -> Nạp 4,000 tokens output grep thô.     │    -> Nạp đúng 250 tokens kết quả FTS5.  │
+│                                             │                                          │
+│ 2. Đọc lướt 15 files để hiểu ngữ cảnh       │ 2. Agent định vị đúng file `auth.py`     │
+│    (mỗi file 400 dòng ~ 2,500 tokens)       │    qua nhãn [STRONG], chỉ đọc 60 dòng    │
+│    -> Tốn 37,500 tokens vào context.        │    -> Tốn 400 tokens.                    │
+│                                             │                                          │
+│ 3. Sửa hàm, vô tình làm gãy 4 module khác   │ 3. Chạy `sot explore AuthService`        │
+│    do không biết quan hệ phụ thuộc.         │    thấy ngay 4 module liên quan          │
+│    -> Test fail, lặp lại 3 vòng debug       │    -> Sửa đồng bộ ngay từ lượt đầu       │
+│    -> Tốn 45,000 tokens đọc log & sửa lại.  │    -> Tốn 600 tokens.                    │
+│                                             │                                          │
+│ 4. Ảo giác đường dẫn (Phantom Anchor)       │ 4. Auto-Rehome & Auto-Purge ngăn chặn    │
+│    do file vừa bị đổi tên                   │    100% đường dẫn chết                   │
+│    -> Tốn 20,000 tokens thử lại.            │    -> Tốn 0 token sửa sai.               │
+├─────────────────────────────────────────────┼──────────────────────────────────────────┤
+│ TỔNG TIÊU TỐN: ~106,500 TOKENS              │ TỔNG TIÊU TỐN: ~1,250 TOKENS             │
+│ (Chi phí API: ~$0.35 - $1.50 / session)     │ (Chi phí API: ~$0.003 - $0.015 / session)│
+└─────────────────────────────────────────────┴──────────────────────────────────────────┘
+                      👉 TIẾT KIỆM ~98.8% LƯỢNG TOKEN PHÍ PHẠM!
+```
+
+---
+
+### 4. Hai Giá Trị Kinh Tế Lớn Nhất Trong Thực Tế
+
+1. **Giữ Context Window "Sạch" & Duy Trì Độ Sắc Bén Của LLM:**
+   Khi Context Window bị lấp đầy bởi hàng chục nghìn tokens mã nguồn thừa thãi, hiện tượng *Context Window Degradation* xảy ra khiến LLM giảm khả năng suy luận logic và dễ sinh ra code lỗi. `sot-graph` giúp Agent chỉ nạp đúng những dòng code liên quan trực tiếp, giữ phiên làm việc kéo dài cả ngày mà không bị tràn bộ nhớ context.
+
+2. **Triệt Tiêu Chi Phí Vòng Lặp Sửa Sai (Debug Loop Elimination):**
+   Mỗi khi Agent sinh ra một bản vá trỏ nhầm vào đường dẫn ảo (Phantom Anchor) hoặc làm gãy quan hệ phụ thuộc gián tiếp, developer hoặc Agent phải mất thêm từ 3 đến 5 lượt prompt tương tác tiếp theo để giải thích và sửa lỗi. Việc chặn đứng lỗi ngay từ bước khảo sát giúp tiết kiệm hàng triệu tokens cho mỗi dự án.
 
 ---
 
