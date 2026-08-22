@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](pyproject.toml)
 [![SQLite: WAL + FTS5](https://img.shields.io/badge/SQLite-FTS5%20%2B%20WAL-orange.svg)](src/sot_graph/db.py)
-[![Tests: 93 passed](https://img.shields.io/badge/Tests-93%2F93%20Passed-brightgreen.svg)](tests/)
+[![Tests: 138 passed](https://img.shields.io/badge/Tests-138%2F138%20Passed-brightgreen.svg)](tests/)
 [![Architecture: Zero-Daemon](https://img.shields.io/badge/Architecture-Zero--Daemon-purple.svg)](#-database-architecture--project-isolation)
 
 ---
@@ -19,7 +19,12 @@ Traditional agent memory and RAG tools suffer from **Phantom Anchors and Dead Pa
 - **Filesystem Chokepoint**: Disk reality is absolute truth. Hints only say *"look at this path"*; the reconciler verifies the actual file on disk.
 - **Trust Verdict System**: Every search result is physically checked before the agent sees it (`[STRONG]`, `[WEAK]`, `[REBUILT]`, `[REMOVED]`).
 - **Binding-Aware Call Graph**: Cross-file edges resolve via lexical scope, call kind, receivers, and import modules — never by bare name matching — so `requests.get()` or `db.execute()` are never confused with project symbols.
-- **ContextBundle Packaging**: `sot pack <symbol>` slices a k-hop subgraph (exact source span + 1-hop contracts + 2-hop signature stubs) into a capped, `content_is_untrusted` YAML artifact for agent prompt registers.
+- **ContextBundle Packaging**: `sot pack <symbol>` slices a k-hop subgraph (exact source span + 1-hop contracts + 2-hop signature stubs) into a capped, `content_is_untrusted` YAML artifact for agent prompt registers; repo-root `AGENTS.md` rides along as an explicitly `content_is_trusted` instruction block.
+- **Symbol Navigation**: `sot usages` (find-all-references grouped by caller, with unresolved bare-name renaming risk), `sot implementations` (extends/implements both directions) and `sot rename` (report-only impact plan).
+- **Repo Map**: `sot map [--tokens N] [--focus a,b]` — token-budgeted symbol map ranked by personalized PageRank for cheap agent orientation.
+- **MCP 2025-06-18**: 11 read-only tools with structured output (`outputSchema`/`structuredContent`), Resource Links for lazy node fetches, `resources/subscribe` push when the graph generation changes, and cursor pagination.
+- **Optional Hybrid Retrieval**: `[vector]` extra fuses FTS5 BM25 with sqlite-vec cosine via reciprocal-rank fusion (`sot embed` + `sot search --hybrid`); the zero-dep core keeps BM25 as the floor.
+- **Optional tree-sitter Breadth**: `[tree-sitter]` extra upgrades Go/Rust/Java/Kotlin/Swift from regex fallbacks to real AST extraction through the same resolution pipeline.
 - **Conflict-Safe Concurrency**: All mutations pass a stable `.sot/write.lock` plus per-path generation compare-and-swap; stale writers get deterministic `CONFLICT` verdicts instead of corrupting newer publications.
 - **Sub-millisecond Performance**: SQLite WAL + FTS5 (BM25, unicode61) search in $< 1.5\text{ ms}$, bounded reader/writer caches ($\le 8\text{MB}$ per connection), zero external server daemons.
 
@@ -193,7 +198,39 @@ Concurrent reconciles are serialized behind `.sot/write.lock` with per-path gene
 # TARGET_TOO_LARGE / STALE_SNAPSHOT instead of silent truncation.
 ```
 
-### 4. Real-Time Sync Daemon (`sot watch`)
+### 4. Navigation & Orientation
+```bash
+# Find-all-references grouped by caller + unresolved bare-name risk
+./bin/sot usages "commit_file_batch"
+
+# extends/implements edges in both directions
+./bin/sot implementations "BaseStore"
+
+# Report-only rename impact plan (no files modified)
+./bin/sot rename "explore_node" --to walk_node
+
+# Token-budgeted repo map ranked by personalized PageRank (Aider recipe)
+./bin/sot map --tokens 1024 --focus "Database.commit_file_batch"
+```
+
+### 5. Optional Extras
+```bash
+pip install 'sot-graph[vector]'        # sqlite-vec hybrid search
+./bin/sot embed && ./bin/sot search "retry logic" --hybrid
+
+pip install 'sot-graph[tree-sitter]'   # real ASTs for Go/Rust/Java/Kotlin/Swift
+
+# Event-driven sync without a daemon: reconcile after merge/checkout
+./bin/sot setup --hooks
+
+# SCIP interop for editors/Sourcegraph
+./bin/sot export --format scip
+
+# Deterministic context-cost benchmark (pack vs whole-file reads)
+python3 scripts/benchmark_context.py
+```
+
+### 6. Real-Time Sync Daemon (`sot watch`)
 ```bash
 # Watch filesystem and reconcile on change (debounced 200ms, CAS-gated)
 ./bin/sot watch
@@ -202,7 +239,7 @@ Concurrent reconciles are serialized behind `.sot/write.lock` with per-path gene
 ./bin/sot watch --backend poll --interval-ms 500
 ```
 
-### 5. Architecture Fact Bundle & Reports
+### 7. Architecture Fact Bundle & Reports
 ```bash
 # Extract 5 standardized fact files (.sot/bundle/) for LLM architecture generation
 ./bin/sot bundle -o .sot/bundle
@@ -214,7 +251,7 @@ Concurrent reconciles are serialized behind `.sot/write.lock` with per-path gene
 ./bin/sot cluster
 ```
 
-### 6. Interactive Visualizer & Exporters
+### 8. Interactive Visualizer & Exporters
 ```bash
 # Open interactive zero-server D3.js force-directed visualizer
 ./bin/sot viz --open
@@ -229,7 +266,7 @@ Concurrent reconciles are serialized behind `.sot/write.lock` with per-path gene
 ./bin/sot export --format graphml -o graph.graphml
 ```
 
-### 7. Integrity Verification & Maintenance
+### 9. Integrity Verification & Maintenance
 ```bash
 # Check for drift between database and filesystem (CI-safe read-only audit)
 ./bin/sot verify --deep

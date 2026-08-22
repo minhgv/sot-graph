@@ -1,7 +1,9 @@
 # sot-graph Roadmap v3 — Research-Driven
 
-**Edition:** v3.0 — 2026-08-22. Derived from a 3-pronged research pass (competitor landscape,
-agentic-context trends, indexing technology) executed by parallel research agents, then
+**Edition:** v3.1 — 2026-08-23. **Status: IMPLEMENTED.** All six phases shipped
+(95923e2 → a1da45a, 138 tests green); see the per-phase ✅ markers below.
+Derived from a 3-pronged research pass (competitor landscape, agentic-context
+trends, indexing technology) executed by parallel research agents, then
 gap-analyzed against the *verified* current inventory of this repository.
 
 ---
@@ -98,7 +100,7 @@ Prioritized by agent utility per unit cost, respecting the zero-dependency/no-da
 philosophy. Phases 1–3 are stdlib-only. Phases 4–5 are optional extras (watchfiles
 precedent). Phase 6 is interop polish.
 
-### Phase 1 — Navigation Table-Stakes *(pure graph; S–M effort)*
+### Phase 1 — Navigation Table-Stakes *(pure graph; S–M effort)* ✅ 95923e2
 
 Close the biggest gap vs Serena/SCIP: reference-finding as a first-class operation.
 
@@ -112,7 +114,7 @@ Close the biggest gap vs Serena/SCIP: reference-finding as a first-class operati
 - **`sot rename --plan <old> <new>`** (report-only): list all affected definition + usage
   sites, flag risk where pending edges are AMBIGUOUS. No filesystem writes — MCP-safe.
 
-### Phase 2 — Orientation & Context Engineering *(pure graph; M effort)*
+### Phase 2 — Orientation & Context Engineering *(pure graph; M effort)* ✅ a29245f
 
 - **`sot map [--tokens N] [--focus sym1,sym2]`** (CLI + MCP `sot_map`): Aider-style
   personalized PageRank over the file↔symbol graph; binary-search the symbol count to fit
@@ -124,7 +126,7 @@ Close the biggest gap vs Serena/SCIP: reference-finding as a first-class operati
 - **Notes as MCP resources**: `sot://notes`, `sot://notes/{id}` + `sot_notes` tool —
   parity with Serena's memory tools without building a memory product.
 
-### Phase 3 — MCP 2025-06-18 Modernization *(stdlib; M effort)*
+### Phase 3 — MCP 2025-06-18 Modernization *(stdlib; M effort)* ✅ f4fff1e
 
 - `outputSchema` + `structuredContent` on sot_search / sot_explore / sot_usages / sot_pack.
 - **Resource Links** in search results (`sot://node/{id}`) so clients lazily fetch bodies
@@ -134,7 +136,7 @@ Close the biggest gap vs Serena/SCIP: reference-finding as a first-class operati
   staleness signal replaces client polling.
 - Cursor-based pagination on `resources/list`.
 
-### Phase 4 — Hybrid Retrieval *(optional `[vector]` extra; M–L effort)*
+### Phase 4 — Hybrid Retrieval *(optional `[vector]` extra; M–L effort)* ✅ 628c103
 
 - `[vector]` extra: sqlite-vec (vec0 virtual table) + pluggable embedder interface.
   FTS5 BM25 remains the always-available floor; when vectors exist, fuse
@@ -142,7 +144,7 @@ Close the biggest gap vs Serena/SCIP: reference-finding as a first-class operati
   search output. Trust verdicts remain orthogonal to score fusion.
 - Embedder stays injectable (local model, API, or none) — the core never requires one.
 
-### Phase 5 — Language Breadth *(optional `[tree-sitter]` extra; L effort)*
+### Phase 5 — Language Breadth *(optional `[tree-sitter]` extra; L effort)* ✅ f1727ab
 
 - `[tree-sitter]` extra with pinned `py-tree-sitter` + grammar wheels
   (Go, Rust, Java, Kotlin, Swift first). Stdlib/vendored extractors remain the default;
@@ -150,7 +152,7 @@ Close the biggest gap vs Serena/SCIP: reference-finding as a first-class operati
 - Grammar pinning policy documented (`tree-sitter>=0.23,<0.24` style) to avoid the known
   grammar-API breakage between minor releases.
 
-### Phase 6 — Ecosystem Interop *(S–M effort each)*
+### Phase 6 — Ecosystem Interop *(S–M effort each)* ✅ a1da45a
 
 - **`sot export --format scip`**: protobuf SCIP index (def/ref occurrences, relationships)
   for editor/Sourcegraph interop (~200 LOC bridge; internal storage stays SQLite).
@@ -181,13 +183,13 @@ Close the biggest gap vs Serena/SCIP: reference-finding as a first-class operati
 
 | Metric | Baseline (2026-08) | Target |
 |---|---|---|
-| MCP tool count | 7 | 11 (+usages, +map, +notes, +implementations) |
+| MCP tool count | 7 | 11 ✅ (sot_usages, sot_implementations, sot_map, sot_notes) |
 | Token cost, orientation task (repo overview) | 58.6k (grep protocol) | < 15k via `sot map` |
 | Token cost, deep-dive task (pack vs grep) | 18.8k vs 58.6k (−68%) | −70% sustained |
 | Dead paths in retrieval | 2 (grep protocol) | 0 |
 | Languages (zero-dep default) | py/js/ts/dart | unchanged |
 | Languages (with extras) | py/js/ts/dart | +go/rust/java/kotlin/swift |
-| Test suite | 97 green | keep ≥ 97, new features land with regression tests |
+| Test suite | 97 green | 138 green ✅ (41 new across the 6 phases) |
 
 ---
 
