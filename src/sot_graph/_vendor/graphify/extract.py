@@ -438,12 +438,278 @@ def extract_ruby(path: Path) -> Dict[str, Any]:
     return _extract_regex_patterns(path, patterns)
 
 
+PHP_TYPE_PAT = re.compile(
+    r"^(?:(?:abstract|final|readonly)\s+)*(class|interface|trait|enum)\s+"
+    r"([A-Za-z_][A-Za-z0-9_]*)(.*)$"
+)
+PHP_EXTENDS_PAT = re.compile(r"\bextends\s+([A-Za-z_][A-Za-z0-9_\\]*)")
+PHP_IMPLEMENTS_PAT = re.compile(r"\bimplements\s+([A-Za-z0-9_\\,\s]+)")
+PHP_USE_IN_TYPE_PAT = re.compile(
+    r"^use\s+([A-Za-z_][A-Za-z0-9_\\]*)((?:\s*,\s*[A-Za-z_][A-Za-z0-9_\\]*)*)\s*;"
+)
+PHP_USE_IMPORT_PAT = re.compile(
+    r"^use\s+(?:function\s+|const\s+)?([A-Za-z_][A-Za-z0-9_\\]*)"
+    r"(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?\s*;"
+)
+PHP_METHOD_PAT = re.compile(
+    r"^(?:(?:public|protected|private|static|abstract|final|readonly)\s+)*"
+    r"function\s+(&?[A-Za-z_][A-Za-z0-9_]*)\s*\("
+)
+PHP_THIS_CALL_PAT = re.compile(r"\$this->\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+PHP_SELF_CALL_PAT = re.compile(r"\b(?:self|static)\s*::\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+PHP_PARENT_CALL_PAT = re.compile(r"\bparent\s*::\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+PHP_STATIC_CALL_PAT = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\s*::\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+PHP_NEW_PAT = re.compile(r"\bnew\s+\\?([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+
+
+def _php_short_name(fqn: str) -> str:
+    """Last segment of a PHP qualified name: 'App\\Contracts\\Bar' -> 'Bar'."""
+    return fqn.rsplit("\\", 1)[-1].strip()
+
+
 def extract_php(path: Path) -> Dict[str, Any]:
-    patterns = [
-        {"regex": r"class\s+([a-zA-Z0-9_]+)", "kind": "class", "prefix": "class"},
-        {"regex": r"function\s+([a-zA-Z0-9_]+)\s*\(", "kind": "function", "prefix": "function"},
-    ]
-    return _extract_regex_patterns(path, patterns)
+    """PHP extractor: classes, interfaces, traits, enums, class-qualified
+    methods, inheritance/trait edges, imports, and scoped call sites.
+
+    Line-based state machine in the spirit of the Dart extractor: comments are
+    stripped, brace depth tracks the enclosing type/method so symbols get
+    stable ids ('PaymentGateway.charge') instead of colliding bare names.
+    """
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return {"nodes": [], "edges": [], "error": str(e)}
+
+    nodes = [{
+        "id": path.name,
+        "label": path.name,
+        "kind": "file",
+        "source_location": "L1",
+        "doc": "",
+    }]
+    edges = []
+
+    current_type: Optional[str] = None
+    current_method: Optional[str] = None
+    brace_depth = 0
+    type_brace_depth = 0
+    method_brace_depth = 0
+
+    lines = content.splitlines()
+    i = 0
+    in_block_comment = False
+
+    def _inject_tail(line_text: str) -> None:
+        """Re-queue the statements after a single-line '{' so compact PHP
+        ('class A { function x() {...} }') is still walked statement by
+        statement. Braces are blanked: the declaring line already counted
+        them for depth tracking."""
+        if "{" not in line_text:
+            return
+        tail = line_text.split("{", 1)[1]
+        tail = tail.replace("{", " ").replace("}", " ").strip()
+        if tail:
+            lines.insert(i, tail)
+
+    while i < len(lines):
+        raw_line = lines[i]
+        i += 1
+        line = raw_line.strip()
+        if not line:
+            continue
+        if in_block_comment:
+            if "*/" in line:
+                in_block_comment = False
+                line = line.split("*/", 1)[1].strip()
+            else:
+                continue
+        if line.startswith("/*"):
+            if "*/" in line:
+                line = line.split("*/", 1)[1].strip()
+            else:
+                in_block_comment = True
+                continue
+        if not line or line.startswith("//") or line.startswith("#"):
+            continue
+
+        # Type declarations (class/interface/trait/enum), with a bounded
+        # lookahead for headers that span multiple lines.
+        m_type = PHP_TYPE_PAT.match(line)
+        if m_type:
+            kind, name, rest = m_type.group(1), m_type.group(2), m_type.group(3)
+            header = rest
+            lookahead = 0
+            while "{" not in header and ";" not in header and lookahead < 5 and i < len(lines):
+                nxt = lines[i].strip()
+                if nxt.startswith("//") or nxt.startswith("#") or nxt.startswith("*"):
+                    break
+                header += " " + nxt
+                i += 1
+                lookahead += 1
+            current_type = name
+            current_method = None
+            type_brace_depth = brace_depth
+            nodes.append({
+                "id": name,
+                "label": f"{kind} {name}",
+                "kind": kind,
+                "source_location": f"L{i - lookahead}",
+                "doc": line,
+            })
+            edges.append({
+                "source": path.name,
+                "target": name,
+                "relation": "defines",
+                "source_location": f"L{i - lookahead}",
+            })
+            m_ext = PHP_EXTENDS_PAT.search(header)
+            if m_ext:
+                edges.append({
+                    "source": name,
+                    "target": _php_short_name(m_ext.group(1)),
+                    "relation": "extends",
+                    "source_location": f"L{i - lookahead}",
+                })
+            m_imp = PHP_IMPLEMENTS_PAT.search(header)
+            if m_imp:
+                for iface in m_imp.group(1).split(","):
+                    iface = iface.strip()
+                    # Stop at any trailing '{' that leaked into the capture.
+                    iface = iface.split("{", 1)[0].strip()
+                    if iface:
+                        edges.append({
+                            "source": name,
+                            "target": _php_short_name(iface),
+                            "relation": "implements",
+                            "source_location": f"L{i - lookahead}",
+                        })
+            _inject_tail(line)
+            # Count braces across the whole consumed header: the '{' may sit
+            # on a lookahead line, and missing it desynchronizes scope exit.
+            consumed = line + " " + header
+            brace_depth += consumed.count("{") - consumed.count("}")
+            continue
+
+        m_use = PHP_USE_IN_TYPE_PAT.match(line) if current_type else None
+        if m_use:
+            names = [m_use.group(1)] + [
+                n.strip() for n in (m_use.group(2) or "").split(",") if n.strip()
+            ]
+            for used in names:
+                edges.append({
+                    "source": current_type,
+                    "target": _php_short_name(used),
+                    "relation": "uses",
+                    "source_location": f"L{i}",
+                })
+            continue
+        if not current_type:
+            m_import = PHP_USE_IMPORT_PAT.match(line)
+            if m_import:
+                edges.append({
+                    "source": path.name,
+                    "target": _php_short_name(m_import.group(1)),
+                    "relation": "imports",
+                    "source_location": f"L{i}",
+                })
+                continue
+
+        m_method = PHP_METHOD_PAT.match(line)
+        if m_method:
+            func_name = m_method.group(1).lstrip("&")
+            if current_type:
+                method_id = f"{current_type}.{func_name}"
+                nodes.append({
+                    "id": method_id,
+                    "label": f"function {func_name}",
+                    "kind": "method",
+                    "source_location": f"L{i}",
+                    "doc": line,
+                })
+                edges.append({
+                    "source": current_type,
+                    "target": method_id,
+                    "relation": "defines",
+                    "source_location": f"L{i}",
+                })
+            else:
+                method_id = func_name
+                nodes.append({
+                    "id": method_id,
+                    "label": f"function {func_name}",
+                    "kind": "function",
+                    "source_location": f"L{i}",
+                    "doc": line,
+                })
+                edges.append({
+                    "source": path.name,
+                    "target": method_id,
+                    "relation": "defines",
+                    "source_location": f"L{i}",
+                })
+            current_method = method_id
+            method_brace_depth = brace_depth
+            _inject_tail(line)
+            brace_depth += line.count("{") - line.count("}")
+            continue
+
+        # Call sites, attributed to the enclosing method (or type).
+        if current_method or current_type:
+            call_src = current_method or current_type
+            for m in PHP_PARENT_CALL_PAT.finditer(line):
+                edges.append({
+                    "source": call_src,
+                    "target": m.group(1),
+                    "relation": "calls",
+                    "source_location": f"L{i}",
+                    # 'super', not 'parent': the dispatcher's qualification
+                    # treats the literal 'parent' as same-class scope, which
+                    # would fabricate parent::__construct() self-loops.
+                    "receiver": "super",
+                })
+            for m in PHP_THIS_CALL_PAT.finditer(line):
+                edges.append({
+                    "source": call_src,
+                    "target": m.group(1),
+                    "relation": "calls",
+                    "source_location": f"L{i}",
+                    "receiver": "self",
+                })
+            for m in PHP_SELF_CALL_PAT.finditer(line):
+                edges.append({
+                    "source": call_src,
+                    "target": m.group(1),
+                    "relation": "calls",
+                    "source_location": f"L{i}",
+                    "receiver": "self",
+                })
+            for m in PHP_STATIC_CALL_PAT.finditer(line):
+                edges.append({
+                    "source": call_src,
+                    "target": f"{m.group(1)}.{m.group(2)}",
+                    "relation": "calls",
+                    "source_location": f"L{i}",
+                    "receiver": m.group(1),
+                })
+            for m in PHP_NEW_PAT.finditer(line):
+                edges.append({
+                    "source": call_src,
+                    "target": m.group(1),
+                    "relation": "calls",
+                    "source_location": f"L{i}",
+                    "receiver": None,
+                })
+
+        had_brace = "{" in line or "}" in line
+        brace_depth += line.count("{") - line.count("}")
+        if had_brace:
+            if current_method and brace_depth <= method_brace_depth:
+                current_method = None
+            if current_type and brace_depth <= type_brace_depth:
+                current_type = None
+                current_method = None
+
+    return {"nodes": nodes, "edges": edges, "error": None}
 
 
 def extract_swift(path: Path) -> Dict[str, Any]:
