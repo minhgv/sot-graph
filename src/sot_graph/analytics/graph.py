@@ -349,6 +349,30 @@ class AnalyticsGraph:
 
         return list(groups.values())
 
+    def _repo_path_prefix(self) -> str:
+        """Longest common directory prefix across all node paths (effectively
+        the project root), computed once. Community labels use it to stay
+        repo-relative instead of echoing absolute host paths."""
+        cached = getattr(self, "_path_prefix_cache", None)
+        if cached is not None:
+            return cached
+        paths = [
+            (d.get("path") or "").replace("\\", "/").rstrip("/")
+            for d in self.nodes.values()
+        ]
+        paths = [p for p in paths if "/" in p]
+        prefix = ""
+        if paths:
+            first = paths[0].split("/")
+            for i in range(1, len(first)):
+                cand = "/".join(first[:i])
+                if all(p == cand or p.startswith(cand + "/") for p in paths):
+                    prefix = cand
+                else:
+                    break
+        self._path_prefix_cache = prefix
+        return prefix
+
     def _generate_community_label(self, nodes: List[str]) -> str:
         """Derive a human-readable title for a community based on directory structure and symbols."""
         if not nodes:
@@ -357,10 +381,13 @@ class AnalyticsGraph:
         # Tally file directory paths
         dir_counts: Dict[str, int] = collections.defaultdict(int)
         kind_counts: Dict[str, int] = collections.defaultdict(int)
+        prefix = self._repo_path_prefix()
 
         for n in nodes:
             data = self.nodes.get(n, {})
             path = data.get("path", "")
+            if prefix and path.startswith(prefix):
+                path = path[len(prefix):]
             if path:
                 parts = [p for p in path.replace("\\", "/").split("/") if p]
                 if len(parts) >= 2:

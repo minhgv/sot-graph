@@ -141,6 +141,18 @@ class AnalyticsTests(unittest.TestCase):
         self.assertEqual(metrics.edge_count, len(graph.edges))
         self.assertGreaterEqual(metrics.density, 0.0)
 
+    def test_community_labels_are_repo_relative(self) -> None:
+        self._populate_mock_project()
+        graph = AnalyticsGraph.from_database(self.db)
+        comm_res = graph.detect_communities(min_community_size=2)
+        labels = [info.label for info in comm_res.community_info.values()]
+        self.assertTrue(labels, "expected at least one community")
+        for label in labels:
+            self.assertNotIn(str(self.root_path), label,
+                             f"label must be repo-relative: {label}")
+            self.assertNotIn("/private/", label, label)
+            self.assertNotIn("/var/folders/", label, label)
+
     def test_architectural_profile_and_mermaid_diagrams(self) -> None:
         self._populate_mock_project()
         graph = AnalyticsGraph.from_database(self.db)

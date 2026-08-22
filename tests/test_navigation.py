@@ -111,6 +111,15 @@ class NavigationTests(unittest.TestCase):
         self.assertIn("store.py", out)   # definition
         self.assertIn("client.py", out)  # usage site
 
+    def test_cmd_rename_definition_is_the_symbol_site(self):
+        # A method's rename plan must point at the method's own line, not at
+        # the enclosing class ('declared inside' is context, not the site).
+        out = self._run_cmd(cmd_rename, target="SqlStore.load")
+        self.assertIn("Definitions (1)", out)
+        self.assertIn("def load", out)
+        self.assertIn("sql.py:4", out)
+        self.assertIn("declared inside: class SqlStore", out)
+
     def test_cmd_rename_flags_ambiguous_risk(self):
         out = self._run_cmd(cmd_rename, target="run")
         self.assertIn("AMBIGUOUS", out)

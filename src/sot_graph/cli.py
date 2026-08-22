@@ -334,7 +334,7 @@ def cmd_rename(args: argparse.Namespace, db: Database) -> int:
     node_id, label, kind, path, line, symbol = row
     new_name = args.to or "<new_name>"
 
-    definitions = db.conn.execute(
+    definers = db.conn.execute(
         "SELECT n.label, n.path, n.line_start FROM graph_edges e "
         "JOIN graph_nodes n ON e.src = n.id "
         "WHERE e.dst = ? AND e.relation = 'defines'", (node_id,)
@@ -345,9 +345,12 @@ def cmd_rename(args: argparse.Namespace, db: Database) -> int:
 
     print(f"\n✏️  Rename plan: '{symbol}' → '{new_name}' (report-only — no files modified)")
     print("=" * 80)
-    print(f"  Definitions ({len(definitions)}):")
-    for def_label, def_path, def_line in definitions or [(label, path, line)]:
-        print(f"    └── {def_label} ({def_path}:{def_line or 1})")
+    # The definition site is the resolved symbol itself; 'defines' edges point
+    # at the enclosing scope (file or class), which is context, not the site.
+    print(f"  Definitions (1):")
+    print(f"    └── {label} ({path}:{line or 1})")
+    for def_label, def_path, def_line in definers:
+        print(f"    └── declared inside: {def_label} ({def_path}:{def_line or 1})")
     print(f"\n  Usage sites ({len(sites)}):")
     for site_path, site_line, caller_label in sites or []:
         print(f"    └── {caller_label} ({site_path}:{site_line or 1})")
@@ -358,7 +361,7 @@ def cmd_rename(args: argparse.Namespace, db: Database) -> int:
               f"'{symbol.rsplit('.', 1)[-1]}' — manual review required:")
         for item in ambiguous:
             print(f"    └── {item['label']} ({item['path']}:{item['line'] or 1})")
-    print(f"\n  Summary: {len(definitions or [1])} definition(s), {len(sites)} usage site(s)"
+    print(f"\n  Summary: 1 definition, {len(sites)} usage site(s)"
           f"{f', {len(ambiguous)} ambiguous' if ambiguous else ''}")
     print()
     return 0
