@@ -154,6 +154,66 @@ Embed `src/sot_graph/adapters/AGENTS.md` into your workspace's `AGENTS.md` or `.
 
 ---
 
+### Maintenance and parallel reconciliation
+
+Reconciliation uses deterministic, bounded worker windows and one SQLite writer. Tune
+throughput explicitly when needed; `--workers 1` is the sequential baseline:
+
+```bash
+./bin/sot reconcile --workers 4 --batch-size 64
+./bin/sot reconcile --workers 1
+```
+
+`clean` is conservative by default: it removes missing tracked paths and orphaned
+edges/pending references while preserving live graph rows and notes. Inspect before
+writing, or reset generated rows with explicit confirmation:
+
+```bash
+./bin/sot clean --dry-run --json
+./bin/sot clean --all --yes --json
+./bin/sot clean --all --include-notes --yes --json
+```
+
+`vacuum` reports database/WAL sizes, pages, free-list space, checkpoint status, and
+elapsed time. `--dry-run` only reports metrics; the mutating operation checkpoints
+the WAL and runs SQLite `VACUUM` without deleting `-wal` or `-shm` files. Keep
+adequate free disk space and avoid running it while another writer holds the DB:
+
+```bash
+./bin/sot vacuum --dry-run --json
+./bin/sot vacuum --optimize --json
+```
+
+### MCP stdio server
+
+Install the optional SDK; the base CLI does not import MCP dependencies:
+
+```bash
+python3 -m pip install '.[mcp]'
+./bin/sot --root /path/to/repo --db /path/to/repo/.sot/sot.db mcp
+```
+
+The server is read-only, does not create a missing database, and exposes the
+bounded `sot_search`, `sot_explore`, and `sot_verify_drift` tools plus
+`sot://stats` and `sot://node/{node_id}` resources. It uses stdio: stdout is
+reserved for JSON-RPC protocol traffic and diagnostics go to stderr. Configure
+`--request-timeout` with a positive finite number and use `--log-level` for
+diagnostics.
+
+### Benchmarks
+
+Benchmark fixtures are deterministic across Python, TypeScript, Go, Rust, and
+Markdown. Each run performs a warmup, reports `perf_counter_ns` median/p95/min
+samples, records an environment fingerprint, and gates correctness against the
+single-worker result. Performance numbers are machine-dependent; correctness is
+the portable acceptance criterion:
+
+```bash
+python3 -m benchmarks.bench_reconcile \
+  --files 5000 --workers 1,2,4,8 --repeat 5 --json results.json
+python3 -m benchmarks.bench_query --files 5000 --repeat 5 --json query-results.json
+```
+
 ## 🧪 Testing
 
 The test suite exercises idempotency, content coverage scoring, auto-purging of dead paths, two-way edge resolution, and multi-language parsers:

@@ -1,0 +1,318 @@
+"""Read-only, protocol-independent service for the sot-graph MCP surface.
+
+The service deliberately does not import the MCP SDK.  It owns short-lived
+read-only SQLite connections and returns plain JSON-compatible values so it is
+usable from other protocols and straightforward to test.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import os
+import sqlite3
+import time
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, cast
+from urllib.parse import quote
+
+from sot_graph.db import Database
+from sot_graph.verifier import TrustVerifier, tokenize
+
+
+class McpServiceError(Exception):
+    """Stable public error with a machine-readable code."""
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+    def as_dict(self) -> Dict[str, str]:
+        return {"code": self.code, "message": self.message}
+
+
+@dataclass(frozen=True)
+class ServiceLimits:
+    search: int = 50
+    explore_depth: int = 4
+    explore_nodes: int = 500
+    drift: int = 1_000
+    response_bytes: int = 256 * 1024
+    body_bytes: int = 8 * 1024
+
+
+class McpService:
+    """Bounded read-only graph operations rooted at one project directory."""
+
+    def __init__(
+        self,
+        db_path: str,
+        project_root: str,
+        *,
+        limits: Optional[ServiceLimits] = None,
+        timeout_ms: int = 2_000,
+    ) -> None:
+        self.db_path = os.path.abspath(os.fspath(db_path))
+        self.project_root = os.path.realpath(os.path.abspath(os.fspath(project_root)))
+        self.limits = limits or ServiceLimits()
+        self.timeout_ms = max(1, int(timeout_ms))
+        if not os.path.isdir(self.project_root):
+            raise McpServiceError("invalid_root", "project root must be an existing directory")
+        if not os.path.isfile(self.db_path):
+            raise McpServiceError("database_unavailable", "SQLite database does not exist")
+        self._closed = False
+
+    def close(self) -> None:
+        """Mark the service closed; per-operation connections are already closed."""
+        self._closed = True
+
+    def _connection(self) -> sqlite3.Connection:
+        if self._closed:
+            raise McpServiceError("closed", "MCP service is closed")
+        # URI mode=ro guarantees that this surface cannot create schema, WAL,
+        # journal, or other files even when the caller supplies a new database.
+        uri = "file:" + quote(self.db_path, safe="/") + "?mode=ro"
+        try:
+            conn = sqlite3.connect(uri, uri=True, timeout=self.timeout_ms / 1000.0)
+            conn.row_factory = sqlite3.Row
+            deadline = time.monotonic() + self.timeout_ms / 1000.0
+            conn.set_progress_handler(lambda: 1 if time.monotonic() >= deadline else 0, 1_000)
+            return conn
+        except (sqlite3.Error, OSError) as exc:
+            raise McpServiceError("database_unavailable", "unable to open read-only graph database") from exc
+
+    def _run(self, operation: Any) -> Any:
+        conn = self._connection()
+        try:
+            return operation(conn)
+        except McpServiceError:
+            raise
+        except sqlite3.OperationalError as exc:
+            if "interrupt" in str(exc).lower() or "locked" in str(exc).lower():
+                raise McpServiceError("timeout", "graph operation timed out") from exc
+            raise McpServiceError("query_failed", "graph query failed") from exc
+        except sqlite3.Error as exc:
+            raise McpServiceError("query_failed", "graph query failed") from exc
+        finally:
+            conn.close()
+
+    def _bounded(self, value: Any, maximum: int, default: int = 1) -> int:
+        try:
+            number = int(value)
+        except (TypeError, ValueError) as exc:
+            raise McpServiceError("invalid_argument", "numeric argument is invalid") from exc
+        if number < 1:
+            raise McpServiceError("invalid_argument", "numeric argument must be positive")
+        return min(number, maximum)
+
+    def _relative_path(self, value: Optional[str]) -> Optional[str]:
+        if not value:
+            return None
+        try:
+            real = os.path.realpath(os.path.abspath(value if os.path.isabs(value) else os.path.join(self.project_root, value)))
+            if os.path.commonpath([self.project_root, real]) != self.project_root:
+                return None
+            return os.path.relpath(real, self.project_root).replace(os.sep, "/")
+        except (OSError, ValueError):
+            return None
+
+    def _body(self, value: Any) -> str:
+        text = str(value or "")
+        raw = text.encode("utf-8")
+        if len(raw) <= self.limits.body_bytes:
+            return text
+        return raw[: self.limits.body_bytes].decode("utf-8", errors="ignore")
+
+    def _fits_response(self, value: Any) -> Any:
+        # Keep the API JSON-ready while enforcing a hard response ceiling.  A
+        # deterministic truncation is preferable to returning an oversized body.
+        import json
+        encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(encoded) <= self.limits.response_bytes:
+            return value
+        if isinstance(value, dict):
+            for key in ("results", "drift", "relations"):
+                if not isinstance(value.get(key), list):
+                    continue
+                value = dict(value)
+                items = list(value[key])
+                value[key] = []
+                value["truncated"] = True
+                for item in items:
+                    trial = dict(value)
+                    trial[key] = value[key] + [item]
+                    if len(json.dumps(trial, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > self.limits.response_bytes:
+                        break
+                    value[key].append(item)
+                if key == "results":
+                    value["returned"] = len(value[key])
+                return value
+
+        raise McpServiceError("response_too_large", "response exceeds configured size limit")
+    def search(self, query: str, *, limit: int = 6, scope: Optional[str] = None, threshold: float = 0.5) -> Dict[str, Any]:
+        if not isinstance(query, str) or not query.strip():
+            raise McpServiceError("invalid_argument", "query must not be empty")
+        if len(query) > 1000:
+            raise McpServiceError("invalid_argument", "query exceeds 1000 characters")
+        if scope is not None and (not isinstance(scope, str) or len(scope) > 4096):
+            raise McpServiceError("invalid_argument", "scope exceeds 4096 characters")
+        limit = self._bounded(limit, self.limits.search)
+        try:
+            threshold = float(threshold)
+        except (TypeError, ValueError) as exc:
+            raise McpServiceError("invalid_argument", "threshold must be between 0 and 1") from exc
+        if not 0 <= threshold <= 1:
+            raise McpServiceError("invalid_argument", "threshold must be between 0 and 1")
+        clean = "".join(c if c.isalnum() or c.isspace() else " " for c in query).strip()
+        tokens = [f'"{t}"*' for t in clean.split() if len(t) >= 2] or [f'"{t}"' for t in clean.split()]
+        if not tokens:
+            return {"query": query, "results": [], "returned": 0, "stale": 0}
+        expr = " OR ".join(tokens)
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            sql = """SELECT k.id,k.path,k.kind,k.symbol,k.label,k.body,k.keywords,k.line_start,
+                      bm25(graph_fts) AS rank_score
+                      FROM graph_fts f JOIN graph_nodes k ON f.rowid=k.rowid
+                      WHERE graph_fts MATCH ?"""
+            params: List[Any] = [expr]
+            if scope:
+                sql += " AND (k.path LIKE ? OR k.body LIKE ?)"
+                params.extend([f"%{scope}%", f"%{scope}%"])
+            sql += " ORDER BY rank_score ASC LIMIT ?"
+            params.append(limit * 3)
+            rows = conn.execute(sql, params).fetchall()
+            out: List[Dict[str, Any]] = []
+            for row in rows:
+                candidate = dict(row)
+                verdict, coverage, real = TrustVerifier.verify_hit(
+                    cast(Database, None), candidate, tokenize(query), self.project_root,
+                    threshold=threshold, auto_heal=False,
+                )
+                rel = self._relative_path(real or candidate.get("path"))
+                if candidate.get("path") and rel is None:
+                    verdict = "STALE"
+                out.append({
+                    "id": candidate["id"], "verdict": verdict,
+                    "coverage": coverage, "path": rel,
+                    "kind": candidate["kind"], "symbol": candidate.get("symbol"),
+                    "label": candidate["label"], "line": candidate.get("line_start"),
+                    "body": self._body(candidate.get("body")),
+                    "rank_score": round(float(candidate.get("rank_score") or 0), 6),
+                })
+            rank = {"STRONG": 0, "REBUILT": 0, "WEAK": 1, "NOPATH": 2, "STALE": 3}
+            out.sort(key=lambda item: (rank.get(item["verdict"], 9), -(item["coverage"] or 0), item["id"]))
+            stale = sum(item["verdict"] == "STALE" for item in out)
+            return self._fits_response({"query": query, "results": out[:limit], "returned": min(len(out), limit), "stale": stale})
+        return self._run(op)
+    def explore(self, node_id: str, *, depth: int = 1, limit: int = 100) -> Dict[str, Any]:
+        if not isinstance(node_id, str) or not node_id.strip():
+            raise McpServiceError("invalid_argument", "node_id must not be empty")
+        if len(node_id) > 512:
+            raise McpServiceError("invalid_argument", "node_id exceeds 512 characters")
+        depth = self._bounded(depth, self.limits.explore_depth)
+        limit = self._bounded(limit, self.limits.explore_nodes)
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            row = conn.execute("SELECT id,path,kind,symbol,label,body,keywords,line_start FROM graph_nodes WHERE id = ?", (node_id,)).fetchone()
+            if row is None:
+                row = conn.execute("SELECT id,path,kind,symbol,label,body,keywords,line_start FROM graph_nodes WHERE symbol = ? OR label LIKE ? ORDER BY id LIMIT 1", (node_id, f"%{node_id}%")).fetchone()
+            if row is None:
+                raise McpServiceError("not_found", "node was not found")
+            node = self._node_dict(row)
+            relations: List[Dict[str, Any]] = []
+            visited = {row["id"]}
+            queue = [(row["id"], 0)]
+            while queue and len(relations) < limit:
+                current, current_depth = queue.pop(0)
+                if current_depth >= depth:
+                    continue
+                for direction, sql in (("outward", "SELECT e.relation,n.id,n.label,n.path,n.line_start,n.kind FROM graph_edges e JOIN graph_nodes n ON e.dst=n.id WHERE e.src=?"), ("inward", "SELECT e.relation,n.id,n.label,n.path,n.line_start,n.kind FROM graph_edges e JOIN graph_nodes n ON e.src=n.id WHERE e.dst=?")):
+                    for rel, target, label, path, line, kind in conn.execute(sql, (current,)).fetchall():
+                        if len(relations) >= limit:
+                            break
+                        item = {"direction": direction, "relation": rel if direction == "outward" else f"used_by ({rel})", "target_id": target, "label": label, "path": self._relative_path(path), "line": line, "kind": kind, "depth": current_depth + 1}
+                        relations.append(item)
+                        if target not in visited:
+                            visited.add(target)
+                            queue.append((target, current_depth + 1))
+            return self._fits_response({"node": node, "relations": relations, "truncated": len(relations) >= limit})
+
+        return self._run(op)
+
+    def _node_dict(self, row: Mapping[str, Any]) -> Dict[str, Any]:
+        return {"id": row["id"], "path": self._relative_path(row["path"]), "kind": row["kind"], "symbol": row["symbol"], "label": row["label"], "body": self._body(row["body"]), "keywords": row["keywords"], "line": row["line_start"]}
+
+    def node(self, node_id: str) -> Dict[str, Any]:
+        if not isinstance(node_id, str) or not node_id.strip():
+            raise McpServiceError("invalid_argument", "node_id must not be empty")
+        if len(node_id) > 512:
+            raise McpServiceError("invalid_argument", "node_id exceeds 512 characters")
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            row = conn.execute("SELECT id,path,kind,symbol,label,body,keywords,line_start FROM graph_nodes WHERE id=?", (node_id,)).fetchone()
+            if row is None:
+                raise McpServiceError("not_found", "node was not found")
+            return self._fits_response(self._node_dict(row))
+        return self._run(op)
+
+    def verify_drift(self, *, deep: bool = False, limit: int = 100) -> Dict[str, Any]:
+        limit = self._bounded(limit, self.limits.drift)
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            rows = conn.execute("SELECT path,sha256,size,mtime_ms FROM file_journal ORDER BY path LIMIT ?", (limit + 1,)).fetchall()
+            drift: List[Dict[str, Any]] = []
+            for row in rows:
+                rel = self._relative_path(row["path"])
+                if rel is None:
+                    drift.append({"path": None, "why": "outside_root"})
+                    continue
+                path = os.path.join(self.project_root, rel)
+                if not os.path.isfile(path):
+                    drift.append({"path": rel, "why": "missing"})
+                    continue
+                st = os.stat(path)
+                if deep:
+                    try:
+                        with open(path, "rb") as handle:
+                            current = hashlib.sha256(handle.read()).hexdigest()
+                    except OSError:
+                        drift.append({"path": rel, "why": "unreadable"})
+                    else:
+                        if current != row["sha256"]:
+                            drift.append({"path": rel, "why": "hash_mismatch"})
+                elif st.st_size != row["size"] or int(st.st_mtime * 1000) != row["mtime_ms"]:
+                    drift.append({"path": rel, "why": "mtime_size_mismatch"})
+                if len(drift) >= limit:
+                    break
+            return self._fits_response({"deep": bool(deep), "drift": drift, "truncated": len(rows) > limit})
+        return self._run(op)
+
+    def stats(self) -> Dict[str, Any]:
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            counts = {"paths": "file_journal", "nodes": "graph_nodes", "edges": "graph_edges", "pending": "pending_edges"}
+            return {key: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]) for key, table in counts.items()}
+        return self._run(op)
+
+    async def _async(self, method: Any, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(method, *args, **kwargs), self.timeout_ms / 1000.0)
+        except asyncio.TimeoutError as exc:
+            raise McpServiceError("timeout", "graph operation timed out") from exc
+
+    async def asearch(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.search, *args, **kwargs)
+
+    async def aexplore(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.explore, *args, **kwargs)
+
+    async def averify_drift(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.verify_drift, *args, **kwargs)
+
+    async def anode(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.node, *args, **kwargs)
+
+    async def astats(self) -> Dict[str, Any]:
+        return await self._async(self.stats)
+
+
+__all__ = ["McpService", "McpServiceError", "ServiceLimits"]

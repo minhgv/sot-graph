@@ -81,37 +81,58 @@ class TrustVerifier:
         query_tokens: Set[str],
         project_root: str,
         threshold: float = 0.5,
+        auto_heal: bool = True,
     ) -> Tuple[str, Optional[float], str]:
         """
-        Verifies a search hit against disk reality:
-        - STRONG: Path physically exists, coverage >= threshold (or no query tokens).
-        - WEAK: Path physically exists, but coverage < threshold.
-        - REBUILT: Path missing, but single file found elsewhere -> re-anchored.
-        - REMOVED: Path missing and cannot be rehomed -> purged from DB.
-        - NOPATH: Virtual node without an anchored disk file (e.g. manual note).
+        Verify a search hit against disk reality.
+
+        ``auto_heal`` retains the historical self-healing behaviour when true.
+        Read-only callers (including MCP) must pass false: no database mutation
+        or deletion is performed and missing/unmoved files return ``STALE``.
+        Every disk access is constrained to ``project_root``; a path outside the
+        root is treated as stale without even checking its existence.
         """
         path = candidate.get("path")
         node_id = candidate["id"]
+        root = os.path.realpath(os.path.abspath(project_root))
 
-        if not path or not path.strip():
+        if not path or not str(path).strip():
             return "NOPATH", 1.0, ""
 
-        if os.path.exists(path) and os.path.isfile(path):
-            cov = cls.calculate_coverage(path, query_tokens)
+        requested = os.path.abspath(os.path.expanduser(str(path)))
+
+        def _inside_root(value: str) -> bool:
+            try:
+                return os.path.commonpath([root, os.path.realpath(value)]) == root
+            except (OSError, ValueError):
+                return False
+
+        # Indexed paths are normally absolute.  Relative paths are interpreted
+        # relative to the configured root, never relative to process cwd.
+        if not os.path.isabs(str(path)):
+            requested = os.path.abspath(os.path.join(root, str(path)))
+        if not _inside_root(requested):
+            return "STALE", None, str(path)
+
+        if os.path.exists(requested) and os.path.isfile(requested):
+            cov = cls.calculate_coverage(requested, query_tokens)
             if cov is not None:
                 verdict = "STRONG" if cov >= threshold else "WEAK"
             else:
                 verdict = "STRONG"
-            return verdict, cov, path
+            return verdict, cov, requested
 
-        # File is missing on disk — check for rehoming
-        basename = os.path.basename(path)
-        new_path = cls.find_rehome(project_root, basename)
-        if new_path and os.path.exists(new_path):
-            db.update_node_path(node_id, path, new_path)
+        # Read-only verification never searches, updates, or purges.
+        if not auto_heal:
+            return "STALE", None, requested
+
+        basename = os.path.basename(requested)
+        new_path = cls.find_rehome(root, basename)
+        if new_path and _inside_root(new_path) and os.path.exists(new_path):
+            db.update_node_path(node_id, requested, new_path)
             cov = cls.calculate_coverage(new_path, query_tokens)
             return "REBUILT", cov, new_path
 
-        # Dead path: Purge all nodes belonging to this dead path from database so it never ranks again
-        db.delete_path(path)
-        return "REMOVED", 0.0, path
+        # Preserve historical auto-purge for the CLI and library callers.
+        db.delete_path(requested)
+        return "REMOVED", 0.0, requested
