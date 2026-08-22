@@ -284,7 +284,40 @@ def build_bundle(
             "warnings": warnings,
         },
     }
+    trusted = _load_trusted_instructions(root, max_bytes)
+    if trusted is not None:
+        bundle["trusted_instructions"] = trusted
     return bundle
+
+
+_TRUSTED_INSTRUCTION_FILES = ("AGENTS.md",)
+_TRUSTED_MAX_BYTES = 8192
+
+
+def _load_trusted_instructions(root: str, max_bytes: int) -> Optional[Dict[str, Any]]:
+    """Repo-level instruction files are operator-authored, hence trusted.
+
+    The bundle's global banner stays untrusted; this block carries an
+    explicit per-block override so prompt builders can treat only this
+    content as instructions.
+    """
+    for name in _TRUSTED_INSTRUCTION_FILES:
+        path = os.path.join(root, name)
+        try:
+            if not os.path.isfile(path):
+                continue
+            with open(path, "r", encoding="utf-8") as fh:
+                text = fh.read(min(_TRUSTED_MAX_BYTES, max(max_bytes // 4, 1024)))
+            if text.strip():
+                return {
+                    "path": name,
+                    "bytes": len(text.encode("utf-8")),
+                    "content_is_untrusted": False,
+                    "content": text,
+                }
+        except OSError:
+            continue
+    return None
 
 
 def _yaml_scalar(value: Any) -> str:
@@ -319,6 +352,14 @@ def render_yaml(bundle: Dict[str, Any]) -> str:
     out.append(f"base_generation: {bundle['base_generation']}")
     out.append(f"generated_at: {bundle['generated_at']}")
     out.append(f"content_is_untrusted: {_yaml_scalar(bundle['content_is_untrusted'])}")
+    trusted = bundle.get("trusted_instructions")
+    if trusted:
+        out.append("")
+        out.append("trusted_instructions:")
+        out.append(f"  path: {_yaml_scalar(trusted['path'])}")
+        out.append(f"  bytes: {trusted['bytes']}")
+        out.append(f"  content_is_untrusted: {_yaml_scalar(trusted['content_is_untrusted'])}")
+        out.append(f"  content: {_yaml_block(trusted['content'], 4)}")
     out.append("")
     out.append("target:")
     for key in ("node_id", "fqn", "symbol", "kind", "relative_path", "trust_verdict",

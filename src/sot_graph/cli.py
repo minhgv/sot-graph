@@ -351,6 +351,24 @@ def cmd_rename(args: argparse.Namespace, db: Database) -> int:
     return 0
 
 
+def cmd_map(args: argparse.Namespace, db: Database, root: str) -> int:
+    from sot_graph.repo_map import build_repo_map
+
+    focus = [f for f in (args.focus or "").split(",") if f.strip()]
+    result = build_repo_map(db.conn, focus=focus, max_tokens=args.tokens, root=root)
+    if not result["rendered"]:
+        print("❌ No code symbols indexed yet — run `sot reconcile` first.")
+        return 1
+    print(result["rendered"])
+    footer = f"  (~{result['tokens_estimate']} tokens, {result['symbols']} symbols"
+    if result["files"]:
+        footer += f", {len(result['files'])} files"
+    if result["truncated"]:
+        footer += ", truncated by budget"
+    print(f"\n🗺️  Repo map{footer})")
+    return 0
+
+
 def cmd_insert(args: argparse.Namespace, db: Database) -> int:
     keywords = [k.strip() for k in args.keywords.split(",") if k.strip()]
     content = f"{args.title}\n{args.body}"
@@ -743,6 +761,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_ren.add_argument("target", help="Symbol to rename")
     p_ren.add_argument("--to", default=None, help="Proposed new name (display only)")
 
+    # map
+    p_map = subparsers.add_parser("map", help="Token-budgeted repo map ranked by personalized PageRank")
+    p_map.add_argument("--tokens", type=int, default=1024, help="Approximate token budget (default: 1024)")
+    p_map.add_argument("--focus", default=None, help="Comma-separated symbols to personalize the ranking")
+
     # insert
     p_ins = subparsers.add_parser("insert", help="Insert a reusable piece of knowledge or decision")
     p_ins.add_argument("--title", required=True, help="Title of the knowledge item")
@@ -877,6 +900,8 @@ def main() -> int:
             return cmd_implementations(args, db)
         elif args.command == "rename":
             return cmd_rename(args, db)
+        elif args.command == "map":
+            return cmd_map(args, db, root)
         elif args.command == "insert":
             return cmd_insert(args, db)
         elif args.command == "reconcile":

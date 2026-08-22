@@ -348,6 +348,59 @@ class McpService:
             })
         return self._run(op)
 
+    def repo_map(self, focus: Optional[str] = None, *, max_tokens: int = 1024) -> Dict[str, Any]:
+        """Token-budgeted repo map ranked by personalized PageRank."""
+        from sot_graph.repo_map import build_repo_map
+
+        if focus is not None and not isinstance(focus, str):
+            raise McpServiceError("invalid_argument", "focus must be a string")
+        if focus is not None and len(focus) > 2048:
+            raise McpServiceError("invalid_argument", "focus exceeds 2048 characters")
+        max_tokens = self._bounded(max_tokens, 8192)
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            focus_list = [f for f in (focus or "").split(",") if f.strip()]
+            result = build_repo_map(conn, focus=focus_list, max_tokens=max_tokens,
+                                    root=self.project_root)
+            return self._fits_response({
+                "ok": True,
+                "map": result["rendered"],
+                "tokens_estimate": result["tokens_estimate"],
+                "symbols": result["symbols"],
+                "files": len(result["files"]),
+                "focus": result["focus"],
+                "truncated": result["truncated"],
+            })
+        return self._run(op)
+
+    def notes(self, query: Optional[str] = None, *, limit: int = 50) -> Dict[str, Any]:
+        """List persisted knowledge notes (optionally filtered by keyword)."""
+        if query is not None and not isinstance(query, str):
+            raise McpServiceError("invalid_argument", "query must be a string")
+        if query is not None and len(query) > 512:
+            raise McpServiceError("invalid_argument", "query exceeds 512 characters")
+        limit = self._bounded(limit, self.limits.search)
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            sql = ("SELECT id, label, keywords, updated_at FROM graph_nodes "
+                   "WHERE kind = 'note'")
+            params: List[Any] = []
+            if query:
+                sql += " AND (label LIKE ? OR keywords LIKE ? OR body LIKE ?)"
+                like = f"%{query}%"
+                params.extend([like, like, like])
+            sql += " ORDER BY updated_at DESC LIMIT ?"
+            params.append(limit)
+            out = [{
+                "id": row["id"],
+                "uri": f"sot://node/{row['id']}",
+                "title": row["label"],
+                "keywords": (row["keywords"] or "").split(),
+                "updated_at": row["updated_at"],
+            } for row in conn.execute(sql, params).fetchall()]
+            return self._fits_response({"notes": out, "returned": len(out)})
+        return self._run(op)
+
     def _node_dict(self, row: Mapping[str, Any]) -> Dict[str, Any]:
         return {"id": row["id"], "path": self._relative_path(row["path"]), "kind": row["kind"], "symbol": row["symbol"], "label": row["label"], "body": self._body(row["body"]), "keywords": row["keywords"], "line": row["line_start"]}
 
@@ -578,6 +631,12 @@ class McpService:
 
     async def aimplementations(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return await self._async(self.implementations, *args, **kwargs)
+
+    async def arepo_map(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.repo_map, *args, **kwargs)
+
+    async def anotes(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.notes, *args, **kwargs)
 
     async def averify_drift(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return await self._async(self.verify_drift, *args, **kwargs)
