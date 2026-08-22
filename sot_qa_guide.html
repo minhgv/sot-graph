@@ -1,0 +1,1508 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SOT-Graph: Toàn Tập Hỏi Đáp & Kịch Bản Sử Dụng Thực Tế (Q&A Guide)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-main: #0d1117;
+      --bg-card: #161b22;
+      --bg-card-hover: #1c2128;
+      --bg-code: #090d13;
+      --border: #30363d;
+      --border-focus: #58a6ff;
+      --text-main: #c9d1d9;
+      --text-muted: #8b949e;
+      --text-bright: #f0f6fc;
+      --primary: #58a6ff;
+      --primary-bg: rgba(88, 166, 255, 0.12);
+      --success: #3fb950;
+      --success-bg: rgba(63, 185, 80, 0.12);
+      --warning: #d29922;
+      --warning-bg: rgba(210, 153, 34, 0.12);
+      --danger: #f85149;
+      --danger-bg: rgba(248, 81, 73, 0.12);
+      --purple: #bc8cff;
+      --purple-bg: rgba(188, 140, 255, 0.12);
+      --accent: #2ea043;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      font-size: 15px;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    /* Header */
+    header {
+      background: rgba(22, 27, 34, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      padding: 16px 24px;
+    }
+    .header-container {
+      max-width: 1300px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .logo-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo-badge {
+      background: linear-gradient(135deg, #1f6feb, #8957e5);
+      color: #fff;
+      font-weight: 800;
+      font-size: 14px;
+      padding: 4px 10px;
+      border-radius: var(--radius-sm);
+      letter-spacing: 0.5px;
+      box-shadow: 0 2px 10px rgba(31, 111, 235, 0.4);
+    }
+    .logo-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--text-bright);
+      letter-spacing: -0.3px;
+    }
+    .logo-subtitle {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    /* Search & Stats Bar */
+    .search-wrapper {
+      position: relative;
+      flex: 1;
+      max-width: 460px;
+    }
+    .search-input {
+      width: 100%;
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 10px 16px 10px 40px;
+      color: var(--text-bright);
+      font-size: 0.9rem;
+      font-family: inherit;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+    .search-input:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.2);
+    }
+    .search-icon {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      font-size: 14px;
+      pointer-events: none;
+    }
+
+    /* Main Layout */
+    .app-layout {
+      max-width: 1300px;
+      margin: 24px auto;
+      padding: 0 24px;
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 28px;
+      flex: 1;
+      width: 100%;
+    }
+
+    /* Sidebar Navigation */
+    .sidebar {
+      position: sticky;
+      top: 96px;
+      height: calc(100vh - 120px);
+      overflow-y: auto;
+      padding-right: 8px;
+    }
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+    .nav-group-title {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+    .category-nav {
+      list-style: none;
+      margin-bottom: 24px;
+    }
+    .category-nav-item {
+      margin-bottom: 4px;
+    }
+    .category-nav-btn {
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-main);
+      padding: 9px 12px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 0.88rem;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: all 0.15s ease;
+    }
+    .category-nav-btn:hover {
+      background: var(--bg-card);
+      color: var(--text-bright);
+    }
+    .category-nav-btn.active {
+      background: var(--primary-bg);
+      color: var(--primary);
+      border-color: rgba(88, 166, 255, 0.3);
+      font-weight: 600;
+    }
+    .category-nav-badge {
+      font-size: 0.72rem;
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      padding: 2px 6px;
+      border-radius: 10px;
+      color: var(--text-muted);
+    }
+    .category-nav-btn.active .category-nav-badge {
+      background: var(--primary);
+      color: #000;
+      border-color: var(--primary);
+      font-weight: 700;
+    }
+
+    /* Metric Cards in Sidebar */
+    .metric-box {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .metric-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .metric-item {
+      text-align: center;
+      padding: 10px;
+      background: var(--bg-code);
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(48, 54, 61, 0.6);
+    }
+    .metric-val {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--primary);
+      font-family: 'Fira Code', monospace;
+    }
+    .metric-lbl {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    /* Content Area */
+    .content-area {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* Hero Banner */
+    .hero-banner {
+      background: linear-gradient(135deg, rgba(31, 111, 235, 0.15), rgba(137, 87, 229, 0.1));
+      border: 1px solid rgba(88, 166, 255, 0.3);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero-banner h2 {
+      font-size: 1.4rem;
+      color: var(--text-bright);
+      margin-bottom: 8px;
+    }
+    .hero-banner p {
+      color: var(--text-main);
+      font-size: 0.92rem;
+      max-width: 900px;
+      line-height: 1.6;
+    }
+
+    /* Category Section */
+    .category-section {
+      margin-bottom: 24px;
+    }
+    .category-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .category-title {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--text-bright);
+    }
+    .category-pill {
+      font-size: 0.75rem;
+      padding: 3px 8px;
+      border-radius: 20px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    /* Q&A Accordion Item */
+    .qa-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      margin-bottom: 12px;
+      transition: all 0.2s ease;
+      overflow: hidden;
+    }
+    .qa-card:hover {
+      border-color: #484f58;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+    .qa-card.open {
+      border-color: rgba(88, 166, 255, 0.4);
+      box-shadow: var(--shadow);
+    }
+
+    .qa-trigger {
+      padding: 16px 20px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      cursor: pointer;
+      user-select: none;
+      background: transparent;
+    }
+    .qa-card.open .qa-trigger {
+      background: rgba(88, 166, 255, 0.04);
+      border-bottom: 1px solid rgba(48, 54, 61, 0.6);
+    }
+
+    .qa-question-box {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      flex: 1;
+    }
+    .qa-icon-q {
+      background: var(--primary-bg);
+      color: var(--primary);
+      font-weight: 700;
+      font-size: 0.8rem;
+      padding: 2px 7px;
+      border-radius: 4px;
+      margin-top: 2px;
+      font-family: 'Fira Code', monospace;
+    }
+    .qa-question-text {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text-bright);
+      line-height: 1.45;
+    }
+    .qa-tags {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+    .badge {
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Fira Code', monospace;
+    }
+    .badge-p0 { background: var(--danger-bg); color: var(--danger); border: 1px solid rgba(248, 81, 73, 0.3); }
+    .badge-core { background: var(--primary-bg); color: var(--primary); border: 1px solid rgba(88, 166, 255, 0.3); }
+    .badge-algo { background: var(--purple-bg); color: var(--purple); border: 1px solid rgba(188, 140, 255, 0.3); }
+    .badge-agent { background: var(--success-bg); color: var(--success); border: 1px solid rgba(63, 185, 80, 0.3); }
+    .badge-cli { background: var(--warning-bg); color: var(--warning); border: 1px solid rgba(210, 153, 34, 0.3); }
+
+    .qa-toggle-btn {
+      color: var(--text-muted);
+      font-size: 18px;
+      transition: transform 0.25s ease;
+      margin-top: 2px;
+    }
+    .qa-card.open .qa-toggle-btn {
+      transform: rotate(180deg);
+      color: var(--primary);
+    }
+
+    /* Q&A Body Content */
+    .qa-body {
+      padding: 20px;
+      display: none;
+      font-size: 0.92rem;
+      color: var(--text-main);
+      background: var(--bg-card);
+      line-height: 1.7;
+    }
+    .qa-card.open .qa-body {
+      display: block;
+    }
+
+    .qa-body p { margin-bottom: 12px; }
+    .qa-body ul, .qa-body ol { margin-left: 20px; margin-bottom: 14px; }
+    .qa-body li { margin-bottom: 6px; }
+    .qa-body strong { color: var(--text-bright); }
+
+    /* Code Blocks */
+    .code-block {
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      margin: 14px 0;
+      overflow: hidden;
+    }
+    .code-header {
+      background: #11161d;
+      padding: 6px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      font-family: 'Fira Code', monospace;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    .copy-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 2px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.7rem;
+      transition: all 0.15s;
+    }
+    .copy-btn:hover {
+      background: #21262d;
+      color: var(--text-bright);
+    }
+    pre {
+      padding: 12px 16px;
+      overflow-x: auto;
+      font-family: 'Fira Code', Consolas, monospace;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      color: #e6edf3;
+    }
+    code {
+      font-family: 'Fira Code', monospace;
+      background: rgba(110, 118, 129, 0.2);
+      padding: 2px 5px;
+      border-radius: 4px;
+      font-size: 0.85em;
+      color: var(--primary);
+    }
+    pre code {
+      background: transparent;
+      padding: 0;
+      color: inherit;
+    }
+
+    /* Callout Boxes */
+    .callout {
+      padding: 12px 16px;
+      border-radius: var(--radius-sm);
+      margin: 14px 0;
+      border-left: 4px solid;
+      font-size: 0.88rem;
+    }
+    .callout-info { background: var(--primary-bg); border-color: var(--primary); color: #c9d1d9; }
+    .callout-success { background: var(--success-bg); border-color: var(--success); color: #c9d1d9; }
+    .callout-warning { background: var(--warning-bg); border-color: var(--warning); color: #c9d1d9; }
+    .callout-danger { background: var(--danger-bg); border-color: var(--danger); color: #c9d1d9; }
+
+    /* ASCII Diagrams */
+    .ascii-art {
+      background: #06090e;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.8rem;
+      color: #58a6ff;
+      overflow-x: auto;
+      white-space: pre;
+      line-height: 1.35;
+      margin: 14px 0;
+    }
+
+    /* Comparison Table */
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0;
+      font-size: 0.85rem;
+    }
+    .data-table th, .data-table td {
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+      text-align: left;
+    }
+    .data-table th {
+      background: #11161d;
+      color: var(--text-bright);
+      font-weight: 600;
+    }
+    .data-table tr:nth-child(even) { background: rgba(22, 27, 34, 0.5); }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border);
+      background: var(--bg-card);
+      padding: 24px;
+      text-align: center;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin-top: auto;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .app-layout { grid-template-columns: 1fr; }
+      .sidebar { position: static; height: auto; }
+      .search-wrapper { max-width: 100%; order: 3; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Sticky Header -->
+  <header>
+    <div class="header-container">
+      <div class="logo-group">
+        <span class="logo-badge">SOT-GRAPH</span>
+        <div>
+          <div class="logo-title">Toàn Tập Hỏi Đáp & Kịch Bản Sử Dụng</div>
+          <div class="logo-subtitle">Single Source of Truth Knowledge Layer for AI Coding Agents</div>
+        </div>
+      </div>
+      <div class="search-wrapper">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="filter-input" class="search-input" placeholder="Tìm kiếm câu hỏi, lệnh CLI, cơ chế, từ khóa...">
+      </div>
+    </div>
+  </header>
+
+  <!-- App Main Layout -->
+  <div class="app-layout">
+    
+    <!-- Left Navigation Sidebar -->
+    <aside class="sidebar">
+      <div class="metric-box">
+        <div class="metric-grid">
+          <div class="metric-item">
+            <div class="metric-val" id="count-total">19</div>
+            <div class="metric-lbl">KỊCH BẢN</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-val">6</div>
+            <div class="metric-lbl">CHỦ ĐỀ</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-val">&lt; 1.5ms</div>
+            <div class="metric-lbl">ĐỘ TRỄ P95</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-val">0</div>
+            <div class="metric-lbl">DAEMONS</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="nav-group-title">Danh Mục Chủ Đề</div>
+      <ul class="category-nav" id="category-nav">
+        <li class="category-nav-item">
+          <button class="category-nav-btn active" data-cat="all">
+            <span>Tất cả kịch bản</span>
+            <span class="category-nav-badge">19</span>
+          </button>
+        </li>
+        <li class="category-nav-item">
+          <button class="category-nav-btn" data-cat="cat-core">
+            <span>1. Cơ Chế Cốt Lõi</span>
+            <span class="category-nav-badge">4</span>
+          </button>
+        </li>
+        <li class="category-nav-item">
+          <button class="category-nav-btn" data-cat="cat-healing">
+            <span>2. Tự Chữa Lành</span>
+            <span class="category-nav-badge">3</span>
+          </button>
+        </li>
+        <li class="category-nav-item">
+          <button class="category-nav-btn" data-cat="cat-agent">
+            <span>3. Tích Hợp AI Agent</span>
+            <span class="category-nav-badge">3</span>
+          </button>
+        </li>
+        <li class="category-nav-item">
+          <button class="category-nav-btn" data-cat="cat-analytics">
+            <span>4. Phân Tích & Đồ Thị</span>
+            <span class="category-nav-badge">3</span>
+          </button>
+        </li>
+        <li class="category-nav-item">
+          <button class="category-nav-btn" data-cat="cat-ops">
+            <span>5. Vận Hành & Hiệu Năng</span>
+            <span class="category-nav-badge">3</span>
+          </button>
+        </li>
+        <li class="category-nav-item">
+          <button class="category-nav-btn" data-cat="cat-cases">
+            <span>6. Tình Huống Thực Tế</span>
+            <span class="category-nav-badge">3</span>
+          </button>
+        </li>
+      </ul>
+
+      <div class="nav-group-title">Thao Tác Nhanh</div>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <button id="btn-expand-all" class="category-nav-btn" style="border: 1px solid var(--border);">
+          <span>Mở toàn bộ câu hỏi</span>
+          <span>▼</span>
+        </button>
+        <button id="btn-collapse-all" class="category-nav-btn" style="border: 1px solid var(--border);">
+          <span>Thu gọn toàn bộ</span>
+          <span>▲</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content Q&A Sections -->
+    <main class="content-area" id="qa-container">
+
+      <!-- Hero Introduction Banner -->
+      <div class="hero-banner">
+        <h2>Kiến Trúc Tri Thức Tự Chữa Lành & Chống Ảo Giác</h2>
+        <p>
+          Tài liệu này tổng hợp toàn bộ các câu hỏi kỹ thuật chuyên sâu, cơ chế vận hành của database nhúng SQLite WAL, 
+          quy trình tự chữa lành đường dẫn, thuật toán đồ thị Louvain / God Nodes và hướng dẫn tích hợp AI Agent vào dự án <code>sot-graph</code>.
+        </p>
+      </div>
+
+      <!-- ========================================== -->
+      <!-- CATEGORY 1: CORE ARCHITECTURE -->
+      <!-- ========================================== -->
+      <section class="category-section" data-category="cat-core" id="cat-core">
+        <div class="category-header">
+          <h3 class="category-title">1. Cơ Chế Cốt Lõi & Chống Ảo Giác (Core Architecture)</h3>
+          <span class="category-pill badge-core">4 Kịch bản</span>
+        </div>
+
+        <!-- Q1 -->
+        <div class="qa-card" id="q1">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q1</span>
+              <div>
+                <div class="qa-question-text">Tại sao sot-graph gọi là "Single Source of Truth"? Sự khác biệt giữa Filesystem làm gốc và Vector/Graph RAG truyền thống là gì?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-p0">P0-ARCHITECTURE</span>
+                  <span class="badge badge-core">SSOT</span>
+                  <span class="badge badge-algo">INVARIANTS</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p>
+              Các hệ thống RAG và Agent Memory truyền thống (dùng Vector DB, Neo4j, Redis) lưu trữ tri thức như một <strong>bản sao rời rạc (detached snapshot)</strong>. Khi lập trình viên sửa code, đổi tên file hoặc xóa thư mục, database không hề biết sự thay đổi này cho đến khi được re-index thủ công, dẫn đến hiện tượng <strong>Phantom Anchors (Đường dẫn ma)</strong> — AI Agent đọc tri thức cũ và sinh mã cho file không còn tồn tại.
+            </p>
+            <div class="callout callout-info">
+              <strong>Nguyên tắc vàng của sot-graph:</strong> <em>"Filesystem is the Single Source of Truth — The knowledge graph is an authoritative, verified projection of reality."</em>
+            </div>
+            <p>Mọi tín hiệu từ file watcher, git hook hay lệnh CLI chỉ được coi là lời gợi ý (<em>"hãy kiểm tra đường dẫn này"</em>). Hệ thống <strong>không bao giờ tin tưởng mù quáng</strong> vào bộ nhớ đệm mà luôn đối soát vật lý trên đĩa cứng trước khi trả kết quả cho Agent.</p>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Đặc tính</th>
+                  <th>Vector / Graph RAG Truyền Thống</th>
+                  <th>sot-graph (Kiến trúc SSOT)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Nguồn chân lý</strong></td>
+                  <td>Vector Embeddings / Graph Nodes trong DB rời</td>
+                  <td><strong>Tệp vật lý trên Filesystem</strong></td>
+                </tr>
+                <tr>
+                  <td><strong>Xử lý khi xóa file</strong></td>
+                  <td>Vẫn trả về vector cũ (gây ảo giác đường dẫn)</td>
+                  <td><strong>Tự động thanh trừng ngay khi tìm kiếm (Auto-Purge)</strong></td>
+                </tr>
+                <tr>
+                  <td><strong>Hạ tầng yêu cầu</strong></td>
+                  <td>Cần Server nền (Neo4j, Qdrant, Chroma, Java/Node)</td>
+                  <td><strong>Zero Daemon</strong>: Nhúng trực tiếp SQLite WAL &lt; 25MB RAM</td>
+                </tr>
+                <tr>
+                  <td><strong>Độ trễ truy vấn</strong></td>
+                  <td>50ms - 500ms (qua mạng / RPC)</td>
+                  <td><strong>&lt; 1.5ms (P95)</strong> qua SQLite FTS5 BM25</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Q2 -->
+        <div class="qa-card" id="q2">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q2</span>
+              <div>
+                <div class="qa-question-text">Nếu tôi sửa đúng 1 dòng trong file, hệ thống có phát hiện được không và cơ chế đồng bộ diễn ra như thế nào?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-p0">P0-DIRTY-CHECK</span>
+                  <span class="badge badge-core">SHA-256</span>
+                  <span class="badge badge-cli">RECONCILER</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p><strong>CÓ, CHẮC CHẮN BIẾT 100% VÀ BIẾT NGAY LẬP TỨC.</strong></p>
+            <p>Bộ điều phối <code>sot_graph.reconciler</code> sử dụng cơ chế bảo vệ 2 tầng để phát hiện mọi thay đổi dù là nhỏ nhất:</p>
+            <ol>
+              <li>
+                <strong>Tầng 1 - Fast Dirty Check qua Filesystem Metadata ($O(1)$):</strong>
+                Khi sửa 1 dòng code, hệ điều hành lập tức cập nhật <code>st_mtime</code> (mili-giây) và thường làm đổi <code>st_size</code> (kích thước byte). Reconciler so sánh cặp <code>(size, mtime_ms)</code> với bản ghi trong bảng <code>file_journal</code>. Nếu khác, file được đánh dấu là bẩn (dirty) ngay trong micro-giây.
+              </li>
+              <li>
+                <strong>Tầng 2 - Bảo Vệ Toàn Vẹn Bằng SHA-256 Hash:</strong>
+                Trong trường hợp bạn sửa 1 ký tự mà kích thước tệp giữ nguyên và metadata <code>mtime</code> bị trùng, hàm <code>_hash(path)</code> sẽ tính toán lại mã băm SHA-256 nội dung. Do hiệu ứng tuyết lở (<em>avalanche effect</em>), mã SHA-256 sẽ khác hoàn toàn giá trị lưu trong database, đảm bảo không một thay đổi nào bị bỏ sót.
+              </li>
+            </ol>
+            <div class="code-block">
+              <div class="code-header">
+                <span>src/sot_graph/reconciler.py:270-281</span>
+                <button class="copy-btn" onclick="navigator.clipboard.writeText('prior = journal_cache.get(path)\nif prior and prior.get(\"size\") == size and prior.get(\"mtime_ms\") == mtime_ms:\n    current_sha = self._hash(path)\n    if prior.get(\"sha256\") == current_sha:\n        continue # Bỏ qua vì file thực sự không đổi\njobs.append(ParseJob(path, self.root_dir, size, mtime_ms))')">Copy Code</button>
+              </div>
+              <pre><code>prior = journal_cache.get(path)
+if prior and prior.get("size") == size and prior.get("mtime_ms") == mtime_ms:
+    current_sha = self._hash(path)
+    if prior.get("sha256") == current_sha:
+        continue  # Bỏ qua vì file thực sự không thay đổi
+jobs.append(ParseJob(path, self.root_dir, size, mtime_ms))</code></pre>
+            </div>
+            <p>Sau khi xác định file bị bẩn, Reconciler thực hiện <strong>Thay thế nguyên tử (Atomic Batch Replacement)</strong> trong SQLite: xóa toàn bộ node, edge cũ của riêng file đó và nạp lại AST mới trong một transaction duy nhất.</p>
+          </div>
+        </div>
+
+        <!-- Q3 -->
+        <div class="qa-card" id="q3">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q3</span>
+              <div>
+                <div class="qa-question-text">Trust Verdict System hoạt động ra sao? Ý nghĩa cụ thể của các nhãn [STRONG], [WEAK], [REBUILT], [REMOVED], [NOPATH]?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-p0">P0-VERIFIER</span>
+                  <span class="badge badge-agent">ANTI-HALLUCINATION</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p>Khi Agent thực hiện <code>sot search "&lt;query&gt;"</code>, mọi kết quả trả về từ FTS5 đều phải đi qua <code>TrustVerifier.verify_hit</code> để kiểm tra tính xác thực trên đĩa:</p>
+            <div class="ascii-art">[Agent Query] ──> [SQLite FTS5 (BM25)] ──> [Candidate Node]
+                                                │
+                    ┌───────────────────────────┴───────────────────────────┐
+                    ▼                                                       ▼
+         [File tồn tại trên đĩa?]                               [File KHÔNG tồn tại?]
+         ├── Có: Đọc 256KB đầu tệp                                           │
+         │   ├── Token query khớp >= 50% ──> [STRONG]                        ▼
+         │   └── Token query khớp < 50%  ──> [WEAK]                [find_rehome: Quét đĩa tìm basename]
+         │                                                          ├── Tìm thấy duy nhất 1 file mới:
+         │                                                          │   ├── db.update_node_path(...)
+         │                                                          │   └── Trả về [REBUILT]
+         │                                                          └── Không tìm thấy (đã xóa vĩnh viễn):
+         │                                                              ├── db.delete_path(...)
+         │                                                              └── Trả về [REMOVED]</div>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Nhãn Verdict</th>
+                  <th>Điều Kiện Kích Hoạt</th>
+                  <th>Hành Động Khuyến Nghị Cho AI Agent</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="badge badge-agent" style="background: rgba(63, 185, 80, 0.2); color: #3fb950;">[STRONG]</span></td>
+                  <td>File tồn tại vật lý VÀ nội dung chứa $\ge 50\%$ từ khóa tìm kiếm.</td>
+                  <td><strong>Tin cậy tuyệt đối</strong>: Điều hướng thẳng tới file và số dòng code.</td>
+                </tr>
+                <tr>
+                  <td><span class="badge badge-cli" style="background: rgba(210, 153, 34, 0.2); color: #d29922;">[WEAK]</span></td>
+                  <td>File có tồn tại nhưng độ phủ từ khóa $&lt; 50\%$ (khớp ngữ nghĩa tiêu đề).</td>
+                  <td><strong>Cẩn trọng</strong>: Đọc lướt nội dung trước khi áp dụng logic.</td>
+                </tr>
+                <tr>
+                  <td><span class="badge badge-algo" style="background: rgba(188, 140, 255, 0.2); color: #bc8cff;">[REBUILT]</span></td>
+                  <td>File bị đổi tên hoặc chuyển thư mục; đã được tự động định vị lại.</td>
+                  <td><strong>Đã tự chữa lành</strong>: Sử dụng đường dẫn mới nhất được báo cáo.</td>
+                </tr>
+                <tr>
+                  <td><span class="badge badge-p0" style="background: rgba(248, 81, 73, 0.2); color: #f85149;">[REMOVED]</span></td>
+                  <td>File đã bị xóa vĩnh viễn khỏi ổ cứng.</td>
+                  <td><strong>Đã thanh trừng</strong>: Node bị xóa khỏi DB, bỏ qua kết quả này.</td>
+                </tr>
+                <tr>
+                  <td><span class="badge badge-core">[NOPATH]</span></td>
+                  <td>Ghi chú tri thức ảo (Architecture Decision Record, quy ước, mẹo).</td>
+                  <td><strong>Mỏ neo kiến thức</strong>: Coi như tài liệu hướng dẫn chuẩn.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Q4 -->
+        <div class="qa-card" id="q4">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q4</span>
+              <div>
+                <div class="qa-question-text">Pending Edge Resolution 2 chiều giải quyết bài toán import chéo (Circular / Out-of-order indexing) như thế nào?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-core">PENDING-EDGES</span>
+                  <span class="badge badge-algo">SQL-RESOLUTION</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p>Trong một dự án thực tế, File A gọi hàm <code>AuthService.validate()</code> ở File B, nhưng File A có thể được Reconciler quét trước File B. Lúc này node <code>AuthService.validate</code> chưa tồn tại trong database.</p>
+            <p><strong>Cơ chế giải quyết của sot-graph:</strong></p>
+            <ul>
+              <li><strong>Bước 1:</strong> Quan hệ chưa giải quyết được lưu tạm vào bảng <code>pending_edges (path, src, dst_symbol, relation, line)</code>.</li>
+              <li><strong>Bước 2:</strong> Khi File B được quét và định nghĩa symbol <code>AuthService.validate</code>, hàm <code>resolve_all_pending_edges()</code> chạy một câu lệnh SQL duy nhất:</li>
+            </ul>
+            <div class="code-block">
+              <div class="code-header">
+                <span>src/sot_graph/db.py:263-273</span>
+                <button class="copy-btn" onclick="navigator.clipboard.writeText('INSERT OR REPLACE INTO graph_edges(path,src,dst,relation,line)\nSELECT p.path,p.src,(SELECT n.id FROM graph_nodes n WHERE n.symbol=p.dst_symbol ORDER BY n.id LIMIT 1),p.relation,p.line\nFROM pending_edges p WHERE EXISTS (SELECT 1 FROM graph_nodes n WHERE n.symbol=p.dst_symbol);\nDELETE FROM pending_edges WHERE EXISTS (SELECT 1 FROM graph_nodes n WHERE n.symbol=pending_edges.dst_symbol);')">Copy Code</button>
+              </div>
+              <pre><code>-- Tự động thăng hạng pending edge thành graph_edges hoàn chỉnh
+INSERT OR REPLACE INTO graph_edges(path, src, dst, relation, line)
+SELECT p.path, p.src, (
+    SELECT n.id FROM graph_nodes n 
+    WHERE n.symbol = p.dst_symbol 
+    ORDER BY n.id LIMIT 1
+), p.relation, p.line
+FROM pending_edges p 
+WHERE EXISTS (SELECT 1 FROM graph_nodes n WHERE n.symbol = p.dst_symbol);
+
+-- Dọn dẹp sạch bảng pending_edges
+DELETE FROM pending_edges 
+WHERE EXISTS (SELECT 1 FROM graph_nodes n WHERE n.symbol = pending_edges.dst_symbol);</code></pre>
+            </div>
+            <p>Nhờ vậy, thứ tự duyệt file hoàn toàn độc lập, đồ thị luôn đạt trạng thái hội tụ (<em>deterministic convergence</em>).</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- CATEGORY 2: SELF-HEALING -->
+      <!-- ========================================== -->
+      <section class="category-section" data-category="cat-healing" id="cat-healing">
+        <div class="category-header">
+          <h3 class="category-title">2. Tự Chữa Lành & Toàn Vẹn Dữ Liệu (Self-Healing & Data Integrity)</h3>
+          <span class="category-pill badge-algo">3 Kịch bản</span>
+        </div>
+
+        <!-- Q5 -->
+        <div class="qa-card" id="q5">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q5</span>
+              <div>
+                <div class="qa-question-text">Khi một file bị xóa vĩnh viễn bằng lệnh `rm`, database tự động xử lý như thế nào để Agent không đọc nhầm mã nguồn đã chết?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-p0">AUTO-PURGE</span>
+                  <span class="badge badge-core">ZERO-STALE</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p>Có 2 con đường để <code>sot-graph</code> phát hiện và thanh trừng file đã bị xóa:</p>
+            <ol>
+              <li>
+                <strong>Đồng Bộ Chủ Động (`sot reconcile`):</strong>
+                Reconciler quét toàn bộ ổ đĩa, so sánh tập hợp đường dẫn hiện có trên đĩa với tập <code>_known_abs_paths()</code> trong DB. Bất kỳ file nào có trong DB nhưng mất trên đĩa sẽ lập tức bị xóa qua <code>db.delete_path(path)</code>.
+              </li>
+              <li>
+                <strong>Tự Chữa Lành Bị Động Tại Thời Điểm Truy Vấn (`sot search`):</strong>
+                Nếu bạn chưa kịp chạy `sot reconcile` mà Agent đã tìm kiếm từ khóa trúng vào file vừa xóa, <code>TrustVerifier.verify_hit</code> kiểm tra <code>os.path.exists(path) == False</code>. Nó quét tìm rehome nhưng không thấy, sau đó <strong>tự động xóa bản ghi ngay trong lượt tìm kiếm đó</strong> và trả về nhãn <code>[REMOVED]</code>:
+                <div class="code-block">
+                  <div class="code-header">
+                    <span>src/sot_graph/verifier.py:139-141</span>
+                  </div>
+                  <pre><code># Preserve historical auto-purge for the CLI and library callers.
+db.delete_path(requested)
+return "REMOVED", 0.0, requested</code></pre>
+                </div>
+              </li>
+            </ol>
+            <div class="callout callout-success">
+              <strong>Kết quả:</strong> Agent không bao giờ bị ảo giác vì node rác bị tiêu diệt ngay tại thời điểm chạm vào.
+            </div>
+          </div>
+        </div>
+
+        <!-- Q6 -->
+        <div class="qa-card" id="q6">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q6</span>
+              <div>
+                <div class="qa-question-text">Khi một file bị di chuyển thư mục (`mv src/utils.py src/helpers/utils.py`), cơ chế Auto-Rehome diễn ra ra sao?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-algo">AUTO-REHOME</span>
+                  <span class="badge badge-core">FIND-REHOME</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p>Khi một file bị di chuyển hoặc đổi tên thư mục cha, đường dẫn cũ trở thành không hợp lệ. Hàm <code>TrustVerifier.find_rehome</code> xử lý như sau:</p>
+            <ol>
+              <li>Tách <code>basename = "utils.py"</code> từ đường dẫn cũ.</li>
+              <li>Duyệt nhanh cây thư mục dự án (bỏ qua các thư mục <code>node_modules</code>, <code>.git</code>, <code>venv</code>).</li>
+              <li>Nếu tìm thấy <strong>DUY NHẤT 1 file</strong> có tên <code>utils.py</code> tại vị trí mới <code>src/helpers/utils.py</code>:
+                <ul>
+                  <li>Hệ thống gọi <code>db.update_node_path(node_id, old_path, new_path)</code>.</li>
+                  <li>Cập nhật lại đường dẫn trong <code>graph_nodes</code> và nhãn <code>label</code>.</li>
+                  <li>Trả về nhãn <code>[REBUILT]</code> kèm đường dẫn mới nhất.</li>
+                </ul>
+              </li>
+              <li>Nếu tìm thấy $\ge 2$ file trùng tên (mơ hồ - <em>ambiguous match</em>): Hệ thống từ chối đoán bừa để đảm bảo an toàn tuyệt đối, xóa đường dẫn cũ và đợi lượt <code>reconcile</code> tiếp theo.</li>
+            </ol>
+          </div>
+        </div>
+
+        <!-- Q7 -->
+        <div class="qa-card" id="q7">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q7</span>
+              <div>
+                <div class="qa-question-text">Tại sao database không bao giờ bị "dơ" hay chứa hàm rác khi lập trình viên xóa bớt hàm trong code?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-core">ATOMIC-BATCH</span>
+                  <span class="badge badge-algo">TRANSACTION</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p>Nhiều hệ thống đồ thị bị lỗi "tích tụ rác" vì chúng dùng câu lệnh <code>UPSERT</code> (chỉ cập nhật hoặc thêm mới, không xóa hàm cũ nếu trong file đã xóa định nghĩa hàm đó).</p>
+            <p><code>sot-graph</code> sử dụng mô hình <strong>Toàn Quyền Theo Tệp (Atomic Full-File Replacement)</strong> trong <code>Database.commit_file_batch</code>:</p>
+            <div class="code-block">
+              <div class="code-header">
+                <span>src/sot_graph/db.py:216-218</span>
+              </div>
+              <pre><code># Xóa sạch toàn bộ node, quan hệ và pending edge cũ thuộc về tệp này
+self.conn.execute("DELETE FROM graph_nodes WHERE path = ?", (path,))
+self.conn.execute("DELETE FROM graph_edges WHERE path = ?", (path,))
+self.conn.execute("DELETE FROM pending_edges WHERE path = ?", (path,))</code></pre>
+            </div>
+            <p>Sau đó mới chèn lại chính xác các hàm, class và lời gọi hàm vừa trích xuất được từ phiên bản hiện tại của tệp. Do đó, nếu bạn xóa 3 hàm trong <code>service.py</code>, 3 hàm đó lập tức biến mất khỏi database trong cùng 1 transaction ACID.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- CATEGORY 3: AGENT INTEGRATION -->
+      <!-- ========================================== -->
+      <section class="category-section" data-category="cat-agent" id="cat-agent">
+        <div class="category-header">
+          <h3 class="category-title">3. Tích Hợp AI Agent & Giao Thức MCP (AI Agent Integration)</h3>
+          <span class="category-pill badge-agent">3 Kịch bản</span>
+        </div>
+
+        <!-- Q8 -->
+        <div class="qa-card" id="q8">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q8</span>
+              <div>
+                <div class="qa-question-text">Làm thế nào để tích hợp sot-graph vào Oh My Pi (OMP), Claude Code, Cursor, OpenCode?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-agent">OMP-EXTENSION</span>
+                  <span class="badge badge-cli">AGENTS.MD</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p><code>sot-graph</code> cung cấp sẵn 3 adapter chính thức trong thư mục <code>src/sot_graph/adapters/</code>:</p>
+            <ol>
+              <li>
+                <strong>Tích hợp Oh My Pi / OMP (`~/.omp`):</strong>
+                Copy file TypeScript extension vào thư mục extensions:
+                <div class="code-block">
+                  <div class="code-header"><span>Bash</span></div>
+                  <pre><code>cp src/sot_graph/adapters/omp_extension.ts ~/.omp/agent/extensions/sot_graph.ts</code></pre>
+                </div>
+                Cung cấp cho Agent 4 tool tự động: <code>sot_search</code>, <code>sot_explore</code>, <code>sot_reconcile</code>, <code>sot_insert</code>.
+              </li>
+              <li>
+                <strong>Tích hợp Claude Code / Cursor / Codex:</strong>
+                Thêm nội dung của <code>src/sot_graph/adapters/AGENTS.md</code> vào tệp <code>AGENTS.md</code> hoặc <code>.cursorrules</code> của repository để định hướng Agent tuân thủ quy trình tra cứu tri thức trước khi viết code mới.
+              </li>
+              <li>
+                <strong>Tích hợp OpenCode:</strong>
+                Khai báo công cụ trong file cấu hình <code>.opencode.json</code> trỏ tới <code>src/sot_graph/adapters/opencode_tools.json</code>.
+              </li>
+            </ol>
+          </div>
+        </div>
+
+        <!-- Q9 -->
+        <div class="qa-card" id="q9">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q9</span>
+              <div>
+                <div class="qa-question-text">MCP (Model Context Protocol) Server cung cấp những công cụ gì cho LLM? Tại sao MCP lại là Read-Only?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-agent">MCP-SERVER</span>
+                  <span class="badge badge-core">READ-ONLY</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p>Lệnh <code>./bin/sot mcp</code> khởi chạy một MCP Stdio Server tiêu chuẩn cung cấp 5 công cụ và 2 tài nguyên cho LLM:</p>
+            <ul>
+              <li><code>sot_search</code>: Tìm kiếm tri thức đã được xác minh đĩa cứng.</li>
+              <li><code>sot_explore</code>: Duyệt đồ thị quan hệ phụ thuộc và lời gọi hàm đa tầng.</li>
+              <li><code>sot_verify_drift</code>: Kiểm toán độ lệch giữa đồ thị và filesystem mà không sửa đổi DB.</li>
+              <li><code>sot_architecture_report</code>: Sinh báo cáo kiến trúc Markdown tóm tắt kèm phát hiện God Nodes.</li>
+              <li><code>sot_communities</code>: Liệt kê các cụm chức năng và điểm số Cohesion.</li>
+              <li><strong>Tài nguyên MCP:</strong> <code>sot://stats</code> (thống kê tổng thể) và <code>sot://node/{id}</code> (chi tiết thực thể).</li>
+            </ul>
+            <div class="callout callout-warning">
+              <strong>Tại sao MCP lại Read-Only?</strong> Để đảm bảo tính <em>Deterministic</em> và không gây tranh chấp khóa SQLite (Database Lock contention) khi có hàng chục Subagent AI cùng truy vấn đồng thời. Mọi thao tác ghi chỉ diễn ra qua tiến trình Reconciler độc lập.
+            </div>
+          </div>
+        </div>
+
+        <!-- Q10 -->
+        <div class="qa-card" id="q10">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q10</span>
+              <div>
+                <div class="qa-question-text">Quy trình làm việc chuẩn của AI Agent (Knowledge Reuse Protocol) khi bắt đầu một task lập trình là gì?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-agent">AGENT-WORKFLOW</span>
+                  <span class="badge badge-cli">BEST-PRACTICES</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p>Để tối ưu token và tránh viết lại mã nguồn đã có trong dự án, Agent cần tuân thủ quy trình 4 bước:</p>
+            <ol>
+              <li>
+                <strong>Bước 1 - Tra Cứu Tri Thức Đã Có:</strong>
+                <code>sot search "&lt;tính năng hoặc hàm cần tìm&gt;"</code>
+              </li>
+              <li>
+                <strong>Bước 2 - Đánh Giá Độ Tin Cậy (Trust Verdict):</strong>
+                Nếu là <code>[STRONG]</code>: Đọc thẳng vào file và tái sử dụng. Nếu là <code>[WEAK]</code>: Mở file kiểm tra nhanh.
+              </li>
+              <li>
+                <strong>Bước 3 - Khảo Sát Tác Động (Impact Analysis):</strong>
+                <code>sot explore "&lt;tên_hàm_hoặc_class_sắp_sửa&gt;"</code> để xem những module nào đang phụ thuộc vào nó.
+              </li>
+              <li>
+                <strong>Bước 4 - Lưu Lại Quyết Định (Knowledge Persistence):</strong>
+                Sau khi hoàn thành giải pháp phức tạp:
+                <code>sot insert --title "Giải pháp X" --body "Chi tiết cách fix..." --keywords "tag1,tag2"</code>
+              </li>
+            </ol>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- CATEGORY 4: GRAPH ANALYTICS -->
+      <!-- ========================================== -->
+      <section class="category-section" data-category="cat-analytics" id="cat-analytics">
+        <div class="category-header">
+          <h3 class="category-title">4. Phân Tích Đồ Thị & Trực Quan Hóa (Graph Analytics & Visualizer)</h3>
+          <span class="category-pill badge-algo">3 Kịch bản</span>
+        </div>
+
+        <!-- Q11 -->
+        <div class="qa-card" id="q11">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q11</span>
+              <div>
+                <div class="qa-question-text">"God Node" là gì? Thuật toán phát hiện God Node và tính toán 2-hop Blast Radius (bán kính ảnh hưởng) như thế nào?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-algo">GOD-NODES</span>
+                  <span class="badge badge-core">BLAST-RADIUS</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p>
+              <strong>God Node (Nút Siêu Kết Nối / Hub Trung Tâm):</strong> Là các class, module hoặc hàm có bậc kết nối (degree) vượt trội, tập trung quá nhiều phụ thuộc của hệ thống. Nếu một God Node bị lỗi hoặc thay đổi API, nó có thể làm gãy hàng loạt module khác.
+            </p>
+            <p><strong>Thuật toán phát hiện (`src/sot_graph/analytics/diagnostics.py`):</strong></p>
+            <ol>
+              <li>Tính giá trị trung bình $\mu$ và độ lệch chuẩn $\sigma$ của bậc kết nối toàn bộ đồ thị:
+                $$\text{Cutoff} = \mu + \text{threshold\_sigma} \times \sigma$$
+              </li>
+              <li>Bất kỳ nút nào có $\text{Degree} \ge \text{Cutoff}$ (mặc định $\text{sigma} = 1.5$) được phân loại là <strong>God Node</strong>.</li>
+              <li>
+                <strong>2-hop Blast Radius:</strong> Thuật toán duyệt BFS đúng 2 bước từ God Node để đếm số lượng thực thể chịu ảnh hưởng trực tiếp và gián tiếp:
+                <ul>
+                  <li>$\text{Blast} \ge 25$: Nguy cơ <span class="badge badge-p0">CRITICAL</span>.</li>
+                  <li>$\text{Blast} \ge 15$: Nguy cơ <span class="badge badge-cli">HIGH</span>.</li>
+                  <li>$\text{Blast} \ge 8$: Nguy cơ <span class="badge badge-algo">MEDIUM</span>.</li>
+                </ul>
+              </li>
+            </ol>
+            <div class="code-block">
+              <div class="code-header"><span>Lệnh phát hiện God Nodes và xuất báo cáo</span></div>
+              <pre><code>./bin/sot report --sigma 1.5 --min-size 2 -o ARCHITECTURE_REPORT.md</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Q12 -->
+        <div class="qa-card" id="q12">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q12</span>
+              <div>
+                <div class="qa-question-text">Thuật toán phát hiện cộng đồng (Community Detection) và hệ số Modularity (Q) / Cohesion Score có ý nghĩa gì?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-algo">LOUVAIN</span>
+                  <span class="badge badge-core">MODULARITY</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p>Thuật toán <code>Label Propagation / Louvain</code> trong <code>sot_graph.analytics</code> tự động gom các file và hàm có tần suất gọi nhau dày đặc thành các <strong>Cộng Đồng Chức Năng (Functional Communities)</strong>:</p>
+            <ul>
+              <li>
+                <strong>Hệ số Modularity ($Q \in [-0.5, 1.0]$):</strong> Đo lường chất lượng phân rã kiến trúc. $Q &gt; 0.3$ thể hiện cấu trúc mã nguồn có tính module hóa cao, ranh giới rõ ràng.
+              </li>
+              <li>
+                <strong>Điểm Số Cohesion ($C \in [0.0, 1.0]$):</strong> Tỷ lệ liên kết nội bộ trong cụm so với tổng liên kết:
+                $$C = \frac{E_{\text{internal}}}{E_{\text{internal}} + E_{\text{external}}}$$
+                Nếu $C &lt; 0.4$, cụm đó đang bị phụ thuộc quá nhiều vào bên ngoài (<em>Tightly Coupled</em>) và cần được xem xét tái cấu trúc (Refactoring).
+              </li>
+            </ul>
+            <div class="code-block">
+              <div class="code-header"><span>Lệnh kiểm tra các cụm cộng đồng</span></div>
+              <pre><code>./bin/sot cluster --min-size 3</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Q13 -->
+        <div class="qa-card" id="q13">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q13</span>
+              <div>
+                <div class="qa-question-text">Làm thế nào để xuất đồ thị sang Interactive HTML D3.js, GraphRAG JSON, Obsidian Vault và GraphML?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-cli">EXPORTERS</span>
+                  <span class="badge badge-agent">GRAPHRAG</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p><code>sot-graph</code> tích hợp sẵn bộ xuất đa định dạng độc lập trong <code>src/sot_graph/export/</code>:</p>
+            <div class="code-block">
+              <div class="code-header"><span>Cú pháp CLI xuất đồ thị</span></div>
+              <pre><code># 1. Trực quan hóa HTML D3.js tương tác và mở trên trình duyệt
+./bin/sot viz -o graph.html --open
+
+# 2. Xuất dữ liệu phân cấp cho các hệ thống GraphRAG
+./bin/sot export -f graphrag -o graphrag_dataset.json
+
+# 3. Xuất toàn bộ đồ thị thành Obsidian Vault (kèm Markdown Wikilinks [[Node]])
+./bin/sot export -f obsidian -o my_obsidian_vault/
+
+# 4. Xuất GraphML chuẩn XML cho Gephi, Cytoscape, NetworkX
+./bin/sot export -f graphml -o graph.graphml</code></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- CATEGORY 5: OPS & MAINTENANCE -->
+      <!-- ========================================== -->
+      <section class="category-section" data-category="cat-ops" id="cat-ops">
+        <div class="category-header">
+          <h3 class="category-title">5. Vận Hành, Bảo Trì & Hiệu Năng (Operations & Maintenance)</h3>
+          <span class="category-pill badge-cli">3 Kịch bản</span>
+        </div>
+
+        <!-- Q14 -->
+        <div class="qa-card" id="q14">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q14</span>
+              <div>
+                <div class="qa-question-text">Khi nào cần chạy `sot clean` và `sot vacuum`? Điểm khác biệt giữa `--dry-run` và thực thi thật là gì?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-cli">MAINTENANCE</span>
+                  <span class="badge badge-core">CLEAN-VACUUM</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p>Trong quá trình phát triển dài hạn, database có thể tích tụ không gian trống (freelist pages) hoặc các quan hệ mồ côi:</p>
+            <ul>
+              <li>
+                <strong>`sot clean`:</strong> Quét và xóa các đường dẫn không còn trên đĩa, các cạnh đồ thị mồ côi (orphaned edges), và pending edges không còn mục tiêu.
+                <ul>
+                  <li><code>--dry-run</code>: Chỉ tính toán và báo cáo số lượng bản ghi sẽ bị xóa dưới dạng JSON, <strong>tuyệt đối không chạm vào DB</strong>.</li>
+                  <li><code>--all --yes</code>: Xóa toàn bộ dữ liệu đồ thị để chuẩn bị index mới từ đầu.</li>
+                </ul>
+              </li>
+              <li>
+                <strong>`sot vacuum`:</strong> Thực hiện Checkpoint SQLite WAL (Write-Ahead Log) và chạy <code>VACUUM</code> để giải phóng dung lượng ổ cứng, chống phân mảnh trang dữ liệu.
+              </li>
+            </ul>
+            <div class="code-block">
+              <div class="code-header"><span>Ví dụ thực tế</span></div>
+              <pre><code># Kiểm tra trước số lượng rác
+./bin/sot clean --dry-run --json
+
+# Dọn dẹp an toàn
+./bin/sot clean --json
+
+# Thu gọn và giải phóng dung lượng đĩa
+./bin/sot vacuum --analyze</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Q15 -->
+        <div class="qa-card" id="q15">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q15</span>
+              <div>
+                <div class="qa-question-text">Làm thế nào để chạy kiểm tra độ lệch (Drift Verification) trong pipeline CI/CD mà không gây lỗi hoặc sửa DB?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-cli">CI-CD</span>
+                  <span class="badge badge-core">VERIFY</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p>Lệnh <code>sot verify</code> được thiết kế chuyên biệt cho các quy trình CI/CD và pre-commit hooks:</p>
+            <ul>
+              <li>Hoạt động ở chế độ <strong>Read-Only tuyệt đối</strong>: Không sửa đổi tệp SQLite, không tạo lock ghi.</li>
+              <li><code>sot verify</code>: Đối soát nhanh metadata (size, mtime) giữa database và filesystem.</li>
+              <li><code>sot verify --deep</code>: Đọc toàn bộ nội dung tệp và băm lại SHA-256 để phát hiện mọi độ lệch ẩn.</li>
+              <li><strong>Mã trả về (Exit Code):</strong> Trả về <code>0</code> nếu đồ thị hoàn toàn khớp với đĩa; trả về <code>1</code> nếu có độ lệch (drift) kèm danh sách tệp bị lệch.</li>
+            </ul>
+            <div class="code-block">
+              <div class="code-header"><span>Sử dụng trong GitHub Actions / CI</span></div>
+              <pre><code># Bước kiểm tra trong CI workflow
+- name: Verify Knowledge Graph Drift
+  run: ./bin/sot verify --deep --json</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Q16 -->
+        <div class="qa-card" id="q16">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q16</span>
+              <div>
+                <div class="qa-question-text">Hiệu năng thực tế của sot-graph: Xử lý bao nhiêu file một giây? Tại sao đạt tốc độ dưới 25ms với RAM dưới 25MB?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-algo">BENCHMARKS</span>
+                  <span class="badge badge-core">PERFORMANCE</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p>Kết quả đo đạc thực tế từ bộ Benchmark chính thức (trên chip Apple M1 Max):</p>
+            <ul>
+              <li><strong>Tốc độ Reconcile:</strong> Xử lý và nạp đầy đủ AST cho <strong>100 files trong ~24.1ms</strong> (&gt; 4,000 files/giây đối với dirty-check).</li>
+              <li><strong>Độ trễ truy vấn FTS5 BM25:</strong> <strong>~1.17ms</strong> (P95) cho các câu truy vấn phức tạp.</li>
+            </ul>
+            <p><strong>Lý do đạt được hiệu năng ấn tượng:</strong></p>
+            <ol>
+              <li><strong>Adaptive Worker Threshold:</strong> Các lô nhỏ (&lt; 16 tệp) chạy tuần tự trong tiến trình chính để loại bỏ 100% chi phí fork đa tiến trình (multiprocessing overhead); chỉ mở worker pool khi có khối lượng tệp lớn.</li>
+              <li><strong>Zero External Memory Footprint:</strong> Sử dụng SQLite nhúng cấu hình <code>PRAGMA journal_mode=WAL</code> và <code>PRAGMA synchronous=NORMAL</code>, bộ nhớ RAM duy trì ổn định dưới 25MB.</li>
+            </ol>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- CATEGORY 6: EDGE CASES -->
+      <!-- ========================================== -->
+      <section class="category-section" data-category="cat-cases" id="cat-cases">
+        <div class="category-header">
+          <h3 class="category-title">6. Xử Lý Sự Cố & Tình Huống Thực Tế (Edge Cases & Troubleshooting)</h3>
+          <span class="category-pill badge-p0">3 Kịch bản</span>
+        </div>
+
+        <!-- Q17 -->
+        <div class="qa-card" id="q17">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q17</span>
+              <div>
+                <div class="qa-question-text">Nếu có 2 file trùng tên (VD: `models/user.py` và `controllers/user.py`) bị di chuyển, hệ thống xử lý thế nào để tránh gán nhầm?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-p0">AMBIGUITY-GUARD</span>
+                  <span class="badge badge-core">SAFETY</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p>Đây là tình huống <strong>Trùng tên cơ sở (Basename Collision)</strong> khi di chuyển file.</p>
+            <div class="code-block">
+              <div class="code-header"><span>src/sot_graph/verifier.py:73-78</span></div>
+              <pre><code>if basename in files:
+    cands.append(os.path.abspath(os.path.join(root, basename)))
+    if len(cands) > 1:
+        return None  # Trùng lặp - từ chối đoán bừa (Ambiguous match)
+return cands[0] if len(cands) == 1 else None</code></pre>
+            </div>
+            <p>
+              Hàm <code>find_rehome</code> có cơ chế <strong>Ambiguity Guard</strong>: Nếu trong cây thư mục xuất hiện từ 2 file <code>user.py</code> trở lên, hệ thống lập tức trả về <code>None</code>. Nó <strong>tuyệt đối không gán bừa</strong>. Node cũ sẽ được thanh trừng an toàn và đợi lượt <code>sot reconcile</code> tiếp theo để nhận diện chính xác theo cấu trúc AST.
+            </p>
+          </div>
+        </div>
+
+        <!-- Q18 -->
+        <div class="qa-card" id="q18">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q18</span>
+              <div>
+                <div class="qa-question-text">Nếu dự án có file mã nguồn bị lỗi cú pháp (Syntax Error), Reconciler có bị crash không?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-p0">FAULT-TOLERANCE</span>
+                  <span class="badge badge-cli">EXTRACTOR</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p><strong>KHÔNG BAO GIỜ CRASH.</strong></p>
+            <p>Tất cả parser trong <code>src/sot_graph/extractor.py</code> và <code>_vendor/graphify/extract.py</code> đều được bọc trong các khối <code>try-except</code> phòng vệ:</p>
+            <ul>
+              <li>Nếu file Python bị <code>SyntaxError</code> hoặc file TypeScript thiếu dấu ngoặc, parser sẽ ghi nhận lỗi vào trường <code>error</code> nhưng vẫn <strong>bảo lưu node tệp gốc (file node)</strong>.</li>
+              <li>Tiến trình Reconciler tiếp tục xử lý các file khác bình thường và trả về tổng kết số file <code>failed</code> trong <code>ReconcileSummary</code>.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Q19 -->
+        <div class="qa-card" id="q19">
+          <div class="qa-trigger">
+            <div class="qa-question-box">
+              <span class="qa-icon-q">Q19</span>
+              <div>
+                <div class="qa-question-text">Làm thế nào để lưu trữ các quyết định kiến trúc (ADR) hoặc kinh nghiệm sửa bug phức tạp vào đồ thị tri thức?</div>
+                <div class="qa-tags">
+                  <span class="badge badge-cli">SOT-INSERT</span>
+                  <span class="badge badge-agent">KNOWLEDGE-ANCHOR</span>
+                </div>
+              </div>
+            </div>
+            <span class="qa-toggle-btn">▼</span>
+          </div>
+          <div class="qa-body">
+            <p>Bạn hoặc AI Agent có thể chèn các ghi chú tri thức (Virtual Knowledge Notes) bằng lệnh <code>sot insert</code>:</p>
+            <div class="code-block">
+              <div class="code-header"><span>Ví dụ chèn ghi chú kiến trúc</span></div>
+              <pre><code>./bin/sot insert \
+  --title "Quy tắc Transaction trong Database" \
+  --body "Mọi thay đổi trên nhiều bảng liên quan bắt buộc phải bọc trong 'with self.conn:' để đảm bảo ACID và chống leak lock." \
+  --path "src/sot_graph/db.py" \
+  --keywords "sqlite,transaction,acid,concurrency"</code></pre>
+            </div>
+            <p>Các ghi chú này nhận nhãn <code>[NOPATH]</code> (hoặc liên kết với tệp nếu có <code>--path</code>) và được lập chỉ mục FTS5 BM25. Khi Agent hỏi <em>"Làm sao để viết transaction an toàn?"</em>, hệ thống sẽ trả về ngay mỏ neo kiến thức này.</p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    <p><strong>sot-graph</strong> — Single Source of Truth Knowledge Graph. MIT License. Copyright © 2026 Minh Giap.</p>
+    <p style="margin-top: 4px;">Được thiết kế cho các AI Coding Agents: Oh My Pi (OMP), Claude Code, Cursor, OpenCode.</p>
+  </footer>
+
+  <!-- Interactive Search and Filter Logic -->
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const filterInput = document.getElementById("filter-input");
+      const qaCards = document.querySelectorAll(".qa-card");
+      const categoryNavBtns = document.querySelectorAll(".category-nav-btn[data-cat]");
+      const btnExpandAll = document.getElementById("btn-expand-all");
+      const btnCollapseAll = document.getElementById("btn-collapse-all");
+      const countTotal = document.getElementById("count-total");
+
+      // Accordion toggle
+      qaCards.forEach(card => {
+        const trigger = card.querySelector(".qa-trigger");
+        trigger.addEventListener("click", () => {
+          card.classList.toggle("open");
+        });
+      });
+
+      // Expand / Collapse all
+      btnExpandAll.addEventListener("click", () => {
+        qaCards.forEach(c => {
+          if (c.style.display !== "none") c.classList.add("open");
+        });
+      });
+      btnCollapseAll.addEventListener("click", () => {
+        qaCards.forEach(c => c.classList.remove("open"));
+      });
+
+      // Category filter
+      let currentCategory = "all";
+      categoryNavBtns.forEach(btn => {
+        btn.addEventListener("click", () => {
+          categoryNavBtns.forEach(b => b.classList.remove("active"));
+          btn.classList.add("active");
+          currentCategory = btn.getAttribute("data-cat");
+          applyFilter();
+        });
+      });
+
+      // Realtime search filter
+      filterInput.addEventListener("input", applyFilter);
+
+      function applyFilter() {
+        const query = filterInput.value.toLowerCase().trim();
+        let visibleCount = 0;
+
+        document.querySelectorAll(".category-section").forEach(section => {
+          const sectionCat = section.getAttribute("data-category");
+          let sectionHasVisible = false;
+
+          section.querySelectorAll(".qa-card").forEach(card => {
+            const text = card.textContent.toLowerCase();
+            const matchesQuery = !query || text.includes(query);
+            const matchesCategory = (currentCategory === "all" || currentCategory === sectionCat);
+
+            if (matchesQuery && matchesCategory) {
+              card.style.display = "block";
+              sectionHasVisible = true;
+              visibleCount++;
+              if (query.length > 2) {
+                card.classList.add("open"); // Tự động mở khi tìm kiếm cụ thể
+              }
+            } else {
+              card.style.display = "none";
+            }
+          });
+
+          section.style.display = sectionHasVisible ? "block" : "none";
+        });
+
+        if (countTotal) {
+          countTotal.textContent = visibleCount;
+        }
+      }
+    });
+  </script>
+</body>
+</html>

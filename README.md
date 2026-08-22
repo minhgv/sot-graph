@@ -8,6 +8,7 @@
 [![SQLite: WAL + FTS5](https://img.shields.io/badge/SQLite-FTS5%20%2B%20WAL-orange.svg)](src/sot_graph/db.py)
 [![Tests: 31 passed](https://img.shields.io/badge/Tests-31%2F31%20Passed-brightgreen.svg)](tests/)
 [![Architecture: Zero--Daemon](https://img.shields.io/badge/Architecture-Zero--Daemon-purple.svg)](#-architecture-overview)
+[![Q&A Guide: 19 Scenarios](https://img.shields.io/badge/Q%26A%20Guide-19%20Scenarios%20HTML-blueviolet.svg)](sot_qa_guide.html)
 
 ---
 
@@ -58,6 +59,25 @@ When an agent searches the knowledge base via `sot search "<query>"`, every cand
 | `[REMOVED]` | **Path permanently deleted from disk.** | **Auto-Purged**: Node deleted from database so it never ranks again. |
 | `[NOPATH]` | **Virtual knowledge note (architecture decisions, rules).** | **Knowledge Anchor**: Treat as documented guideline. |
 
+---
+
+## 📚 Interactive Q&A Guide & Troubleshooting (`sot_qa_guide.html`)
+
+For a comprehensive, interactive deep-dive into real-world usage scenarios, edge cases, self-healing mechanics, and graph algorithms, explore the standalone **[Interactive Q&A Guide (sot_qa_guide.html)](sot_qa_guide.html)**:
+
+```bash
+# Open the interactive Q&A guide directly in your browser:
+open sot_qa_guide.html        # macOS
+xdg-open sot_qa_guide.html    # Linux
+```
+
+### 🌟 Key Q&A Topics Covered:
+1. **Core Architecture & Anti-Hallucination**: Filesystem SSOT principles, fast dirty check vs SHA-256 hash detection, Trust Verdict classifications (`[STRONG]`, `[WEAK]`, `[REBUILT]`, `[REMOVED]`), and SQL pending edge resolution.
+2. **Self-Healing & Data Integrity**: Immediate auto-purge upon file deletion (`rm`), auto-rehome upon directory moves (`mv`), and atomic full-file replacement avoiding ghost entities.
+3. **AI Agent Integration**: Oh My Pi (`omp_extension.ts`), Claude Code/Cursor (`AGENTS.md`), read-only MCP stdio server tools, and the 4-step Knowledge Reuse Protocol.
+4. **Graph Analytics & Insights**: God Node identification ($\mu + \sigma \cdot \text{std}$) with 2-hop Blast Radius, Louvain modularity ($Q$), and multi-format exporters.
+5. **Operations & Maintenance**: `sot clean` & `sot vacuum` with `--dry-run`, CI/CD drift audits (`sot verify --deep`), and benchmark metrics.
+6. **Real-World Edge Cases**: Basename collision guards, syntax error resilience, and architecture decision persistence (`sot insert`).
 ---
 
 ## 🏗️ Architecture Overview
