@@ -77,13 +77,13 @@ Explore comprehensive architectural analyses, real-world agent integration guide
   xdg-open sot_qa_guide.html    # Linux
   ```
 
-### 🌟 6 Nhóm Chủ Đề Chính Được Giải Đáp Chi Tiết:
-1. **Cơ Chế Cốt Lõi & Chống Ảo Giác**: Filesystem SSOT, Fast Dirty Check metadata (O(1)) + SHA-256 hash, phân loại Trust Verdict (`[STRONG]`, `[WEAK]`, `[REBUILT]`, `[REMOVED]`), và SQL pending edge resolution 2 chiều.
-2. **Tự Chữa Lành & Toàn Vẹn Dữ Liệu**: Tự động thanh trừng khi xóa file (`rm`), tự động định vị lại khi đổi tên/chuyển thư mục (`mv`), và Atomic Full-File Replacement chống tích tụ node rác.
-3. **Tích Hợp AI Agent & MCP**: Cài đặt extension cho Oh My Pi (`omp_extension.ts`), cấu hình Claude Code/Cursor (`AGENTS.md`), 5 công cụ Read-Only MCP Stdio Server và quy trình 4 bước Knowledge Reuse Protocol.
-4. **Phân Tích Đồ Thị & Trực Quan Hóa**: Thuật toán nhận diện God Nodes (μ + threshold_sigma × σ) kèm 2-hop Blast Radius, phân cụm Louvain / Modularity (Q), và bộ xuất Interactive HTML D3.js, GraphRAG JSON, Obsidian Vault, GraphML.
-5. **Vận Hành, Bảo Trì & Hiệu Năng**: Lệnh `sot clean` & `sot vacuum` (chế độ an toàn `--dry-run`), CI/CD drift audits (`sot verify --deep`), và benchmark hiệu năng (< 25ms / 100 files, RAM < 25MB).
-6. **Xử Lý Sự Cố & Tình Huống Thực Tế**: Ambiguity Guard chống gán nhầm file trùng tên, khả năng chịu lỗi khi gặp Syntax Error, và lưu trữ quyết định kiến trúc (ADR) với `sot insert`.
+### 🌟 6 Core Topic Areas Covered in Depth:
+1. **Core Architecture & Anti-Hallucination**: Filesystem SSOT, Fast Dirty Check metadata ($O(1)$) + SHA-256 hashing, Trust Verdict classification (`[STRONG]`, `[WEAK]`, `[REBUILT]`, `[REMOVED]`), and atomic 2-way pending edge resolution in SQL.
+2. **Self-Healing & Data Integrity**: Automatic path purging upon file deletion (`rm`), automatic rehoming on file moves/renames (`mv`), and Atomic Full-File Replacement to prevent stale node accumulation.
+3. **AI Agent Integration & MCP**: Extension setup for Oh My Pi (`omp_extension.ts`), agent configuration for Claude Code/Cursor (`AGENTS.md`), 5 Read-Only MCP Stdio tools, and the 4-step Knowledge Reuse Protocol.
+4. **Graph Analytics & Visualizations**: God Node detection algorithms ($\mu + \text{threshold\_sigma} \times \sigma$) with 2-hop Blast Radius, Louvain community detection / Modularity ($Q$), and multi-format exporters (Interactive HTML D3.js, GraphRAG JSON, Obsidian Vault, GraphML).
+5. **Operations, Maintenance & Performance**: Safe pruning via `sot clean` & defragmentation via `sot vacuum` (with safe `--dry-run` modes), non-mutating CI/CD drift audits (`sot verify --deep`), and latency benchmarks ($< 25\text{ms}$ / 100 files, RAM $< 25\text{MB}$).
+6. **Edge Cases & Incident Handling**: Ambiguity Guard against basename collisions across directories, syntax error fault tolerance during parsing, and persisting Architectural Decision Records (ADRs) with `sot insert`.
 ---
 
 ## 🏗️ Architecture Overview
@@ -333,36 +333,36 @@ PYTHONPATH=".:src" python3 -m benchmarks.bench_query --files 100 --repeat 3
 
 ## ⚖️ Architectural Comparison: `sot-graph` vs `graphify` vs `gitnexus`
 
-| Tiêu chí / Capability | `sot-graph` (Dự án này) | `graphify` | `gitnexus` |
+| Dimension / Capability | `sot-graph` (This Project) | `graphify` | `gitnexus` |
 | :--- | :--- | :--- | :--- |
-| **Mục tiêu cốt lõi (Core Purpose)** | Lớp tri thức **Single Source of Truth** tự chữa lành cho AI Coding Agents trong vòng lặp lập trình thực tế (*Active filesystem loop*). | Xây dựng đồ thị tri thức đa phương tiện sâu (Code, Docs, Papers) kèm báo cáo kiến trúc và phân tích suy luận ngữ nghĩa qua LLM. | Công cụ Code Intelligence & MCP client-side chạy trong trình duyệt / zero-server, lập bản đồ AST & Git repository. |
-| **Nguồn Chân Lý (Source of Truth)** | **Filesystem là chân lý tuyệt đối**. Mọi hint chỉ là gợi ý, dữ liệu luôn được xác minh đối chiếu trực tiếp từ đĩa trước khi trả về. | **Tệp đầu vào + Suy luận LLM**. Lấy snapshot cây thư mục tại thời điểm quét và lưu đồ thị JSON tĩnh. | **Git Repository + Tree-sitter AST**. Lập chỉ mục cây Git và các quan hệ cuộc gọi (*call graph*) trong bộ nhớ. |
-| **Cơ chế Chống Ảo Giác (Anti-Hallucination)** | **Trust Verdict Engine** (`[STRONG]`, `[WEAK]`, `[REBUILT]`, `[REMOVED]`): Kiểm tra vật lý file tồn tại và độ phủ token trên đĩa trước khi trả kết quả. | Phân loại liên kết minh bạch (`EXTRACTED` vs `INFERRED` vs `AMBIGUOUS`) kèm audit trail và cảnh báo token cost. | Dựa vào phân tích cú pháp tĩnh Tree-sitter; không có cơ chế đối soát độ phủ token hay kiểm tra thay đổi vật lý runtime. |
-| **Cơ chế Tự Chữa Lành (Self-Healing)** | **Tự động & Tức thì**: Tự nhận diện file bị di chuyển/đổi tên (`[REBUILT]`), tự động xóa các đường dẫn chết (`[REMOVED]`) và dọn dẹp quan hệ mồ côi. | **Không tự động**: Cần chạy lại `/graphify --update` hoặc tái tạo toàn bộ đồ thị tri thức khi codebase thay đổi. | **Theo phiên / Manual**: Đòi hỏi re-indexing lại kho mã nguồn khi có commit hoặc nhánh mới. |
-| **Engine Lưu trữ & Truy vấn (Storage & State)** | **SQLite WAL + FTS5 (BM25)**: Hỗ trợ giao dịch ACID, dirty tracking theo SHA-256 generation, độ trễ truy vấn sub-millisecond ($< 1.5\text{ms}$). | **JSON (`graph.json`) + Markdown Reports**: Không dùng DB quan hệ nhúng; lưu đồ thị dưới dạng tệp phẳng. | **In-memory / IndexedDB / WASM Browser Cache**: Dữ liệu lưu trong RAM trình duyệt hoặc tiến trình Node.js tạm thời. |
-| **Hiệu năng & Tài nguyên (Footprint)** | Cực kỳ nhẹ ($< 25\text{MB}$ RAM), **Zero external dependencies**, xử lý song song đa tiến trình (~$20\text{ms}$ / 100 files). | Tốn token LLM khi chạy chế độ `--mode deep`; thích hợp chạy định kỳ / tài liệu hóa thay vì chạy theo từng lệnh code. | Phụ thuộc runtime trình duyệt/Node.js và bộ nhớ RAM khi xử lý các kho mã nguồn lớn (*monorepo*). |
-| **Phân tích Cụm & God Nodes** | Tích hợp sẵn thuật toán **Louvain / Modularity ($Q$)**, Cohesion score, và **God Node Detection (2-hop blast radius)** không cần daemon ngoài. | Tích hợp thuật toán **Leiden / Louvain community detection**, chấm điểm Cohesion, và phát hiện các kết nối bất thường (*Surprising connections*). | Tập trung vào biểu diễn quan hệ kế thừa, import và call-chain trực quan; không tập trung vào phân tích cụm kiến trúc. |
-| **Trực quan hóa (Visualization)** | Trực quan hóa tương tác Standalone HTML D3.js v7 (*force-directed graph*) kèm bộ lọc cộng đồng và chi tiết nút/cạnh. | Trực quan hóa tương tác HTML D3.js + Hỗ trợ xuất Obsidian Canvas / Vault và GraphML. | Giao diện đồ họa Web UI hiện đại chạy trực tiếp trên trình duyệt (*client-side interactive map*). |
-| **Định dạng Xuất (Exports)** | **GraphRAG JSON**, **Obsidian Markdown Vault**, **GraphML XML**, và **Markdown Report**. | **GraphRAG JSON**, **Obsidian Markdown Vault**, **GRAPH_REPORT.md**. | Chủ yếu phục vụ MCP server và Web UI nội bộ. |
-| **Giao thức MCP (Model Context Protocol)** | **5 MCP Tools stdio** (`sot_search`, `sot_explore`, `sot_verify_drift`, `sot_architecture_report`, `sot_communities`). | Tích hợp qua cấu hình CLAUDE.md hoặc MCP server mở rộng. | **MCP-Native stdio/SSE server** với các công cụ tra cứu cấu trúc mã nguồn. |
+| **Core Purpose** | Self-healing **Single Source of Truth** knowledge layer for AI Coding Agents in the active filesystem coding loop. | Deep multi-modal knowledge graph builder (Code, Docs, Papers) with architectural reporting and LLM semantic inference. | Client-side zero-server Code Intelligence & MCP tool running in-browser for AST & Git repository exploration. |
+| **Source of Truth** | **Filesystem is the absolute truth**. Hints are only triggers; state is physically verified against disk before delivery. | **Input files + LLM inference**. Takes directory snapshots at extraction time and stores static graph JSON. | **Git Repository + Tree-sitter AST**. Indexes Git trees and in-memory call graph relationships. |
+| **Anti-Hallucination Mechanism** | **Trust Verdict Engine** (`[STRONG]`, `[WEAK]`, `[REBUILT]`, `[REMOVED]`): Physical disk checks and token coverage filtering at query time. | Transparent link classification (`EXTRACTED` vs `INFERRED` vs `AMBIGUOUS`) with token cost audit trail. | Static Tree-sitter AST parsing; no runtime token coverage verification or physical disk change audits. |
+| **Self-Healing Capabilities** | **Automated & Instantaneous**: Auto-detects moved/renamed files (`[REBUILT]`), purges dead paths (`[REMOVED]`), cleans orphan edges. | **Manual / Batch**: Requires re-running `/graphify --update` or full graph rebuild when the codebase changes. | **Session / Manual**: Requires repository re-indexing when new commits or branches are introduced. |
+| **Storage & Query Engine** | **SQLite WAL + FTS5 (BM25)**: ACID transactions, SHA-256 generation dirty tracking, sub-millisecond query latency ($< 1.5\text{ms}$). | **JSON (`graph.json`) + Markdown Reports**: Flat files; no embedded relational or property graph database. | **In-memory / IndexedDB / WASM Browser Cache**: Data stored in browser RAM or transient Node.js process memory. |
+| **Footprint & Resources** | Ultra-lightweight ($< 25\text{MB}$ RAM), **Zero external dependencies**, parallel multiprocessing (~$20\text{ms}$ / 100 files). | Incurs LLM API token costs when running `--mode deep`; best for periodic documentation rather than per-turn edits. | Dependent on Node.js/browser runtime and RAM scaling when indexing large monorepos. |
+| **Clustering & God Nodes** | In-process **Louvain / Modularity ($Q$)**, Cohesion scoring, and **God Node Detection (2-hop blast radius)** with zero daemons. | Built-in **Leiden / Louvain community detection**, Cohesion scoring, and Surprising Connection discovery. | Focuses on visual inheritance, import, and call-chain graphs rather than modularity analysis. |
+| **Visualization** | Standalone Interactive HTML D3.js v7 (*force-directed physics*) with community filters and node/edge inspector. | Interactive HTML D3.js + Obsidian Canvas / Vault export and GraphML. | Modern client-side interactive graphical web app running directly in the browser. |
+| **Export Formats** | **GraphRAG JSON**, **Obsidian Markdown Vault**, **GraphML XML**, and **Markdown Report**. | **GraphRAG JSON**, **Obsidian Markdown Vault**, **GRAPH_REPORT.md**. | Primarily targets internal MCP stdio/SSE server and web UI. |
+| **MCP Protocol Integration** | **5 Read-Only MCP Tools stdio** (`sot_search`, `sot_explore`, `sot_verify_drift`, `sot_architecture_report`, `sot_communities`). | Integrated via CLAUDE.md guidelines or external MCP wrapper servers. | **MCP-Native stdio/SSE server** providing codebase structure lookup tools. |
 
 ---
 
-### 📌 Khi Nào Nên Sử Dụng Công Cụ Nào? (Selection Guide)
+### 📌 When to Choose Which Tool? (Selection Guide)
 
-1. **Chọn `sot-graph` khi:**
-   - Bạn đang xây dựng hoặc sử dụng **AI Coding Agents (OMP, Claude Code, Cursor, Agy)** cần một lớp tri thức **cực nhanh, tự chữa lành, và không bao giờ bị lỗi đường dẫn chết (dead paths / phantom anchors)**.
-   - Cần một công cụ **Zero-Daemon, Zero-External-Dependencies** chạy bằng Python tiêu chuẩn + SQLite với độ trễ truy vấn sub-millisecond ($< 1.5\text{ms}$).
-   - Bạn muốn có đầy đủ từ tìm kiếm trust-verified, phân tích kiến trúc (God Nodes, Communities), đến xuất GraphRAG / Obsidian / HTML visualizer trong cùng một CLI duy nhất.
+1. **Choose `sot-graph` when:**
+   - You are building or using **AI Coding Agents (OMP, Claude Code, Cursor, Windsurf, Agy)** that require an **ultra-fast, self-healing knowledge layer that eliminates dead paths and phantom anchors**.
+   - You need a **Zero-Daemon, Zero-External-Dependencies** tool running on standard Python 3.10+ and embedded SQLite with sub-millisecond query latency ($< 1.5\text{ms}$).
+   - You want end-to-end capabilities from trust-verified search and architectural diagnostics (God Nodes, Louvain Communities) to GraphRAG, Obsidian, and HTML visualizer exports in a single CLI.
 
-2. **Chọn `graphify` khi:**
-   - Bạn cần phân tích **toàn diện một kho tài liệu hỗn hợp** (bao gồm cả mã nguồn, tài liệu Markdown/PDF, bài báo nghiên cứu, hình ảnh/video).
-   - Bạn muốn tận dụng **sức mạnh suy luận ngữ nghĩa của LLM** để trích xuất các liên kết tiềm ẩn (`INFERRED` edges) và tạo báo cáo kiểm toán chi phí token chi tiết.
-   - Bạn muốn tạo Obsidian Vault tri thức sâu để con người đọc và nghiên cứu tài liệu hệ thống.
+2. **Choose `graphify` when:**
+   - You need to analyze a **heterogeneous multi-modal document corpus** (combining source code, Markdown/PDF docs, research papers, and diagrams).
+   - You want to leverage **LLM semantic reasoning** to discover implicit relationships (`INFERRED` edges) with explicit token cost audit trails.
+   - You want to generate rich Obsidian vaults for human architectural study and documentation.
 
-3. **Chọn `gitnexus` khi:**
-   - Bạn muốn **khảo sát nhanh kiến trúc mã nguồn ngay trên trình duyệt web** (Zero-Server Web App) chỉ bằng cách kéo thả file ZIP hoặc paste URL GitHub.
-   - Bạn cần một giao diện đồ họa web client-side trực quan để lập trình viên tự duyệt call-chains và cây quan hệ Git mà không cần cài đặt môi trường backend.
+3. **Choose `gitnexus` when:**
+   - You want to **rapidly explore code architecture directly in a web browser** (Zero-Server Web App) by dropping a ZIP file or pasting a GitHub repository URL.
+   - You need an interactive client-side web UI for developers to inspect call chains and Git revision graphs without configuring a backend runtime.
 
 ---
 
