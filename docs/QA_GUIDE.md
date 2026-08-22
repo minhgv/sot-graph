@@ -54,7 +54,7 @@ Every signal from file watchers, git hooks, or CLI commands is treated merely as
 
 The `sot_graph.reconciler` coordinator employs a two-tier defense mechanism to capture even the smallest file modification:
 
-1. **Tier 1 - Fast Dirty Check via Filesystem Metadata ($O(1)$):**
+1. **Tier 1 - Fast Dirty Check via Filesystem Metadata (O(1)):**
    When modifying a line of code, the operating system instantly updates `st_mtime` (millisecond resolution) and typically alters `st_size` (byte length). The Reconciler compares the `(size, mtime_ms)` pair against the `file_journal` table. If different, the file is marked dirty in microseconds.
 
 2. **Tier 2 - Integrity Guard via SHA-256 Hashing:**
@@ -299,11 +299,11 @@ To optimize token consumption and prevent redundant code implementation, agents 
 
 The `Label Propagation / Louvain` algorithm in `sot_graph.analytics` groups tightly coupled files and functions into **Functional Communities**:
 
-- **Modularity Score ($Q \in [-0.5, 1.0]$):** Measures the quality of architectural decomposition. **$Q > 0.3$** indicates strong modular boundaries and clean interfaces.
-- **Cohesion Score ($C \in [0.0, 1.0]$):** Ratio of internal cluster connections to total connections:
-  > **Cohesion ($C$)** = $E_{\text{internal}} / (E_{\text{internal}} + E_{\text{external}})$
-  
-  If **$C < 0.4$**, the cluster is overly dependent on external packages (*Tightly Coupled*) and represents a candidate for refactoring.
+- **Modularity Score (Q ∈ [-0.5, 1.0]):** Measures the quality of architectural decomposition. **Q > 0.3** indicates strong modular boundaries and clean interfaces.
+- **Cohesion Score (C ∈ [0.0, 1.0]):** Ratio of internal cluster connections to total connections:
+  > **Cohesion (C)** = `E_internal / (E_internal + E_external)`
+
+  If **C < 0.4**, the cluster is overly dependent on external packages (*Tightly Coupled*) and represents a candidate for refactoring.
 
 ```bash
 # Inspect detected architectural communities

@@ -89,14 +89,14 @@ However, contemporary AI coding agents suffer from **3 Critical Failure Modes**:
    ```bash
    ./bin/sot cluster --min-size 3
    ```
-   The response enumerates functional clusters (Auth, Billing, Notifications...) along with the global Modularity score $Q$, ensuring new files are placed in their proper architectural domain.
+   The response enumerates functional clusters (Auth, Billing, Notifications...) along with the global Modularity score Q, ensuring new files are placed in their proper architectural domain.
 
 ---
 
 ### Phase 2: Generation & Active Development Loop
 
 #### The Real-World Challenge
-- **Phantom Anchors**: A developer renames `src/services/user_service.py` to `src/core/services/user.py`. The agent remembers the old path from previous turns and generates `from src.services.user_service import UserService` $\rightarrow$ immediate runtime failure.
+- **Phantom Anchors**: A developer renames `src/services/user_service.py` to `src/core/services/user.py`. The agent remembers the old path from previous turns and generates `from src.services.user_service import UserService` → immediate runtime failure.
 - **Cross-Import & Out-of-Order Indexing**: File A imports a class from File B before File B has been indexed, breaking relationship graphs.
 
 #### How `sot-graph` Solves It
@@ -105,7 +105,7 @@ However, contemporary AI coding agents suffer from **3 Critical Failure Modes**:
 2. **Two-Way Pending Edge Resolution (`db.resolve_pending_edges`):**
    Unresolved imports/calls are staged in `pending_edges`. The moment the target file is parsed, a single atomic SQL transaction promotes them into fully resolved `graph_edges`.
 3. **Microsecond Reconciliation (Fast Dirty Check):**
-   During active coding, calling `sot reconcile` takes only **~24.1ms**. The reconciler performs an $O(1)$ comparison of `(size, mtime_ms)`, re-parsing only the single file that actually changed.
+   During active coding, calling `sot reconcile` takes only **~24.1ms**. The reconciler performs an O(1) comparison of `(size, mtime_ms)`, re-parsing only the single file that actually changed.
 
 ---
 
@@ -125,13 +125,13 @@ However, contemporary AI coding agents suffer from **3 Critical Failure Modes**:
    - Direct callers (Incoming Edges - Hop 1).
    - Higher-level upstream services depending indirectly (Upstream Callers - Hop 2).
 2. **God Node Diagnostics:**
-   If a symbol's degree exceeds $\text{Cutoff} = \mu + 1.5\sigma$, the system flags a warning:
+   If a symbol's degree exceeds `Cutoff = μ + 1.5σ`, the system flags a warning:
    ```
    ⚠️ WARNING: 'PaymentService' is a GOD NODE with Blast Radius = 28 [CRITICAL]
    Modifying this symbol will impact 5 architectural communities.
    ```
    The agent proactively updates all upstream callers and expands unit test coverage.
-3. **Cluster Cohesion Scoring ($C < 0.4$):**
+3. **Cluster Cohesion Scoring (C < 0.4):**
    Identifies tightly coupled modules so the agent can suggest clean interface decoupling.
 
 ---
@@ -324,9 +324,9 @@ A fundamental operational question: **"When integrating sot-graph into a codebas
 
 Unlike cloud RAG or vector database solutions (which consume continuous API credits for LLM summarization and embedding vectors):
 
-1. **AST Parsing & Extraction:** 100% local CPU processing via Tree-sitter / Regex $\rightarrow$ **0 Tokens**.
-2. **Indexing & SHA-256 Hashing:** All hash tables and SQLite FTS5 inverted indices run in-process $\rightarrow$ **0 Tokens**.
-3. **Graph Algorithms & Clustering:** Louvain community detection, Modularity $Q$, God Node cutoff ($\mu + 1.5\sigma$), and BFS 2-hop traversals execute in RAM $\rightarrow$ **0 Tokens**.
+1. **AST Parsing & Extraction:** 100% local CPU processing via Tree-sitter / Regex → **0 Tokens**.
+2. **Indexing & SHA-256 Hashing:** All hash tables and SQLite FTS5 inverted indices run in-process → **0 Tokens**.
+3. **Graph Algorithms & Clustering:** Louvain community detection, Modularity Q, God Node cutoff (μ + 1.5σ), and BFS 2-hop traversals execute in RAM → **0 Tokens**.
 4. **Zero Embedding Cost:** No dependency on or billing from external embedding APIs (e.g., `text-embedding-3-small` or `ada-002`).
 
 ---
@@ -339,7 +339,7 @@ When agents interact with `sot-graph` via CLI or MCP Stdio protocol, payloads in
 | :--- | :--- | :---: |
 | **`sot search`** / `sot_search` | 3–5 candidate nodes with `[STRONG]` labels, exact file paths, and line numbers. | **~150 – 350 tokens** |
 | **`sot explore`** / `sot_explore` | 2-hop relationship tree (direct callers, upstream dependencies, call sites). | **~300 – 700 tokens** |
-| **`sot cluster`** / `sot_communities` | List of functional clusters and Modularity score $Q$. | **~200 – 450 tokens** |
+| **`sot cluster`** / `sot_communities` | List of functional clusters and Modularity score Q. | **~200 – 450 tokens** |
 | **`sot verify`** / `sot_verify_drift` | SHA-256 drift report and list of anomalous files. | **~80 – 200 tokens** |
 | **`sot insert`** | Virtual knowledge anchor confirmation (ADR / Bug note). | **~50 – 100 tokens** |
 
@@ -372,7 +372,7 @@ Consider a typical real-world development task: **"Add Role-Based Access Control
 │    -> Consumes 20,000 tokens retrying.      │    -> Consumes 0 retry tokens.           │
 ├─────────────────────────────────────────────┼──────────────────────────────────────────┤
 │ TOTAL CONSUMPTION: ~106,500 TOKENS          │ TOTAL CONSUMPTION: ~1,250 TOKENS         │
-│ (Estimated API Cost: ~$0.35 - $1.50/session)│ (Estimated API Cost: ~$0.003 - $0.015)   │
+│ (Estimated API Cost: ~USD 0.35 - 1.50/session)│ (Estimated API Cost: ~USD 0.003 - 0.015) │
 └─────────────────────────────────────────────┴──────────────────────────────────────────┘
                       👉 NET TOKEN SAVINGS: ~98.8%!
 ```

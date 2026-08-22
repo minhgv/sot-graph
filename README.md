@@ -26,7 +26,7 @@ Traditional RAG and agent memory systems suffer from **"Phantom Anchors, Stale C
 - **Filesystem Chokepoint**: A hint (file watcher, hook, or CLI) can only say *"look at this path"*. It is never believed about what happened. The reconciler reads the actual file from disk to make the graph match.
 - **Trust-Verified Search**: Every search result is **verified against disk reality** before the agent sees it. If a path is dead, it is purged immediately; if it was moved, it is auto-healed.
 - **Single-Writer Concurrency**: A single SQLite WAL database handles dirty tracking via SHA-256 generation counters. Multiple concurrent agents editing files will always converge to the exact same state without race conditions.
-- **Pure Zero-Daemon Footprint**: Runs completely in-process using standard Python 3.10+ and embedded SQLite ($< 25\text{MB}$ RAM).
+- **Pure Zero-Daemon Footprint**: Runs completely in-process using standard Python 3.10+ and embedded SQLite (< 25MB RAM).
 
 ---
 
@@ -69,7 +69,7 @@ Explore comprehensive architectural analyses, real-world agent integration guide
 
 - 📖 **[Comprehensive Q&A Guide (`docs/QA_GUIDE.md`)](docs/QA_GUIDE.md)** — 19 detailed real-world scenarios covering self-healing, anti-hallucination mechanics, and graph analytics.
 - 🚀 **[AI-Assisted SDLC Guide (`docs/AI_SDLC_GUIDE.md`)](docs/AI_SDLC_GUIDE.md)** — Deep-dive into applying `sot-graph` across all 6 phases of software development, eliminating Cold Start Redundancy and constraining Blast Radius.
-- ⚖️ **[Architectural Comparison: GitNexus vs sot-graph (`docs/GITNEXUS_VS_SOT_GRAPH.md`)](docs/GITNEXUS_VS_SOT_GRAPH.md)** — Independent 8-dimensional architectural appraisal, failure mode audit, and optimal two-tier hybrid architecture pattern.
+- ⚖️ **[Architectural Comparison: GitNexus vs sot-graph (`docs/GITNEXUS_VS_SOT_GRAPH.md`)](docs/GITNEXUS_VS_SOT_GRAPH.md)** — Objective 8-dimensional technical comparison, failure mode audit, and two-tier hybrid architecture pattern.
 - ⚡ **[Interactive Standalone HTML Guide (Live Demo on GitHub)](https://htmlpreview.github.io/?https://github.com/minhgv/sot-graph/blob/main/sot_qa_guide.html)** — Instant search, category filters, and 1-click code copying.
 - 💻 **Offline Local Browser View**:
   ```bash
@@ -78,11 +78,11 @@ Explore comprehensive architectural analyses, real-world agent integration guide
   ```
 
 ### 🌟 6 Core Topic Areas Covered in Depth:
-1. **Core Architecture & Anti-Hallucination**: Filesystem SSOT, Fast Dirty Check metadata ($O(1)$) + SHA-256 hashing, Trust Verdict classification (`[STRONG]`, `[WEAK]`, `[REBUILT]`, `[REMOVED]`), and atomic 2-way pending edge resolution in SQL.
+1. **Core Architecture & Anti-Hallucination**: Filesystem SSOT, Fast Dirty Check metadata (O(1)) + SHA-256 hashing, Trust Verdict classification (`[STRONG]`, `[WEAK]`, `[REBUILT]`, `[REMOVED]`), and atomic 2-way pending edge resolution in SQL.
 2. **Self-Healing & Data Integrity**: Automatic path purging upon file deletion (`rm`), automatic rehoming on file moves/renames (`mv`), and Atomic Full-File Replacement to prevent stale node accumulation.
 3. **AI Agent Integration & MCP**: Extension setup for Oh My Pi (`omp_extension.ts`), agent configuration for Claude Code/Cursor (`AGENTS.md`), 5 Read-Only MCP Stdio tools, and the 4-step Knowledge Reuse Protocol.
-4. **Graph Analytics & Visualizations**: God Node detection algorithms ($\mu + \text{threshold\_sigma} \times \sigma$) with 2-hop Blast Radius, Louvain community detection / Modularity ($Q$), and multi-format exporters (Interactive HTML D3.js, GraphRAG JSON, Obsidian Vault, GraphML).
-5. **Operations, Maintenance & Performance**: Safe pruning via `sot clean` & defragmentation via `sot vacuum` (with safe `--dry-run` modes), non-mutating CI/CD drift audits (`sot verify --deep`), and latency benchmarks ($< 25\text{ms}$ / 100 files, RAM $< 25\text{MB}$).
+4. **Graph Analytics & Visualizations**: God Node detection algorithms (μ + threshold_sigma × σ) with 2-hop Blast Radius, Louvain community detection / Modularity (Q), and multi-format exporters (Interactive HTML D3.js, GraphRAG JSON, Obsidian Vault, GraphML).
+5. **Operations, Maintenance & Performance**: Safe pruning via `sot clean` & defragmentation via `sot vacuum` (with safe `--dry-run` modes), non-mutating CI/CD drift audits (`sot verify --deep`), and latency benchmarks (< 25ms / 100 files, RAM < 25MB).
 6. **Edge Cases & Incident Handling**: Ambiguity Guard against basename collisions across directories, syntax error fault tolerance during parsing, and persisting Architectural Decision Records (ADRs) with `sot insert`.
 ---
 
@@ -133,8 +133,8 @@ Explore comprehensive architectural analyses, real-world agent integration guide
 ## ⚙️ Core Subsystems Under the Hood
 
 ### 1. Level-Triggered Single-Writer Reconciler (`src/sot_graph/reconciler.py`)
-- **Fast Dirty Check**: Compares `size`, `mtime_ms`, and `SHA-256` content hashes. Unchanged files take $< 0.1\text{ms}$ to verify.
-- **Adaptive Worker Threshold**: Automatically runs sequential parsing for small batches ($< 16$ files) to eliminate multiprocessing fork overhead, while fanning out to parallel worker pools for large codebases.
+- **Fast Dirty Check**: Compares `size`, `mtime_ms`, and `SHA-256` content hashes. Unchanged files take < 0.1ms to verify.
+- **Adaptive Worker Threshold**: Automatically runs sequential parsing for small batches (< 16 files) to eliminate multiprocessing fork overhead, while fanning out to parallel worker pools for large codebases.
 - **Atomic Commits**: For any modified file, all old nodes, edges, and pending references owned by that path are deleted and replaced in a single SQLite transaction.
 - **Idempotency Guarantee**: Running `sot reconcile` 1 time or 100 times produces the exact same deterministic graph state.
 
@@ -175,6 +175,31 @@ chmod +x bin/sot
 # Optional: Install MCP dependencies if running MCP stdio server
 pip install -e '.[mcp]'
 ```
+
+### Database Storage Location & Project Isolation
+
+When running `sot-graph`, each project maintains its own **fully isolated, local SQLite database** inside the project root directory. There is no shared global daemon or central database across repositories:
+
+```text
+<project-root>/
+├── .sot/
+│   ├── sot.db          # Primary SQLite database (graph nodes, edges, FTS5 index)
+│   ├── sot.db-wal      # SQLite Write-Ahead Log (created during active transactions)
+│   └── sot.db-shm      # Shared-memory index for concurrent WAL reads
+├── src/
+├── tests/
+└── README.md
+```
+
+- **Default Path**: `<project-root>/.sot/sot.db`
+- **Custom Project Root (`--root`)**: Use `--root <dir>` to reconcile another workspace (e.g. `sot reconcile --root /path/to/project`).
+- **Custom Database Path (`--db`)**: Use `--db <path>` to store the database in a custom location (e.g. `sot reconcile --db /tmp/custom_sot.db`).
+- **Recommended `.gitignore`**: Add `.sot/` to your project's `.gitignore` to prevent committing binary SQLite files to Git:
+  ```gitignore
+  # sot-graph local index
+  .sot/
+  ```
+- **Self-Healing & Disposable Index**: Because the physical filesystem is the single source of truth, `.sot/sot.db` is completely disposable. If deleted or corrupted, running `sot reconcile` re-scans the source files and reconstructs the full graph index in milliseconds.
 
 ---
 
@@ -339,9 +364,9 @@ PYTHONPATH=".:src" python3 -m benchmarks.bench_query --files 100 --repeat 3
 | **Source of Truth** | **Filesystem is the absolute truth**. Hints are only triggers; state is physically verified against disk before delivery. | **Input files + LLM inference**. Takes directory snapshots at extraction time and stores static graph JSON. | **Git Repository + Tree-sitter AST**. Indexes Git trees and in-memory call graph relationships. |
 | **Anti-Hallucination Mechanism** | **Trust Verdict Engine** (`[STRONG]`, `[WEAK]`, `[REBUILT]`, `[REMOVED]`): Physical disk checks and token coverage filtering at query time. | Transparent link classification (`EXTRACTED` vs `INFERRED` vs `AMBIGUOUS`) with token cost audit trail. | Static Tree-sitter AST parsing; no runtime token coverage verification or physical disk change audits. |
 | **Self-Healing Capabilities** | **Automated & Instantaneous**: Auto-detects moved/renamed files (`[REBUILT]`), purges dead paths (`[REMOVED]`), cleans orphan edges. | **Manual / Batch**: Requires re-running `/graphify --update` or full graph rebuild when the codebase changes. | **Session / Manual**: Requires repository re-indexing when new commits or branches are introduced. |
-| **Storage & Query Engine** | **SQLite WAL + FTS5 (BM25)**: ACID transactions, SHA-256 generation dirty tracking, sub-millisecond query latency ($< 1.5\text{ms}$). | **JSON (`graph.json`) + Markdown Reports**: Flat files; no embedded relational or property graph database. | **In-memory / IndexedDB / WASM Browser Cache**: Data stored in browser RAM or transient Node.js process memory. |
-| **Footprint & Resources** | Ultra-lightweight ($< 25\text{MB}$ RAM), **Zero external dependencies**, parallel multiprocessing (~$20\text{ms}$ / 100 files). | Incurs LLM API token costs when running `--mode deep`; best for periodic documentation rather than per-turn edits. | Dependent on Node.js/browser runtime and RAM scaling when indexing large monorepos. |
-| **Clustering & God Nodes** | In-process **Louvain / Modularity ($Q$)**, Cohesion scoring, and **God Node Detection (2-hop blast radius)** with zero daemons. | Built-in **Leiden / Louvain community detection**, Cohesion scoring, and Surprising Connection discovery. | Focuses on visual inheritance, import, and call-chain graphs rather than modularity analysis. |
+| **Storage & Query Engine** | **SQLite WAL + FTS5 (BM25)**: ACID transactions, SHA-256 generation dirty tracking, sub-millisecond query latency (< 1.5ms). | **JSON (`graph.json`) + Markdown Reports**: Flat files; no embedded relational or property graph database. | **In-memory / IndexedDB / WASM Browser Cache**: Data stored in browser RAM or transient Node.js process memory. |
+| **Footprint & Resources** | Ultra-lightweight (< 25MB RAM), **Zero external dependencies**, parallel multiprocessing (~20ms / 100 files). | Incurs LLM API token costs when running `--mode deep`; best for periodic documentation rather than per-turn edits. | Dependent on Node.js/browser runtime and RAM scaling when indexing large monorepos. |
+| **Clustering & God Nodes** | In-process **Louvain / Modularity (Q)**, Cohesion scoring, and **God Node Detection (2-hop blast radius)** with zero daemons. | Built-in **Leiden / Louvain community detection**, Cohesion scoring, and Surprising Connection discovery. | Focuses on visual inheritance, import, and call-chain graphs rather than modularity analysis. |
 | **Visualization** | Standalone Interactive HTML D3.js v7 (*force-directed physics*) with community filters and node/edge inspector. | Interactive HTML D3.js + Obsidian Canvas / Vault export and GraphML. | Modern client-side interactive graphical web app running directly in the browser. |
 | **Export Formats** | **GraphRAG JSON**, **Obsidian Markdown Vault**, **GraphML XML**, and **Markdown Report**. | **GraphRAG JSON**, **Obsidian Markdown Vault**, **GRAPH_REPORT.md**. | Primarily targets internal MCP stdio/SSE server and web UI. |
 | **MCP Protocol Integration** | **5 Read-Only MCP Tools stdio** (`sot_search`, `sot_explore`, `sot_verify_drift`, `sot_architecture_report`, `sot_communities`). | Integrated via CLAUDE.md guidelines or external MCP wrapper servers. | **MCP-Native stdio/SSE server** providing codebase structure lookup tools. |
@@ -352,7 +377,7 @@ PYTHONPATH=".:src" python3 -m benchmarks.bench_query --files 100 --repeat 3
 
 1. **Choose `sot-graph` when:**
    - You are building or using **AI Coding Agents (OMP, Claude Code, Cursor, Windsurf, Agy)** that require an **ultra-fast, self-healing knowledge layer that eliminates dead paths and phantom anchors**.
-   - You need a **Zero-Daemon, Zero-External-Dependencies** tool running on standard Python 3.10+ and embedded SQLite with sub-millisecond query latency ($< 1.5\text{ms}$).
+   - You need a **Zero-Daemon, Zero-External-Dependencies** tool running on standard Python 3.10+ and embedded SQLite with sub-millisecond query latency (< 1.5ms).
    - You want end-to-end capabilities from trust-verified search and architectural diagnostics (God Nodes, Louvain Communities) to GraphRAG, Obsidian, and HTML visualizer exports in a single CLI.
 
 2. **Choose `graphify` when:**

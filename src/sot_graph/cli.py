@@ -477,6 +477,34 @@ def cmd_export(args: argparse.Namespace, db: Database) -> int:
         print(f"❌ Unknown export format: {fmt}. Supported: graphrag, obsidian, graphml")
         return 1
     return 0
+def cmd_setup(args: argparse.Namespace, root: str) -> int:
+    from pathlib import Path
+    from sot_graph.adapters.installer import install_harnesses, list_supported_harnesses
+
+    if args.list:
+        print("Supported AI Coding Harnesses:")
+        for key, desc in list_supported_harnesses().items():
+            print(f"  - {key:<12} : {desc}")
+        return 0
+
+    global_install = not args.workspace_only
+    workspace_install = not args.global_only
+    harnesses = [args.harness] if args.harness != "all" else ["all"]
+
+    results = install_harnesses(
+        harnesses=harnesses,
+        root=Path(root),
+        global_install=global_install,
+        workspace_install=workspace_install,
+    )
+
+    print(f"🚀 Configured {len(results)} harness(es):")
+    for h_name, files in results.items():
+        print(f"\n[{h_name.upper()}] ({len(files)} files)")
+        for f in files:
+            print(f"  ✓ {f}")
+    return 0
+
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -576,6 +604,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_expo.add_argument("-o", "--output", default=None, help="Output file or directory path")
     p_expo.add_argument("--scope", default=None, help="Scope export to path or subdirectory")
 
+    # setup
+    p_setup = subparsers.add_parser("setup", help="Configure AI coding harnesses (OMP, OpenCode, Antigravity, Claude)")
+    p_setup.add_argument("--harness", default="all", choices=["all", "omp", "opencode", "antigravity", "claude"], help="Target harness (default: all)")
+    p_setup.add_argument("--global-only", action="store_true", help="Install to user home directory only")
+    p_setup.add_argument("--workspace-only", action="store_true", help="Install to current workspace only")
+    p_setup.add_argument("--list", action="store_true", help="List supported harnesses")
+
     return parser
 
 
@@ -585,11 +620,13 @@ def main() -> int:
 
     root = os.path.abspath(args.root)
     db_path = args.db or default_db_path(root)
+    if args.command == "setup":
+        return cmd_setup(args, root)
+
     if args.command == "mcp":
         # Keep the optional SDK out of normal CLI startup/import paths.
         from sot_graph.mcp_server import main as mcp_main
         return mcp_main(["--root", root, "--db", db_path])
-
     db = Database(db_path)
     reconciler = Reconciler(db, root)
 
