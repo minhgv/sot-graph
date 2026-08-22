@@ -6,6 +6,7 @@ Vietnamese labels in PHP controllers). --force is the upgrade path that
 re-extracts every file on an existing index without touching notes.
 """
 
+import os
 import shutil
 import tempfile
 import unittest
@@ -44,6 +45,21 @@ class ForceReindexTests(unittest.TestCase):
         parsed = parse_file_graph(str(self.root / "app" / "util.py"), str(self.root))
         file_node = next(n for n in parsed["nodes"] if n["kind"] == "file")
         self.assertIn("util value", file_node["body"])
+
+    def test_preview_budget_env_override(self):
+        big = self.root / "app" / "big.py"
+        big.write_text("# pad\n" * 2000 + "needle_marker = 1\n", encoding="utf-8")
+        try:
+            os.environ["SOT_PREVIEW_BYTES"] = "32768"
+            parsed = parse_file_graph(str(big), str(self.root))
+            body = next(n for n in parsed["nodes"] if n["kind"] == "file")["body"]
+            self.assertIn("needle_marker", body)
+        finally:
+            os.environ.pop("SOT_PREVIEW_BYTES", None)
+
+        parsed = parse_file_graph(str(big), str(self.root))
+        body = next(n for n in parsed["nodes"] if n["kind"] == "file")["body"]
+        self.assertNotIn("needle_marker", body, "default budget must stay bounded")
 
     def test_force_reextracts_everything_and_is_idempotent(self):
         first = self.reconciler.reconcile(workers=1)

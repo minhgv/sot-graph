@@ -75,6 +75,20 @@ def get_language(path: str) -> str:
     return LANGUAGE_MAP.get(ext, "text")
 
 
+def _preview_budget() -> int:
+    """Content-preview bytes for file nodes (searchable via FTS).
+
+    Default 4KB covers most source files entirely; SOT_PREVIEW_BYTES raises
+    or lowers it (0..1MB) for repos that need deep content search — pair a
+    raise with `sot reconcile --force` to refresh existing indexes.
+    """
+    try:
+        raw = int(os.environ.get("SOT_PREVIEW_BYTES", "4096"))
+    except ValueError:
+        return 4096
+    return min(1_048_576, max(0, raw))
+
+
 def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
     """
     Extracts AST/Symbols and edges for a file.
@@ -100,7 +114,7 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
     # 1. Base File Node (both code and non-code files carry a short content
     # preview so full-text search can find strings and comments, not just
     # symbol bodies — e.g. Vietnamese labels inside PHP view controllers.)
-    preview = content_bytes[:400].decode("utf-8", errors="replace")
+    preview = content_bytes[:_preview_budget()].decode("utf-8", errors="replace")
     file_node = {
         "id": file_node_id,
         "kind": "file",
