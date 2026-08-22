@@ -18,7 +18,10 @@
 Traditional agent memory and RAG tools suffer from **Phantom Anchors and Dead Paths**—pointing to files that were moved, deleted, or refactored. `sot-graph` solves this at the architectural root:
 - **Filesystem Chokepoint**: Disk reality is absolute truth. Hints only say *"look at this path"*; the reconciler verifies the actual file on disk.
 - **Trust Verdict System**: Every search result is physically checked before the agent sees it (`[STRONG]`, `[WEAK]`, `[REBUILT]`, `[REMOVED]`).
-- **Sub-millisecond Performance**: SQLite WAL + FTS5 (BM25) search in $< 1.5\text{ ms}$, $< 25\text{ MB}$ RAM, zero external server daemons.
+- **Binding-Aware Call Graph**: Cross-file edges resolve via lexical scope, call kind, receivers, and import modules — never by bare name matching — so `requests.get()` or `db.execute()` are never confused with project symbols.
+- **ContextBundle Packaging**: `sot pack <symbol>` slices a k-hop subgraph (exact source span + 1-hop contracts + 2-hop signature stubs) into a capped, `content_is_untrusted` YAML artifact for agent prompt registers.
+- **Conflict-Safe Concurrency**: All mutations pass a stable `.sot/write.lock` plus per-path generation compare-and-swap; stale writers get deterministic `CONFLICT` verdicts instead of corrupting newer publications.
+- **Sub-millisecond Performance**: SQLite WAL + FTS5 (BM25, unicode61) search in $< 1.5\text{ ms}$, bounded reader/writer caches ($\le 8\text{MB}$ per connection), zero external server daemons.
 
 ---
 
@@ -139,20 +142,22 @@ When an agent searches via `sot search` or `sot_search`, every result is verifie
 | `[REMOVED]` | Path was permanently deleted from disk. | **Auto-Purged**: Node removed from index immediately. |
 | `[NOPATH]` | Virtual knowledge note (Architectural Decision Records, rules). | **Knowledge Anchor**: Treat as project convention. |
 
-### 4-Step Knowledge Reuse Protocol for Agents
+### 5-Step Knowledge Reuse Protocol for Agents
 
 Agents should follow this standard protocol before implementing new code:
 1. **Search Existing Solutions**: `sot search "<what you are looking for>"`
 2. **Follow Trust Verdicts**: Prioritize `[STRONG]` references; inspect `[WEAK]` matches.
 3. **Trace Blast Radius**: `sot explore "<symbol_name>"` to see incoming callers before breaking APIs.
-4. **Persist Architecture Decisions**: `sot insert --title "<topic>" --body "<details>" --keywords "k1,k2"`
+4. **Pack Working Context**: `sot pack "<symbol>"` to load the exact source span + caller/callee contracts (capped, untrusted-flagged) instead of dumping whole files into the prompt.
+5. **Persist Architecture Decisions**: `sot insert --title "<topic>" --body "<details>" --keywords "k1,k2"`
 
 ---
 
 ## 💻 Developer & Agent CLI Reference
 
 ```bash
-usage: sot [-h] [--root ROOT] [--db DB] {search,explore,insert,reconcile,verify,doctor,clean,vacuum,report,cluster,viz,export,bundle,setup,mcp} ...
+usage: sot [-h] [--root ROOT] [--db DB]
+           {search,explore,insert,reconcile,verify,doctor,clean,vacuum,mcp,report,cluster,viz,export,bundle,setup,pack,watch} ...
 ```
 
 ### 1. Codebase Indexing & Sync
@@ -163,6 +168,8 @@ usage: sot [-h] [--root ROOT] [--db DB] {search,explore,insert,reconcile,verify,
 # Multi-worker parallel sync for large repositories
 ./bin/sot reconcile --workers 4 --batch-size 64
 ```
+
+Concurrent reconciles are serialized behind `.sot/write.lock` with per-path generation CAS: if a file changed mid-parse, that path is reported as a conflict (re-queued for the next pass) instead of overwriting the newer version.
 
 ### 2. Search & Code Exploration
 ```bash
@@ -253,7 +260,8 @@ usage: sot [-h] [--root ROOT] [--db DB] {search,explore,insert,reconcile,verify,
 ```
 
 - **Default Location**: `<project-root>/.sot/sot.db`
-- **Zero Central Daemons**: No background daemon, socket, or global database shared across repos.
+- **Zero Central Daemons**: No background daemon, socket, or global database shared across repos. (`sot watch` is an opt-in foreground helper, not a required service.)
+- **Versioned Schema (v3)**: `graph_nodes` stores FQNs, signatures, and exact spans; `pending_edges` stores call context (kind/receiver/import source). Schema upgrades are tracked via `PRAGMA user_version` — an outdated database is dropped and rebuilt by the next `sot reconcile` (the index is disposable by design).
 - **Recommended `.gitignore`**:
   ```gitignore
   # sot-graph local index
