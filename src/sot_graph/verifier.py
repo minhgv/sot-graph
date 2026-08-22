@@ -129,10 +129,33 @@ class TrustVerifier:
         basename = os.path.basename(requested)
         new_path = cls.find_rehome(root, basename)
         if new_path and _inside_root(new_path) and os.path.exists(new_path):
-            db.update_node_path(node_id, requested, new_path)
-            cov = cls.calculate_coverage(new_path, query_tokens)
-            return "REBUILT", cov, new_path
-
+            if cls._rehomable(new_path, candidate):
+                db.update_node_path(node_id, requested, new_path)
+                cov = cls.calculate_coverage(new_path, query_tokens)
+                return "REBUILT", cov, new_path
         # Preserve historical auto-purge for the CLI and library callers.
         db.delete_path(requested)
         return "REMOVED", 0.0, requested
+
+    @staticmethod
+    def _rehomable(new_path: str, candidate: Dict[str, Any]) -> bool:
+        """Guard against basename collisions re-homing nodes onto the wrong
+        file (e.g. sibling Odoo addons that each ship hooks.py).
+
+        File nodes accept the basename match itself; code symbols must
+        actually appear in the candidate file's text, otherwise the verdict
+        degrades to REMOVED instead of attaching the node to a foreign file.
+        """
+        symbol = candidate.get("symbol")
+        if candidate.get("kind") == "file" or not symbol:
+            return True
+        needle = str(symbol).rsplit(".", 1)[-1]
+        if not needle.isidentifier() and not needle.replace("$", "").isalnum():
+            # Weird symbol text (file names, hashes): don't block the rehome.
+            return True
+        try:
+            with open(new_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read(524288)
+        except OSError:
+            return False
+        return re.search(rf"\b{re.escape(needle)}\b", content) is not None
