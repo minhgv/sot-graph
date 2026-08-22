@@ -44,6 +44,19 @@ class ServiceLimits:
     body_bytes: int = 8 * 1024
 
 
+class _ConnView:
+    """Minimal Database-compatible view over a read-only connection.
+
+    Database query methods only touch ``self.conn``, so the unbound methods
+    can serve MCP reads without opening a writer connection.
+    """
+
+    __slots__ = ("conn",)
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+
 class McpService:
     """Bounded read-only graph operations rooted at one project directory."""
 
@@ -257,6 +270,84 @@ class McpService:
 
         return self._run(op)
 
+    def _resolve_target_row(self, conn: sqlite3.Connection, target: str) -> sqlite3.Row:
+        row = conn.execute(
+            "SELECT id,path,kind,symbol,label,body,keywords,line_start FROM graph_nodes WHERE id = ?",
+            (target,)).fetchone()
+        if row is None:
+            row = conn.execute(
+                "SELECT id,path,kind,symbol,label,body,keywords,line_start FROM graph_nodes WHERE symbol = ? LIMIT 1",
+                (target,)).fetchone()
+        if row is None:
+            row = conn.execute(
+                "SELECT id,path,kind,symbol,label,body,keywords,line_start FROM graph_nodes "
+                "WHERE kind != 'file' AND (label LIKE ? OR fqn LIKE ?) ORDER BY kind LIMIT 1",
+                (f"%{target}%", f"%{target}%")).fetchone()
+        if row is None:
+            raise McpServiceError("not_found", "symbol was not found")
+        return row
+
+    def usages(self, target: str, *, limit: int = 100) -> Dict[str, Any]:
+        """Reference sites of a symbol grouped by caller (find-all-references)."""
+        if not isinstance(target, str) or not target.strip():
+            raise McpServiceError("invalid_argument", "target must not be empty")
+        if len(target) > 512:
+            raise McpServiceError("invalid_argument", "target exceeds 512 characters")
+        limit = self._bounded(limit, self.limits.explore_nodes)
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            row = self._resolve_target_row(conn, target)
+            view = cast(Database, _ConnView(conn))
+            data = Database.usages(view, row["id"], row["symbol"])
+            callers = [{
+                "caller_id": caller["caller_id"],
+                "label": caller["label"],
+                "kind": caller["kind"],
+                "path": self._relative_path(caller["path"]),
+                "sites": caller["sites"],
+            } for caller in data["callers"][:limit]]
+            risk = [{
+                "label": item["label"], "path": self._relative_path(item["path"]),
+                "dst_symbol": item["dst_symbol"], "relation": item["relation"],
+                "line": item["line"], "state": item["state"],
+            } for item in data["risk"][:limit]]
+            return self._fits_response({
+                "target": self._node_dict(row),
+                "callers": callers,
+                "risk": risk,
+                "truncated": len(data["callers"]) > limit or len(data["risk"]) > limit,
+            })
+        return self._run(op)
+
+    def implementations(self, target: str) -> Dict[str, Any]:
+        """extends/implements edges of a symbol, both directions."""
+        if not isinstance(target, str) or not target.strip():
+            raise McpServiceError("invalid_argument", "target must not be empty")
+        if len(target) > 512:
+            raise McpServiceError("invalid_argument", "target exceeds 512 characters")
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            row = self._resolve_target_row(conn, target)
+            view = cast(Database, _ConnView(conn))
+            data = Database.inheritance_edges(view, row["id"], row["symbol"])
+
+            def _rel(entry: Mapping[str, Any]) -> Dict[str, Any]:
+                return {"label": entry["label"], "path": self._relative_path(entry["path"]),
+                        "kind": entry["kind"], "relation": entry["relation"], "line": entry["line"]}
+
+            def _pen(entry: Mapping[str, Any]) -> Dict[str, Any]:
+                return {"label": entry["label"], "path": self._relative_path(entry["path"]),
+                        "dst_symbol": entry["dst_symbol"], "state": entry["state"]}
+
+            return self._fits_response({
+                "target": self._node_dict(row),
+                "bases": [_rel(e) for e in data["bases"]],
+                "derived": [_rel(e) for e in data["derived"]],
+                "pending_bases": [_pen(e) for e in data["pending_bases"]],
+                "pending_derived": [_pen(e) for e in data["pending_derived"]],
+            })
+        return self._run(op)
+
     def _node_dict(self, row: Mapping[str, Any]) -> Dict[str, Any]:
         return {"id": row["id"], "path": self._relative_path(row["path"]), "kind": row["kind"], "symbol": row["symbol"], "label": row["label"], "body": self._body(row["body"]), "keywords": row["keywords"], "line": row["line_start"]}
 
@@ -448,12 +539,6 @@ class McpService:
         """Build a k-hop ContextBundle (read-only) for agent prompt registers."""
         from sot_graph.pack import PackError, build_bundle, render_yaml
 
-        class _ConnView:
-            __slots__ = ("conn",)
-
-            def __init__(self, conn: sqlite3.Connection) -> None:
-                self.conn = conn
-
         def op(conn: sqlite3.Connection) -> Dict[str, Any]:
             try:
                 bundle = build_bundle(
@@ -487,6 +572,12 @@ class McpService:
 
     async def aexplore(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return await self._async(self.explore, *args, **kwargs)
+
+    async def ausages(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.usages, *args, **kwargs)
+
+    async def aimplementations(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.implementations, *args, **kwargs)
 
     async def averify_drift(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return await self._async(self.verify_drift, *args, **kwargs)

@@ -189,32 +189,38 @@ def cmd_search(args: argparse.Namespace, db: Database, root: str) -> int:
     return 0
 
 
-def cmd_explore(args: argparse.Namespace, db: Database) -> int:
-    query = args.target.strip()
-    # Prefer real symbols over file/doc nodes whose labels merely mention
-    # the query text.
-    cur = db.conn.execute(
-        "SELECT id, label, kind, path, line_start FROM graph_nodes "
+def _resolve_symbol(db: Database, query: str):
+    """Resolve a query to one node row: (id, label, kind, path, line, symbol).
+
+    Prefers exact symbol matches over file/doc nodes whose labels merely
+    mention the query text.
+    """
+    row = db.conn.execute(
+        "SELECT id, label, kind, path, line_start, symbol FROM graph_nodes "
         "WHERE symbol = ? LIMIT 1", (query,)
-    )
-    row = cur.fetchone()
-    if not row:
-        cur = db.conn.execute(
-            "SELECT id, label, kind, path, line_start FROM graph_nodes "
-            "WHERE kind != 'file' AND (label LIKE ? OR fqn LIKE ?) "
-            "ORDER BY kind LIMIT 1", (f"%{query}%", f"%{query}%")
-        )
-        row = cur.fetchone()
+    ).fetchone()
     if not row:
         row = db.conn.execute(
-            "SELECT id, label, kind, path, line_start FROM graph_nodes "
+            "SELECT id, label, kind, path, line_start, symbol FROM graph_nodes "
+            "WHERE kind != 'file' AND (label LIKE ? OR fqn LIKE ?) "
+            "ORDER BY kind LIMIT 1", (f"%{query}%", f"%{query}%")
+        ).fetchone()
+    if not row:
+        row = db.conn.execute(
+            "SELECT id, label, kind, path, line_start, symbol FROM graph_nodes "
             "WHERE label LIKE ? LIMIT 1", (f"%{query}%",)
         ).fetchone()
+    return row
+
+
+def cmd_explore(args: argparse.Namespace, db: Database) -> int:
+    query = args.target.strip()
+    row = _resolve_symbol(db, query)
     if not row:
         print(f"❌ No symbol or node matching '{query}' found in graph.")
         return 1
 
-    node_id, label, kind, path, line = row
+    node_id, label, kind, path, line, _symbol = row
     print(f"\n🌐 Graph Walk: [{label}] ({kind}) @ {path}:{line or 1}")
     print("=" * 80)
 
@@ -236,6 +242,111 @@ def cmd_explore(args: argparse.Namespace, db: Database) -> int:
         for r in inward:
             print(f"    └── [{r['relation']}] ➔ {r['label']} ({r['path']}:{r['line'] or 1})")
 
+    print()
+    return 0
+
+
+def _print_usages_risk(risk: list, symbol: str) -> None:
+    if not risk:
+        return
+    print(f"\n  ⚠ Unresolved references to bare name '{symbol}' "
+          f"({len(risk)} — cannot be safely attributed):")
+    for item in risk:
+        print(f"    └── [{item['state']}] {item['label']} → {item['dst_symbol']}"
+              f" ({item['relation']}) @ {item['path']}:{item['line'] or 1}")
+
+
+def cmd_usages(args: argparse.Namespace, db: Database) -> int:
+    query = args.target.strip()
+    row = _resolve_symbol(db, query)
+    if not row:
+        print(f"❌ No symbol or node matching '{query}' found in graph.")
+        return 1
+    node_id, label, kind, path, line, symbol = row
+
+    data = db.usages(node_id, symbol)
+    total = sum(len(c["sites"]) for c in data["callers"])
+    print(f"\n🔎 Usages of [{label}] ({kind}) — {total} site(s) across "
+          f"{len(data['callers'])} caller(s)")
+    print("=" * 80)
+    if not data["callers"]:
+        print("  (No resolved inbound references)")
+    for caller in data["callers"]:
+        print(f"\n  ◀ {caller['label']} ({caller['kind']})")
+        for site in caller["sites"]:
+            print(f"      └── [{site['relation']}] @ line {site['line'] or 1}")
+    _print_usages_risk(data["risk"], symbol)
+    print()
+    return 0
+
+
+def cmd_implementations(args: argparse.Namespace, db: Database) -> int:
+    query = args.target.strip()
+    row = _resolve_symbol(db, query)
+    if not row:
+        print(f"❌ No symbol or node matching '{query}' found in graph.")
+        return 1
+    node_id, label, kind, path, line, symbol = row
+
+    data = db.inheritance_edges(node_id, symbol)
+    print(f"\n🧬 Inheritance of [{label}] ({kind}) @ {path}:{line or 1}")
+    print("=" * 80)
+    if data["bases"]:
+        print("  ▶ Extends / Implements (bases):")
+        for item in data["bases"]:
+            print(f"    └── [{item['relation']}] {item['label']} ({item['path']}:{item['line'] or 1})")
+    if data["derived"]:
+        print("  ◀ Derived types (implements/extends this):")
+        for item in data["derived"]:
+            print(f"    └── [{item['relation']}] {item['label']} ({item['path']}:{item['line'] or 1})")
+    if not data["bases"] and not data["derived"]:
+        print("  (No extends/implements edges found)")
+    for entry, title in ((data["pending_bases"], "unresolved bases"),
+                         (data["pending_derived"], "unresolved derived types")):
+        if entry:
+            print(f"\n  ⚠ {len(entry)} {title} (link could not be resolved):")
+            for item in entry:
+                print(f"    └── [{item['state']}] {item['label']} → {item['dst_symbol']}"
+                      f" ({item['path']})")
+    print()
+    return 0
+
+
+def cmd_rename(args: argparse.Namespace, db: Database) -> int:
+    query = args.target.strip()
+    row = _resolve_symbol(db, query)
+    if not row:
+        print(f"❌ No symbol or node matching '{query}' found in graph.")
+        return 1
+    node_id, label, kind, path, line, symbol = row
+    new_name = args.to or "<new_name>"
+
+    definitions = db.conn.execute(
+        "SELECT n.label, n.path, n.line_start FROM graph_edges e "
+        "JOIN graph_nodes n ON e.src = n.id "
+        "WHERE e.dst = ? AND e.relation = 'defines'", (node_id,)
+    ).fetchall()
+    data = db.usages(node_id, symbol)
+    ambiguous = [r for r in data["risk"] if r["state"] == "AMBIGUOUS"]
+    sites = [(c["path"], s["line"], c["label"]) for c in data["callers"] for s in c["sites"]]
+
+    print(f"\n✏️  Rename plan: '{symbol}' → '{new_name}' (report-only — no files modified)")
+    print("=" * 80)
+    print(f"  Definitions ({len(definitions)}):")
+    for def_label, def_path, def_line in definitions or [(label, path, line)]:
+        print(f"    └── {def_label} ({def_path}:{def_line or 1})")
+    print(f"\n  Usage sites ({len(sites)}):")
+    for site_path, site_line, caller_label in sites or []:
+        print(f"    └── {caller_label} ({site_path}:{site_line or 1})")
+    if not sites:
+        print("    └── (none resolved)")
+    if ambiguous:
+        print(f"\n  ⚠ Risk: {len(ambiguous)} AMBIGUOUS reference(s) share the bare name "
+              f"'{symbol.rsplit('.', 1)[-1]}' — manual review required:")
+        for item in ambiguous:
+            print(f"    └── {item['label']} ({item['path']}:{item['line'] or 1})")
+    print(f"\n  Summary: {len(definitions or [1])} definition(s), {len(sites)} usage site(s)"
+          f"{f', {len(ambiguous)} ambiguous' if ambiguous else ''}")
     print()
     return 0
 
@@ -619,6 +730,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_exp.add_argument("target", help="Symbol, function name, or class to explore")
     p_exp.add_argument("--depth", type=int, default=2, help="Graph walk depth (default: 2)")
 
+    # usages
+    p_usg = subparsers.add_parser("usages", help="List every reference site of a symbol, grouped by caller")
+    p_usg.add_argument("target", help="Symbol, function name, or class to inspect")
+
+    # implementations
+    p_imp = subparsers.add_parser("implementations", help="Show extends/implements relationships of a symbol")
+    p_imp.add_argument("target", help="Base class/interface or derived type to inspect")
+
+    # rename
+    p_ren = subparsers.add_parser("rename", help="Report-only impact plan for renaming a symbol")
+    p_ren.add_argument("target", help="Symbol to rename")
+    p_ren.add_argument("--to", default=None, help="Proposed new name (display only)")
+
     # insert
     p_ins = subparsers.add_parser("insert", help="Insert a reusable piece of knowledge or decision")
     p_ins.add_argument("--title", required=True, help="Title of the knowledge item")
@@ -747,6 +871,12 @@ def main() -> int:
             return cmd_search(args, db, root)
         elif args.command == "explore":
             return cmd_explore(args, db)
+        elif args.command == "usages":
+            return cmd_usages(args, db)
+        elif args.command == "implementations":
+            return cmd_implementations(args, db)
+        elif args.command == "rename":
+            return cmd_rename(args, db)
         elif args.command == "insert":
             return cmd_insert(args, db)
         elif args.command == "reconcile":

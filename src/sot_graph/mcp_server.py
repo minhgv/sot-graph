@@ -60,6 +60,12 @@ def create_server(service: McpService) -> Any:
             types.Tool(name="sot_explore", description="Read-only bounded graph traversal.", inputSchema={
                 "type": "object", "properties": {"node_id": {"type": "string"}, "depth": {"type": "integer", "minimum": 1}, "limit": {"type": "integer", "minimum": 1}}, "required": ["node_id"], "additionalProperties": False,
             }),
+            types.Tool(name="sot_usages", description="Read-only find-all-references: every reference site of a symbol, grouped by caller, plus unresolved bare-name risk.", inputSchema={
+                "type": "object", "properties": {"target": {"type": "string"}, "limit": {"type": "integer", "minimum": 1}}, "required": ["target"], "additionalProperties": False,
+            }),
+            types.Tool(name="sot_implementations", description="Read-only extends/implements relationships of a symbol (bases and derived types).", inputSchema={
+                "type": "object", "properties": {"target": {"type": "string"}}, "required": ["target"], "additionalProperties": False,
+            }),
             types.Tool(name="sot_verify_drift", description="Read-only bounded filesystem drift audit.", inputSchema={
                 "type": "object", "properties": {"deep": {"type": "boolean"}, "limit": {"type": "integer", "minimum": 1}}, "additionalProperties": False,
             }),
@@ -85,6 +91,10 @@ def create_server(service: McpService) -> Any:
                 result = await service.asearch(args.get("query", ""), limit=args.get("limit", 6), scope=args.get("scope"), threshold=args.get("threshold", 0.5))
             elif name == "sot_explore":
                 result = await service.aexplore(args.get("node_id", ""), depth=args.get("depth", 1), limit=args.get("limit", 100))
+            elif name == "sot_usages":
+                result = await service.ausages(args.get("target", ""), limit=args.get("limit", 100))
+            elif name == "sot_implementations":
+                result = await service.aimplementations(args.get("target", ""))
             elif name == "sot_verify_drift":
                 result = await service.averify_drift(deep=args.get("deep", False), limit=args.get("limit", 100))
             elif name == "sot_architecture_report":

@@ -739,6 +739,95 @@ class Database:
                     break
         return result
 
+    def usages(self, node_id: str, symbol: str) -> Dict[str, Any]:
+        """Every reference site of a symbol, grouped by caller.
+
+        Calls/uses/imports edges pointing at ``node_id`` plus the unresolved
+        pending edges whose bare name matches ``symbol`` (renaming risk).
+        """
+        rows = self.conn.execute(
+            "SELECT e.src, n.label, n.path, n.kind, e.relation, e.line "
+            "FROM graph_edges e JOIN graph_nodes n ON e.src = n.id "
+            "WHERE e.dst = ? AND e.relation != 'defines' "
+            "ORDER BY n.path, e.line", (node_id,)
+        ).fetchall()
+        callers: List[Dict[str, Any]] = []
+        by_caller: Dict[str, Dict[str, Any]] = {}
+        for src, label, path, kind, rel, line in rows:
+            entry = by_caller.get(src)
+            if entry is None:
+                entry = {"caller_id": src, "label": label, "path": path, "kind": kind, "sites": []}
+                by_caller[src] = entry
+                callers.append(entry)
+            entry["sites"].append({"relation": rel, "line": line})
+
+        names = [symbol]
+        bare = symbol.rsplit(".", 1)[-1]
+        if bare != symbol:
+            names.append(bare)
+        placeholders = ",".join("?" * len(names))
+        risk = [
+            {"src": r[0], "label": r[1], "path": r[2], "dst_symbol": r[3],
+             "relation": r[4], "line": r[5], "state": r[6]}
+            for r in self.conn.execute(
+                f"SELECT p.src, n.label, n.path, p.dst_symbol, p.relation, p.line, p.resolution_state "
+                f"FROM pending_edges p JOIN graph_nodes n ON p.src = n.id "
+                f"WHERE p.dst_symbol IN ({placeholders}) "
+                f"AND p.resolution_state IN ('UNRESOLVED', 'AMBIGUOUS') "
+                f"AND p.src != ? ORDER BY p.resolution_state, n.path, p.line",
+                (*names, node_id),
+            ).fetchall()
+        ]
+        return {"callers": callers, "risk": risk}
+
+    def inheritance_edges(self, node_id: str, symbol: str) -> Dict[str, Any]:
+        """extends/implements edges around a node, both directions, plus
+        unresolved pending links that could not be promoted."""
+        def _around(where_col: str, join_col: str) -> List[Dict[str, Any]]:
+            return [
+                {"node_id": r[0], "label": r[1], "path": r[2], "kind": r[3],
+                 "relation": r[4], "line": r[5]}
+                for r in self.conn.execute(
+                    f"SELECT n.id, n.label, n.path, n.kind, e.relation, e.line "
+                    f"FROM graph_edges e JOIN graph_nodes n ON {join_col} = n.id "
+                    f"WHERE {where_col} = ? AND e.relation IN ('extends', 'implements') "
+                    f"ORDER BY n.path", (node_id,)
+                ).fetchall()
+            ]
+
+        names = [symbol]
+        bare = symbol.rsplit(".", 1)[-1]
+        if bare != symbol:
+            names.append(bare)
+        placeholders = ",".join("?" * len(names))
+        pending_bases = [
+            {"src": r[0], "label": r[1], "path": r[2], "dst_symbol": r[3], "state": r[4]}
+            for r in self.conn.execute(
+                f"SELECT p.src, n.label, n.path, p.dst_symbol, p.resolution_state "
+                f"FROM pending_edges p JOIN graph_nodes n ON p.src = n.id "
+                f"WHERE p.src = ? AND p.relation IN ('extends', 'implements') "
+                f"AND p.resolution_state != 'RESOLVED' ORDER BY n.path",
+                (node_id,),
+            ).fetchall()
+        ]
+        pending_derived = [
+            {"src": r[0], "label": r[1], "path": r[2], "dst_symbol": r[3], "state": r[4]}
+            for r in self.conn.execute(
+                f"SELECT p.src, n.label, n.path, p.dst_symbol, p.resolution_state "
+                f"FROM pending_edges p JOIN graph_nodes n ON p.src = n.id "
+                f"WHERE p.dst_symbol IN ({placeholders}) "
+                f"AND p.relation IN ('extends', 'implements') "
+                f"AND p.resolution_state != 'RESOLVED' AND p.src != ? ORDER BY n.path",
+                (*names, node_id),
+            ).fetchall()
+        ]
+        return {
+            "bases": _around("e.src", "e.dst"),
+            "derived": _around("e.dst", "e.src"),
+            "pending_bases": pending_bases,
+            "pending_derived": pending_derived,
+        }
+
     def stats(self) -> Dict[str, int]:
         row = self.conn.execute(
             "SELECT "
