@@ -401,6 +401,15 @@ class McpService:
             return self._fits_response({"notes": out, "returned": len(out)})
         return self._run(op)
 
+    def graph_generation(self) -> Dict[str, Any]:
+        """Current publication generation — the staleness signal for MCP push."""
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(generation), 0), COUNT(*) FROM file_journal"
+            ).fetchone()
+            return {"generation": row[0], "paths": row[1]}
+        return self._run(op)
+
     def _node_dict(self, row: Mapping[str, Any]) -> Dict[str, Any]:
         return {"id": row["id"], "path": self._relative_path(row["path"]), "kind": row["kind"], "symbol": row["symbol"], "label": row["label"], "body": self._body(row["body"]), "keywords": row["keywords"], "line": row["line_start"]}
 
@@ -637,6 +646,9 @@ class McpService:
 
     async def anotes(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return await self._async(self.notes, *args, **kwargs)
+
+    async def agraph_generation(self) -> Dict[str, Any]:
+        return await self._async(self.graph_generation)
 
     async def averify_drift(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return await self._async(self.verify_drift, *args, **kwargs)
