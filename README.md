@@ -8,7 +8,7 @@
 [![SQLite: WAL + FTS5](https://img.shields.io/badge/SQLite-FTS5%20%2B%20WAL-orange.svg)](src/sot_graph/db.py)
 [![Tests: 31 passed](https://img.shields.io/badge/Tests-31%2F31%20Passed-brightgreen.svg)](tests/)
 [![Architecture: Zero--Daemon](https://img.shields.io/badge/Architecture-Zero--Daemon-purple.svg)](#-architecture-overview)
-[![Q&A Guide: 19 Scenarios](https://img.shields.io/badge/Q%26A%20Guide-19%20Scenarios%20HTML-blueviolet.svg)](sot_qa_guide.html)
+[![Q&A Guide: 19 Scenarios](https://img.shields.io/badge/Q%26A%20Guide-19%20Scenarios%20Docs-blueviolet.svg)](docs/QA_GUIDE.md)
 
 ---
 
@@ -61,23 +61,25 @@ When an agent searches the knowledge base via `sot search "<query>"`, every cand
 
 ---
 
-## 📚 Interactive Q&A Guide & Troubleshooting (`sot_qa_guide.html`)
+## 📚 Q&A Guide & Knowledge Base (`docs/QA_GUIDE.md`)
 
-For a comprehensive, interactive deep-dive into real-world usage scenarios, edge cases, self-healing mechanics, and graph algorithms, explore the standalone **[Interactive Q&A Guide (sot_qa_guide.html)](sot_qa_guide.html)**:
+To explore all real-world usage scenarios, edge cases, self-healing mechanics, and graph algorithms:
 
-```bash
-# Open the interactive Q&A guide directly in your browser:
-open sot_qa_guide.html        # macOS
-xdg-open sot_qa_guide.html    # Linux
-```
+- 📖 **[Đọc Hướng Dẫn Hỏi Đáp Đầy Đủ Trên GitHub (docs/QA_GUIDE.md)](docs/QA_GUIDE.md)** (Hỗ trợ đọc trực tiếp với các mục Accordion mở rộng).
+- ⚡ **[Xem Bản HTML Tương Tác Trực Tuyến (HTMLPreview)](https://htmlpreview.github.io/?https://github.com/minhgv/sot-graph/blob/main/sot_qa_guide.html)** (Tìm kiếm thời gian thực, lọc danh mục & copy code 1-click).
+- 💻 **Xem Offline Trên Trình Duyệt Cá Nhân**:
+  ```bash
+  open sot_qa_guide.html        # macOS
+  xdg-open sot_qa_guide.html    # Linux
+  ```
 
-### 🌟 Key Q&A Topics Covered:
-1. **Core Architecture & Anti-Hallucination**: Filesystem SSOT principles, fast dirty check vs SHA-256 hash detection, Trust Verdict classifications (`[STRONG]`, `[WEAK]`, `[REBUILT]`, `[REMOVED]`), and SQL pending edge resolution.
-2. **Self-Healing & Data Integrity**: Immediate auto-purge upon file deletion (`rm`), auto-rehome upon directory moves (`mv`), and atomic full-file replacement avoiding ghost entities.
-3. **AI Agent Integration**: Oh My Pi (`omp_extension.ts`), Claude Code/Cursor (`AGENTS.md`), read-only MCP stdio server tools, and the 4-step Knowledge Reuse Protocol.
-4. **Graph Analytics & Insights**: God Node identification ($\mu + \sigma \cdot \text{std}$) with 2-hop Blast Radius, Louvain modularity ($Q$), and multi-format exporters.
-5. **Operations & Maintenance**: `sot clean` & `sot vacuum` with `--dry-run`, CI/CD drift audits (`sot verify --deep`), and benchmark metrics.
-6. **Real-World Edge Cases**: Basename collision guards, syntax error resilience, and architecture decision persistence (`sot insert`).
+### 🌟 6 Nhóm Chủ Đề Chính Được Giải Đáp Chi Tiết:
+1. **Cơ Chế Cốt Lõi & Chống Ảo Giác**: Filesystem SSOT, Fast Dirty Check metadata ($O(1)$) + SHA-256 hash, phân loại Trust Verdict (`[STRONG]`, `[WEAK]`, `[REBUILT]`, `[REMOVED]`), và SQL pending edge resolution 2 chiều.
+2. **Tự Chữa Lành & Toàn Vẹn Dữ Liệu**: Tự động thanh trừng khi xóa file (`rm`), tự động định vị lại khi đổi tên/chuyển thư mục (`mv`), và Atomic Full-File Replacement chống tích tụ node rác.
+3. **Tích Hợp AI Agent & MCP**: Cài đặt extension cho Oh My Pi (`omp_extension.ts`), cấu hình Claude Code/Cursor (`AGENTS.md`), 5 công cụ Read-Only MCP Stdio Server và quy trình 4 bước Knowledge Reuse Protocol.
+4. **Phân Tích Đồ Thị & Trực Quan Hóa**: Thuật toán nhận diện God Nodes ($\mu + \sigma \cdot \text{std}$) kèm 2-hop Blast Radius, phân cụm Louvain / Modularity $Q$, và bộ xuất Interactive HTML D3.js, GraphRAG JSON, Obsidian Vault, GraphML.
+5. **Vận Hành, Bảo Trì & Hiệu Năng**: Lệnh `sot clean` & `sot vacuum` (chế độ an toàn `--dry-run`), CI/CD drift audits (`sot verify --deep`), và benchmark hiệu năng (< 25ms / 100 files, RAM < 25MB).
+6. **Xử Lý Sự Cố & Tình Huống Thực Tế**: Ambiguity Guard chống gán nhầm file trùng tên, khả năng chịu lỗi khi gặp Syntax Error, và lưu trữ quyết định kiến trúc (ADR) với `sot insert`.
 ---
 
 ## 🏗️ Architecture Overview
