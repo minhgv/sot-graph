@@ -84,3 +84,35 @@ PYTHONPATH=".:src" python3 -m benchmarks.bench_query --files 500 --repeat 5 --js
    - Run `sot vacuum --analyze` to checkpoint WAL logs and update SQLite query planner statistics.
 3. **Use Scoped Searches for Massive Repositories**:
    - `sot search "query" --scope <subfolder>` restricts FTS candidate generation to relevant modules.
+
+---
+
+## 📦 Context-Cost Benchmark (v3, deterministic)
+
+The LLM-in-the-loop protocol (sub-agent D1 pack vs D2 grep: 18.8k vs 58.6k tokens,
+−68%, 0 vs 2 dead paths) motivated a reproducible offline harness:
+
+```bash
+python3 scripts/benchmark_context.py            # defaults to 3 core targets
+python3 scripts/benchmark_context.py --targets build_bundle,parse_file_graph --json
+```
+
+Method: for each target, compare `sot pack` YAML tokens (k-hop slice: source span
++ caller/callee contracts + signature stubs) against the naive protocol of reading
+every whole file in the same k-hop neighbourhood (the grep-then-read baseline).
+Tokens estimated as bytes/4. No LLM, no network — numbers are stable across runs.
+
+Results on this repository (2026-08-23, 138 tests green):
+
+| Target | pack | naive | files | saved |
+|---|---|---|---|---|
+| Database.commit_file_batch | 1,680 | 10,388 | 1 | 83.8% |
+| build_bundle | 3,375 | 29,377 | 6 | 88.5% |
+| parse_file_graph | 3,442 | 17,624 | 6 | 80.5% |
+| **average** | | | | **84.3%** |
+
+Notes:
+- Micro-repos (<5 tiny files) can invert the ratio because the bundle's structural
+  YAML outweighs file bytes; the harness reports the numbers honestly either way.
+- The LLM protocol adds dead-path avoidance on top (0 vs 2 dead paths measured),
+  which the deterministic core cannot capture.

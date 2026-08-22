@@ -132,7 +132,7 @@ class ExportTests(unittest.TestCase):
         args_rag = parser.parse_args(["export", "-f", "graphrag", "-o", rag_out])
         buf = io.StringIO()
         with redirect_stdout(buf):
-            ret = cmd_export(args_rag, self.db)
+            ret = cmd_export(args_rag, self.db, str(self.project_dir))
         self.assertEqual(ret, 0)
         self.assertTrue(Path(rag_out).exists())
 
@@ -141,7 +141,7 @@ class ExportTests(unittest.TestCase):
         args_obs = parser.parse_args(["export", "-f", "obsidian", "-o", obs_out])
         buf = io.StringIO()
         with redirect_stdout(buf):
-            ret = cmd_export(args_obs, self.db)
+            ret = cmd_export(args_obs, self.db, str(self.project_dir))
         self.assertEqual(ret, 0)
         self.assertTrue(Path(obs_out).is_dir())
 
@@ -150,7 +150,7 @@ class ExportTests(unittest.TestCase):
         args_gml = parser.parse_args(["export", "-f", "graphml", "-o", gml_out])
         buf = io.StringIO()
         with redirect_stdout(buf):
-            ret = cmd_export(args_gml, self.db)
+            ret = cmd_export(args_gml, self.db, str(self.project_dir))
         self.assertEqual(ret, 0)
         self.assertTrue(Path(gml_out).exists())
 

@@ -693,7 +693,7 @@ def cmd_viz(args: argparse.Namespace, db: Database, root: str) -> int:
     return 0
 
 
-def cmd_export(args: argparse.Namespace, db: Database) -> int:
+def cmd_export(args: argparse.Namespace, db: Database, root: str) -> int:
     from sot_graph.analytics.graph import AnalyticsGraph
     from sot_graph.export.exporter import (
         export_graphrag_json,
@@ -701,8 +701,17 @@ def cmd_export(args: argparse.Namespace, db: Database) -> int:
         export_graphml,
     )
 
-    graph = AnalyticsGraph.from_database(db, scope=args.scope)
     fmt = args.format.lower()
+
+    if fmt == "scip":
+        from sot_graph.export.scip import export_scip
+
+        out_file = args.output or os.path.join(root, ".sot", "index.scip")
+        size = export_scip(db, root, out_file)
+        print(f"🧭 SCIP index exported to: {out_file} ({size} bytes)")
+        return 0
+
+    graph = AnalyticsGraph.from_database(db, scope=args.scope)
 
     if fmt in ("graphrag", "json"):
         out_file = args.output or "graphrag.json"
@@ -717,7 +726,7 @@ def cmd_export(args: argparse.Namespace, db: Database) -> int:
         export_graphml(graph, output_path=out_file)
         print(f"🕸️  GraphML XML exported to: {out_file}")
     else:
-        print(f"❌ Unknown export format: {fmt}. Supported: graphrag, obsidian, graphml")
+        print(f"❌ Unknown export format: {fmt}. Supported: graphrag, obsidian, graphml, scip")
         return 1
     return 0
 def cmd_setup(args: argparse.Namespace, root: str) -> int:
@@ -728,6 +737,19 @@ def cmd_setup(args: argparse.Namespace, root: str) -> int:
         print("Supported AI Coding Harnesses:")
         for key, desc in list_supported_harnesses().items():
             print(f"  - {key:<12} : {desc}")
+        return 0
+
+    if getattr(args, "hooks", False):
+        from sot_graph.adapters.hooks import install_git_hooks
+
+        installed = install_git_hooks(Path(root))
+        if not installed:
+            print("⚠ No .git directory found — git hooks not installed.")
+            return 1
+        print(f"🪝 Installed git hooks ({', '.join(h.name for h in installed)}):")
+        for hook in installed:
+            print(f"  ✓ {hook}")
+        print("   The graph now reconciles automatically after merge/checkout.")
         return 0
 
     global_install = not args.workspace_only
@@ -865,8 +887,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_viz.add_argument("--open", action="store_true", help="Automatically open visualizer in default web browser")
 
     # export
-    p_expo = subparsers.add_parser("export", help="Export knowledge graph to GraphRAG JSON, Obsidian, or GraphML")
-    p_expo.add_argument("-f", "--format", default="graphrag", choices=["graphrag", "json", "obsidian", "graphml"], help="Export format (default: graphrag)")
+    p_expo = subparsers.add_parser("export", help="Export knowledge graph to GraphRAG JSON, Obsidian, GraphML, or SCIP")
+    p_expo.add_argument("-f", "--format", default="graphrag", choices=["graphrag", "json", "obsidian", "graphml", "scip"], help="Export format (default: graphrag)")
     p_expo.add_argument("-o", "--output", default=None, help="Output file or directory path")
     p_expo.add_argument("--scope", default=None, help="Scope export to path or subdirectory")
     # bundle
@@ -881,6 +903,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_setup.add_argument("--global-only", action="store_true", help="Install to user home directory only")
     p_setup.add_argument("--workspace-only", action="store_true", help="Install to current workspace only")
     p_setup.add_argument("--list", action="store_true", help="List supported harnesses")
+    p_setup.add_argument("--hooks", action="store_true", help="Provision git post-merge/post-checkout hooks that reconcile the graph (no daemon)")
 
     p_pack = subparsers.add_parser(
         "pack", help="Package a k-hop ContextBundle (YAML) for AI agent prompt registers")
@@ -953,7 +976,7 @@ def main() -> int:
         elif args.command == "viz":
             return cmd_viz(args, db, root)
         elif args.command == "export":
-            return cmd_export(args, db)
+            return cmd_export(args, db, root)
         elif args.command == "bundle":
             return cmd_bundle(args, db, root)
         elif args.command == "pack":
