@@ -427,6 +427,7 @@ def cmd_reconcile(args: argparse.Namespace, reconciler: Reconciler) -> int:
             paths=args.paths,
             workers=args.workers,
             batch_size=args.batch_size,
+            force=getattr(args, "force", False),
         )
     except KeyboardInterrupt:
         return 130
@@ -844,6 +845,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Files per deterministic transaction window (default: 64)",
     )
     p_rec.add_argument("--json", action="store_true", help="Output summary as JSON")
+    p_rec.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-extract every file regardless of journal state (upgrade path "
+             "for extractor changes; notes are preserved)",
+    )
     # verify
     p_ver = subparsers.add_parser("verify", help="Check for drift between graph and filesystem (CI-safe)")
     p_ver.add_argument("--deep", action="store_true", help="Perform full SHA-256 content re-hashing")

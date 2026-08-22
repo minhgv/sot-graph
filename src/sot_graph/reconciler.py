@@ -259,7 +259,7 @@ class Reconciler:
 
 
     def _jobs_for_scan(
-        self, paths: Optional[Sequence[str]]
+        self, paths: Optional[Sequence[str]], force: bool = False
     ) -> Tuple[List[ParseJob], Set[str], int]:
         disk_paths = self.scan(paths)
         jobs: List[ParseJob] = []
@@ -274,7 +274,7 @@ class Reconciler:
             size = int(stat.st_size)
             mtime_ms = int(stat.st_mtime * 1000)
             prior = journal_cache.get(path) or self.db.get_file_journal(path)
-            if prior and prior.get("size") == size and prior.get("mtime_ms") == mtime_ms:
+            if not force and prior and prior.get("size") == size and prior.get("mtime_ms") == mtime_ms:
                 # Hash verification preserves v1 behavior for edits that retain
                 # both size and mtime.
                 current_sha = self._hash(path)
@@ -488,8 +488,13 @@ class Reconciler:
         *,
         workers: Optional[int] = None,
         batch_size: int = 64,
+        force: bool = False,
     ) -> ReconcileSummary:
-        """Scan and reconcile with deterministic, bounded parallel extraction."""
+        """Scan and reconcile with deterministic, bounded parallel extraction.
+
+        ``force`` re-extracts every discovered file regardless of journal
+        state — the upgrade path for extractor changes on existing indexes.
+        """
         if workers is None:
             workers = min(8, max(1, os.cpu_count() or 1))
         if workers < 1:
@@ -498,7 +503,7 @@ class Reconciler:
             raise ValueError("batch_size must be >= 1")
         started = time.monotonic()
 
-        jobs, current_paths, scan_failures = self._jobs_for_scan(paths)
+        jobs, current_paths, scan_failures = self._jobs_for_scan(paths, force=force)
         known_paths = self._known_abs_paths()
         unchanged = len(current_paths) - len(jobs) - scan_failures
         updated = 0

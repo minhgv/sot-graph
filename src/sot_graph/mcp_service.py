@@ -197,8 +197,24 @@ class McpService:
             sql += " ORDER BY rank_score ASC LIMIT ?"
             params.append(limit * 3)
             rows = conn.execute(sql, params).fetchall()
+            # Same symbol-first bucketing as Database.search_fts: file-node
+            # previews must not out-rank the symbols they define.
+            tokens_l = [t.lower() for t in clean.split()]
+
+            def _bucket(row: Any):
+                # bm25 is negative-better; keep the raw value for ordering.
+                try:
+                    score = float(row["rank_score"])
+                except (TypeError, ValueError):
+                    score = 0.0
+                text = f"{row['symbol'] or ''} {row['label'] or ''}".lower()
+                if row["kind"] != "file" and any(t in text for t in tokens_l):
+                    return (0, score)
+                return (1, score)
+
+            buckets = [_bucket(row) for row in rows]
             out: List[Dict[str, Any]] = []
-            for row in rows:
+            for row, bucket in zip(rows, buckets):
                 candidate = dict(row)
                 verdict, coverage, real = TrustVerifier.verify_hit(
                     cast(Database, None), candidate, tokenize(query), self.project_root,
@@ -208,6 +224,7 @@ class McpService:
                 if candidate.get("path") and rel is None:
                     verdict = "STALE"
                 out.append({
+                    "_bucket": bucket,
                     "id": candidate["id"], "verdict": verdict,
                     "coverage": coverage, "path": rel,
                     "kind": candidate["kind"], "symbol": candidate.get("symbol"),
@@ -216,7 +233,11 @@ class McpService:
                     "rank_score": round(float(candidate.get("rank_score") or 0), 6),
                 })
             rank = {"STRONG": 0, "REBUILT": 0, "WEAK": 1, "NOPATH": 2, "STALE": 3}
-            out.sort(key=lambda item: (rank.get(item["verdict"], 9), -(item["coverage"] or 0), item["id"]))
+            out.sort(key=lambda item: (
+                rank.get(item["verdict"], 9), -(item["coverage"] or 0),
+                item["_bucket"], item["id"]))
+            for item in out:
+                item.pop("_bucket", None)
             stale = sum(item["verdict"] == "STALE" for item in out)
             return self._fits_response({"query": query, "results": out[:limit], "returned": min(len(out), limit), "stale": stale})
         return self._run(op)

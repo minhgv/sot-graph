@@ -97,22 +97,23 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
     lang = get_language(path)
     module = dotted_module(rel_path)
 
-    # 1. Base File Node
+    # 1. Base File Node (both code and non-code files carry a short content
+    # preview so full-text search can find strings and comments, not just
+    # symbol bodies — e.g. Vietnamese labels inside PHP view controllers.)
+    preview = content_bytes[:400].decode("utf-8", errors="replace")
     file_node = {
         "id": file_node_id,
         "kind": "file",
         "symbol": p.name,
         "fqn": module,
         "label": f"File: {rel_path}",
-        "body": f"File {rel_path} ({lang}, {file_size} bytes)",
+        "body": f"File {rel_path} ({lang}, {file_size} bytes)\nPreview:\n{preview}",
         "keywords": [p.name, lang, "file"],
         "line_start": 1,
     }
 
     if not fn_name:
-        # Non-code or non-AST file (Markdown, configs, scripts)
-        preview = content_bytes[:400].decode("utf-8", errors="replace")
-        file_node["body"] = f"File {rel_path} ({lang})\nPreview:\n{preview}"
+        # Non-code file (Markdown, configs, scripts): no AST extraction.
         return {
             "nodes": [file_node],
             "edges": [],

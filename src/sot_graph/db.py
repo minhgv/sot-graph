@@ -752,9 +752,26 @@ class Database:
             params.extend([f"%{scope}%", f"%{scope}%"])
         sql += " ORDER BY bm25(graph_fts) ASC LIMIT ?"
         params.append(limit * 3)
+        rows = self.conn.execute(sql, params).fetchall()
+
+        # File nodes now carry content previews and can out-score the very
+        # symbols they define. Prefer nodes whose symbol/label matches a
+        # query token; everything else (file bodies, doc notes) keeps bm25
+        # order within its bucket.
+        tokens_l = [t.lower() for t in clean_q.split()]
+
+        def _rank(r: Any) -> Tuple[int, float]:
+            # bm25 is negative-better; keep the raw value for ordering.
+            score = r[9]
+            text = f"{r[3] or ''} {r[5] or ''}".lower()
+            if r[2] != "file" and any(t in text for t in tokens_l):
+                return (0, score)
+            return (1, score)
+
+        rows = sorted(rows, key=_rank)
         return [{"id": r[0], "path": r[1], "kind": r[2], "symbol": r[3], "fqn": r[4],
                  "label": r[5], "body": r[6], "keywords": r[7], "line_start": r[8], "score": abs(r[9])}
-                for r in self.conn.execute(sql, params).fetchall()]
+                for r in rows]
 
     def explore_node(self, node_id: str, depth: int = 1, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         if depth < 0 or (limit is not None and limit <= 0):
