@@ -50,8 +50,11 @@ When to use:
 | **Cluster Graph** | `sot cluster [--scope <path>]` | `xd://sot_cluster` |
 | **Architecture Report** | `sot report [-o GRAPH_REPORT.md]` | `xd://sot_report` |
 | **Interactive Viz** | `sot viz [-o graph.html]` | `xd://sot_viz` |
-| **Export Graph** | `sot export -f <graphrag|obsidian|scip>` | `xd://sot_export` |
+| **Export Graph** | `sot export -f <graphrag/obsidian/scip>` | `xd://sot_export` |
 | **Fact Bundler** | `sot bundle [-o .sot/bundle/]` | `xd://sot_bundle` |
+| **Embed Index** | `sot embed [--limit 5000]` | CLI |
+| **File Watcher** | `sot watch [--debounce-ms 200]` | CLI (Daemon) |
+| **Harness Setup** | `sot setup [--harness <name>]` | CLI |
 """
 
 RULES_MARKDOWN = """# SOT-Graph Project Rules for OMP (Oh My Pi)

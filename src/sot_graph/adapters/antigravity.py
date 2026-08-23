@@ -8,51 +8,100 @@ import sys
 
 ANTIGRAVITY_SKILL_MARKDOWN = """---
 name: sot-graph
-description: Single Source of Truth (SOT) verified knowledge graph for AI coding agents. Provides verified codebase search with Trust Verdicts ([STRONG], [WEAK], [REBUILT]), AST cross-file dependency exploration, zero-daemon SQLite storage, self-healing synchronization, and graph analytics.
+description: Single Source of Truth (SOT) verified knowledge graph for AI coding agents. Provides verified codebase search with Trust Verdicts ([STRONG], [WEAK], [REBUILT]), AST cross-file dependency exploration, zero-daemon SQLite storage, self-healing synchronization, and graph analytics (Louvain clustering, God Node detection, HTML/GraphRAG/Obsidian export, Fact Bundles).
 ---
 
-# sot-graph for Google Antigravity / Gemini CLI
+# /sot-graph (Single Source of Truth Knowledge Layer for Google Antigravity / Gemini CLI)
 
-Ground agent actions in physical filesystem reality using the SOT knowledge layer:
+Ground Gemini and Antigravity agent actions in physical filesystem reality using the SOT knowledge layer.
 
-## 1. Verified Knowledge Search
-Search the codebase with Trust Verdicts before implementing new logic:
-```bash
-sot search "<query>" -n 5
-```
-Or use the MCP tool `sot_search(query="...")`.
+## When to Use SOT-Graph
+- **Top-down orientation**: Map repository architecture without token waste (`sot map` / `sot_map`).
+- **Before writing or implementing code**: Search if utilities or existing solutions already exist (`sot search` / `sot_search`).
+- **Before modifying core functions or classes**: Trace upstream/downstream dependencies (`sot explore` / `sot_explore`, `sot usages` / `sot_usages`).
+- **Polymorphism & interface inspection**: Inspect concrete implementations (`sot implementations` / `sot_implementations`).
+- **Safe symbol refactoring**: Plan or execute multi-file renames (`sot rename` / `sot_rename`).
+- **Token-efficient context packaging**: Extract k-hop subgraphs into YAML ContextBundles (`sot pack` / `sot_pack`).
+- **Verifying disk consistency**: Audit phantom anchors and drift (`sot verify` / `sot_verify`).
+- **Recording knowledge**: Record non-obvious architecture choices or critical bug solutions (`sot insert` / `sot_insert`).
+- **Architecture analysis & reports**: Extract 5 fact bundle files (`sot bundle` / `sot_bundle`), generate visual graphs, community clustering, or health reports (`sot cluster`, `sot report`, `sot viz`, `sot export`).
+- **Database maintenance**: Purge stale records and vacuum freelists (`sot clean`, `sot vacuum`, `sot doctor`).
 
-Trust Verdicts:
-- `[STRONG]`: High confidence — file and symbols physically verified on disk.
-- `[WEAK]`: Semantic match only — inspect before relying on it.
-- `[REBUILT]`: File has moved location; use the updated path.
+## Trust Verdicts
+| Verdict | Meaning | Action |
+| :--- | :--- | :--- |
+| `[STRONG]` | File exists on disk, symbol exists in AST, token coverage verified. | **Proceed directly.** 100% reliable anchor. |
+| `[WEAK]` | Semantic or partial match; low lexical coverage. | **Inspect snippet range** before relying on symbol. |
+| `[REBUILT]` | File moved or renamed; auto-rehomed by reconciler. | **Use updated path** reported in result. |
+| `[REMOVED]` | Node deleted on disk; scheduled for purge. | **Do NOT use.** Symbol no longer exists. |
+| `[NOPATH]` | Virtual or inline node without a physical file backing. | **Context-only.** Verify origin. |
 
-## 2. AST Call Graph & Dependency Exploration
-Trace cross-file call graphs and references before modifying functions:
-```bash
-sot explore "<symbol_or_function_name>" --depth 2
-```
-Or use the MCP tool `sot_explore(target="...")`.
-
-## 3. Drift Audit & Self-Healing
-```bash
-sot verify --deep        # Check for phantom anchors and dead paths
-sot reconcile            # Re-synchronize SQLite DB with disk state
-```
-
-## 4. Knowledge Anchoring
-Record non-obvious architecture decisions and tricky bug fixes:
-```bash
-sot insert --title "<topic>" --body "<details>" --keywords "k1,k2"
-```
+## Quick CLI & MCP Tool Reference
+| Category | CLI Command | MCP Tool |
+| :--- | :--- | :--- |
+| **Search Codebase** | `sot search "<query>" [-n 5] [--hybrid]` | `sot_search` |
+| **Repository Map** | `sot map [--focus <areas>] [--tokens 1024]` | `sot_map` |
+| **Trace Call Graph** | `sot explore "<symbol>" [--depth 2]` | `sot_explore` |
+| **Inspect Usages** | `sot usages "<symbol>"` | `sot_usages` |
+| **Implementations** | `sot implementations "<interface>"` | `sot_implementations` |
+| **Rename Impact** | `sot rename "<symbol>" --to <new_name>` | `sot_rename` |
+| **Pack Subgraph** | `sot pack "<symbol>" [--depth 2] [-o <file>]`| `sot_pack` |
+| **Synchronize DB** | `sot reconcile [--workers 4]` | `sot_reconcile` |
+| **Audit Drift** | `sot verify [--deep]` | `sot_verify` |
+| **Database Doctor** | `sot doctor` | `sot_doctor` |
+| **Clean Stale Data**| `sot clean [--purge-missing]` | `sot_clean` |
+| **Vacuum Database** | `sot vacuum` | `sot_vacuum` |
+| **Store Note** | `sot insert --title "..." --body "..."` | `sot_insert` |
+| **Cluster Graph** | `sot cluster [--scope <path>]` | `sot_cluster` |
+| **Architecture Report** | `sot report [-o report.md]` | `sot_report` |
+| **Interactive Viz** | `sot viz [-o graph.html]` | `sot_viz` |
+| **Export Graph** | `sot export -f <graphrag/obsidian/scip>` | `sot_export` |
+| **Fact Bundler** | `sot bundle [-o .sot/bundle/]` | `sot_bundle` |
+| **Embed Index** | `sot embed [--limit 5000]` | CLI |
+| **File Watcher** | `sot watch [--debounce-ms 200]` | CLI (Daemon) |
+| **Harness Setup** | `sot setup [--harness <name>]` | CLI |
 """
 
 GEMINI_SECTION = """
 ## SOT-Graph Knowledge Reuse Protocol (SSOT)
-- **Zero Hallucinated Anchors**: The filesystem is the single source of truth. Always ground symbol existence using `sot search` or `sot_search`.
-- **Pre-Implementation Verification**: Before writing new helper utilities, search if a verified implementation exists (`[STRONG]` verdict).
-- **Architectural Blast Radius**: Before changing core functions/classes, run `sot explore "<symbol>"` or `sot_explore` to verify all incoming references.
-- **Drift Synchronization**: After refactoring, renaming, or deleting files, run `sot reconcile` to purge dead paths.
+
+### 1. Filesystem as Single Source of Truth (SSOT)
+- The physical filesystem is the absolute ground truth. The SOT knowledge graph (`.sot/sot.db`) is an authoritative projection of reality.
+- Never assume a file path exists based on historical context without verification.
+
+### 2. Knowledge Reuse Protocol (Mandatory Before Implementation)
+Before writing any new utility, helper function, or class:
+1. Run `sot search "<keyword>"` or use the `sot_search` MCP tool.
+2. Check Trust Verdicts:
+   - `[STRONG]`: Code physically exists and is verified on disk.
+   - `[WEAK]`: Semantic match only; inspect the file.
+   - `[REBUILT]`: File was moved; use the updated path.
+   - `[REMOVED]`: Node deleted on disk; do NOT reference.
+   - `[NOPATH]`: Virtual/inline node; verify origin.
+
+### 3. Dependency Impact & Safe Refactoring Protocol
+Before modifying, refactoring, or renaming core functions/classes:
+1. Run `sot explore "<symbol>"` or `sot_explore` to inspect Outward Calls and Incoming References.
+2. Run `sot usages "<symbol>"` or `sot_usages` to locate all calling sites.
+3. For interfaces or abstract classes, run `sot implementations "<symbol>"` or `sot_implementations`.
+4. For multi-file symbol renames, run `sot rename "<symbol>" --to "<new_name>"` to review staged changes.
+
+### 4. Context Isolation & Subgraph Packaging Protocol
+When delegating code context to subagents or prompt registers:
+1. Run `sot pack "<symbol>" --depth 2 -o .sot/bundle/context.yaml` to extract a token-efficient k-hop subgraph.
+2. Feed the compact YAML ContextBundle instead of full raw files to save 60-70% tokens.
+
+### 5. Self-Healing & Drift Reconciliation
+- If you create, move, or delete files, run `sot reconcile` or `sot_reconcile`.
+- Run `sot verify --deep` or `sot_verify` to audit phantom anchors and dead paths.
+- After completing tricky bugs or complex architectural designs, record knowledge:
+  `sot insert --title "..." --body "..." --keywords "..."`.
+
+### 6. Architecture Analysis & Fact Bundle Protocol
+When requested to review or synthesize architecture documentation:
+1. Run `sot bundle` (or tool `sot_bundle`) to generate 5 high-density fact files in `.sot/bundle/`.
+2. Ingest the 5 fact files (`01_module_inventory.md`, `02_routing_endpoints.md`, `03_workflows_states.md`, `04_dependencies_violations.md`, `05_system_metrics.json`) along with `src/sot_graph/templates/ARCHITECTURE_TEMPLATE.md`.
+3. Output the report with 100% grounded facts, valid diagrams, and prioritized recommendations.
 """
 
 

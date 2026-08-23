@@ -5,7 +5,7 @@ description: Trace cross-file dependencies and blast radius of a symbol
 Run the SOT-Graph AST explorer for the target symbol:
 
 ```bash
-./bin/sot explore "$ARGUMENTS"
+sot explore "$ARGUMENTS"
 ```
 
 - Add `--depth <n>` to widen the graph walk (default 2).
