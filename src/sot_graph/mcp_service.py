@@ -11,13 +11,13 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, Set, Tuple, cast
 from urllib.parse import quote
-
 from sot_graph.db import Database
 from sot_graph.verifier import TrustVerifier, tokenize
 
@@ -179,11 +179,26 @@ class McpService:
             raise McpServiceError("invalid_argument", "threshold must be between 0 and 1") from exc
         if not 0 <= threshold <= 1:
             raise McpServiceError("invalid_argument", "threshold must be between 0 and 1")
-        clean = "".join(c if c.isalnum() or c.isspace() else " " for c in query).strip()
-        tokens = [f'"{t}"*' for t in clean.split() if len(t) >= 2] or [f'"{t}"' for t in clean.split()]
+        raw_tokens = [t.strip("\"'") for t in query.split() if t.strip("\"'")]
+        tokens: Set[str] = set()
+        tokens_l: List[str] = []
+        for raw in raw_tokens:
+            cleaned = re.sub(r'[\*\^\"(){}:]', '', raw)
+            if not cleaned:
+                continue
+            if len(cleaned) >= 2:
+                tokens.add(f'"{cleaned}"*')
+            for part in re.split(r'[_\.\-:\$@\s]+', cleaned):
+                if len(part) >= 2:
+                    tokens.add(f'"{part}"*')
+                    tokens_l.append(part.lower())
+                part_strip = part.strip('_')
+                if len(part_strip) >= 2:
+                    tokens.add(f'"{part_strip}"*')
+                    tokens_l.append(part_strip.lower())
         if not tokens:
             return {"query": query, "results": [], "returned": 0, "stale": 0}
-        expr = " OR ".join(tokens)
+        expr = " OR ".join(sorted(tokens))
 
         def op(conn: sqlite3.Connection) -> Dict[str, Any]:
             sql = """SELECT k.id,k.path,k.kind,k.symbol,k.label,k.body,k.keywords,k.line_start,
@@ -197,10 +212,6 @@ class McpService:
             sql += " ORDER BY rank_score ASC LIMIT ?"
             params.append(limit * 3)
             rows = conn.execute(sql, params).fetchall()
-            # Same symbol-first bucketing as Database.search_fts: file-node
-            # previews must not out-rank the symbols they define.
-            tokens_l = [t.lower() for t in clean.split()]
-
             def _bucket(row: Any):
                 # bm25 is negative-better; keep the raw value for ordering.
                 try:

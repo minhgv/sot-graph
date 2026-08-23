@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sqlite3
 import stat
@@ -368,7 +369,9 @@ class Database:
                     node_rows.append((
                         n["id"], path, n["kind"], n.get("symbol"),
                         n.get("fqn"), n.get("signature"),
-                        n["label"], n["body"], " ".join(kw) if kw else "",
+                        n.get("label") or n.get("id") or "",
+                        n.get("body") or "",
+                        " ".join(kw) if kw else "",
                         n.get("line_start"), n.get("line_end"),
                         n.get("col_start"), n.get("col_end"), now))
                 self.conn.executemany(
@@ -740,26 +743,34 @@ class Database:
                             int((time.monotonic() - started) * 1000), bool(optimize), False)
 
     def search_fts(self, query: str, limit: int = 10, scope: Optional[str] = None) -> List[Dict[str, Any]]:
-        clean_q = "".join(c if c.isalnum() or c.isspace() else " " for c in query).strip()
-        if not clean_q or limit <= 0:
+        raw_tokens = [t.strip("\"'") for t in query.split() if t.strip("\"'")]
+        tokens: Set[str] = set()
+        tokens_l: List[str] = []
+        for raw in raw_tokens:
+            cleaned = re.sub(r'[\*\^\"(){}:]', '', raw)
+            if not cleaned:
+                continue
+            if len(cleaned) >= 2:
+                tokens.add(f'"{cleaned}"*')
+            for part in re.split(r'[_\.\-:\$@\s]+', cleaned):
+                if len(part) >= 2:
+                    tokens.add(f'"{part}"*')
+                    tokens_l.append(part.lower())
+                part_strip = part.strip('_')
+                if len(part_strip) >= 2:
+                    tokens.add(f'"{part_strip}"*')
+                    tokens_l.append(part_strip.lower())
+        if not tokens or limit <= 0:
             return []
-        tokens = [f'"{t}"*' for t in clean_q.split() if len(t) >= 2] or [f'"{t}"' for t in clean_q.split()]
         sql = "SELECT k.id,k.path,k.kind,k.symbol,k.fqn,k.label,k.body,k.keywords,k.line_start,bm25(graph_fts) " \
               "FROM graph_fts f JOIN graph_nodes k ON f.rowid=k.rowid WHERE graph_fts MATCH ?"
-        params: List[Any] = [" OR ".join(tokens)]
+        params: List[Any] = [" OR ".join(sorted(tokens))]
         if scope:
             sql += " AND (k.path LIKE ? OR k.body LIKE ?)"
             params.extend([f"%{scope}%", f"%{scope}%"])
         sql += " ORDER BY bm25(graph_fts) ASC LIMIT ?"
         params.append(limit * 3)
         rows = self.conn.execute(sql, params).fetchall()
-
-        # File nodes now carry content previews and can out-score the very
-        # symbols they define. Prefer nodes whose symbol/label matches a
-        # query token; everything else (file bodies, doc notes) keeps bm25
-        # order within its bucket.
-        tokens_l = [t.lower() for t in clean_q.split()]
-
         def _rank(r: Any) -> Tuple[int, float]:
             # bm25 is negative-better; keep the raw value for ordering.
             score = r[9]

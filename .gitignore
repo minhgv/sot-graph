@@ -38,3 +38,4 @@ sot_obsidian_vault/
 
 # macOS metadata
 .DS_Store
+.zcode/

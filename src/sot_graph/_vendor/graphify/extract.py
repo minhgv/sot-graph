@@ -360,17 +360,17 @@ def _extract_regex_patterns(path: Path, patterns: List[Dict[str, Any]]) -> Dict[
 
 
 def extract_js(path: Path) -> Dict[str, Any]:
-    """JavaScript / TypeScript extractor."""
+    """JavaScript / TypeScript extractor supporting ES6, TypeScript types, enums, interfaces, and arrow functions."""
     patterns = [
-        {"regex": r"class\s+([a-zA-Z0-9_$]+)(?:\s+extends\s+([a-zA-Z0-9_$]+))?", "kind": "class", "prefix": "class"},
-        {"regex": r"interface\s+([a-zA-Z0-9_$]+)", "kind": "interface", "prefix": "interface"},
-        {"regex": r"type\s+([a-zA-Z0-9_$]+)\s*=", "kind": "type", "prefix": "type"},
-        {"regex": r"(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z0-9_$]+)\s*\(", "kind": "function", "prefix": "function"},
-        {"regex": r"(?:export\s+)?(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[a-zA-Z0-9_$]+)\s*=>", "kind": "function", "prefix": "arrow_func"},
+        {"regex": r"(?:export\s+)?(?:default\s+)?class\s+([a-zA-Z0-9_$]+)(?:\s+extends\s+([a-zA-Z0-9_$]+))?", "kind": "class", "prefix": "class"},
+        {"regex": r"(?:export\s+)?interface\s+([a-zA-Z0-9_$]+)", "kind": "interface", "prefix": "interface"},
+        {"regex": r"(?:export\s+)?type\s+([a-zA-Z0-9_$]+)\s*=", "kind": "type", "prefix": "type"},
+        {"regex": r"(?:export\s+)?enum\s+([a-zA-Z0-9_$]+)", "kind": "enum", "prefix": "enum"},
+        {"regex": r"(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([a-zA-Z0-9_$]+)\s*(?:<[^>]*>)?\s*\(", "kind": "function", "prefix": "function"},
+        {"regex": r"(?:export\s+)?(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?(?:<[^>]*>)?\s*(?:\([^)]*\)|[a-zA-Z0-9_$]+)(?:\s*:\s*[^=>]+)?\s*=>", "kind": "function", "prefix": "arrow_func"},
         {"regex": r"import\s+.*?from\s+['\"]([^'\"]+)['\"]", "kind": "import", "prefix": "import"},
     ]
     return _extract_regex_patterns(path, patterns)
-
 
 def _ts_or_regex(
     path: Path,
@@ -439,6 +439,7 @@ JAVA_TYPE_HEADER_PAT = re.compile(
     r"(?:\s*\([^)]*\))?"                     # record component list
     r"(?:\s+extends\s+([A-Za-z_][A-Za-z0-9_.<>,\s]*?))?"
     r"(?:\s+implements\s+([A-Za-z_][A-Za-z0-9_.<>,\s]*?))?"
+    r"(?:\s+permits\s+[A-Za-z_][A-Za-z0-9_.<>,\s]*?)?"
     r"\s*\{"
 )
 
@@ -500,6 +501,8 @@ def extract_java(path: Path) -> Dict[str, Any]:
     patterns = [
         {"regex": r"(?:public|protected|private)?\s*class\s+([a-zA-Z0-9_]+)", "kind": "class", "prefix": "class"},
         {"regex": r"(?:public|protected|private)?\s*interface\s+([a-zA-Z0-9_]+)", "kind": "interface", "prefix": "interface"},
+        {"regex": r"(?:public|protected|private)?\s*enum\s+([a-zA-Z0-9_]+)", "kind": "enum", "prefix": "enum"},
+        {"regex": r"(?:public|protected|private)?\s*record\s+([a-zA-Z0-9_]+)", "kind": "record", "prefix": "record"},
         {"regex": r"(?:public|protected|private|static|\s)+[a-zA-Z0-9_<>\[\]]+\s+([a-zA-Z0-9_]+)\s*\([^)]*\)\s*\{?", "kind": "function", "prefix": "method"},
     ]
     return _ts_or_regex(path, "java", patterns, regex_postprocess=_java_inheritance_edges)

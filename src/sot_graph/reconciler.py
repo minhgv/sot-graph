@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import os
 import signal
+import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from dataclasses import asdict, dataclass
@@ -514,8 +515,14 @@ class Reconciler:
         pool_broken = False
         executor: Optional[ProcessPoolExecutor] = None
 
-        old_sigint = signal.getsignal(signal.SIGINT)
-        signal.signal(signal.SIGINT, signal.default_int_handler)
+        old_sigint = None
+        is_main_thread = (threading.current_thread() is threading.main_thread())
+        if is_main_thread:
+            try:
+                old_sigint = signal.getsignal(signal.SIGINT)
+                signal.signal(signal.SIGINT, signal.default_int_handler)
+            except (ValueError, AttributeError):
+                is_main_thread = False
         try:
             windows = [
                 jobs[index:index + batch_size]
@@ -591,7 +598,11 @@ class Reconciler:
                 executor.shutdown(wait=False, cancel_futures=True)
             raise
         finally:
-            signal.signal(signal.SIGINT, old_sigint)
+            if is_main_thread and old_sigint is not None:
+                try:
+                    signal.signal(signal.SIGINT, old_sigint)
+                except (ValueError, AttributeError):
+                    pass
             if executor is not None and not interrupted:
                 executor.shutdown(wait=not pool_broken, cancel_futures=pool_broken)
 

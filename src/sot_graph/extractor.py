@@ -88,6 +88,37 @@ def _preview_budget() -> int:
         return 4096
     return min(1_048_576, max(0, raw))
 
+def _decompose_keywords(*sources: Optional[str]) -> List[str]:
+    """Extract full identifiers, sub-tokens, snake_case parts, camelCase parts,
+    and adjacent n-grams so FTS5 matches both full and partial queries."""
+    seen: Set[str] = set()
+    out: List[str] = []
+
+    def _add(tok: str) -> None:
+        cleaned = tok.strip("._-/$: ")
+        if len(cleaned) >= 2 and cleaned not in seen:
+            seen.add(cleaned)
+            out.append(cleaned)
+
+    for src in sources:
+        if not src:
+            continue
+        _add(src)
+        parts = [p for p in re.split(r"[\s/\\.:\-]+", src) if p]
+        for p in parts:
+            _add(p)
+            sub_parts = [sp for sp in p.split("_") if sp]
+            if len(sub_parts) > 1:
+                for sp in sub_parts:
+                    _add(sp)
+                for i in range(len(sub_parts) - 1):
+                    _add(f"{sub_parts[i]}_{sub_parts[i+1]}")
+            camel_parts = re.findall(r"[A-Z]?[a-z0-9]+|[A-Z]+(?=[A-Z][a-z0-9]|\b)", p)
+            if len(camel_parts) > 1:
+                for cp in camel_parts:
+                    _add(cp)
+    return out
+
 
 def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
     """
@@ -97,7 +128,6 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
     p = Path(path)
     ext = p.suffix.lower()
     fn_name = EXT_DISPATCH.get(ext)
-
     rel_path = os.path.relpath(path, root_dir)
     try:
         content_bytes = p.read_bytes()
@@ -122,7 +152,7 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
         "fqn": module,
         "label": f"File: {rel_path}",
         "body": f"File {rel_path} ({lang}, {file_size} bytes)\nPreview:\n{preview}",
-        "keywords": [p.name, lang, "file"],
+        "keywords": _decompose_keywords(p.name, p.stem, lang, "file", rel_path),
         "line_start": 1,
     }
 
@@ -193,7 +223,7 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
             "signature": rn.get("signature"),
             "label": f"{label} — {rel_path}:{line_no or 1}",
             "body": body,
-            "keywords": [raw_id, kind, lang, p.name],
+            "keywords": _decompose_keywords(raw_id, rn.get("label"), kind, lang, p.name, p.stem),
             "line_start": line_no,
             "line_end": rn.get("line_end"),
             "col_start": rn.get("col_start"),
