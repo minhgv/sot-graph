@@ -39,14 +39,17 @@ class ResolutionStatus(str, Enum):
     INFERRED = "INFERRED"
     AMBIGUOUS = "AMBIGUOUS"
     UNRESOLVED = "UNRESOLVED"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
 
 
 class CompletenessStatus(str, Enum):
     """Discovery completeness of usages, implementations, or graph neighborhood."""
     COMPLETE = "COMPLETE"
+    COMPLETE_WITHIN_INDEX_CAPABILITY = "COMPLETE_WITHIN_INDEX_CAPABILITY"
+    KNOWN_GAPS = "KNOWN_GAPS"
     PARTIAL = "PARTIAL"
     UNKNOWN = "UNKNOWN"
-
+    NOT_APPLICABLE = "NOT_APPLICABLE"
 
 @dataclass(frozen=True)
 class TrustEvidence:
@@ -78,7 +81,7 @@ class TrustEvidence:
             return "WEAK"
         if self.freshness == FreshnessStatus.FRESH:
             if self.relevance in (RelevanceType.EXACT_SYMBOL, RelevanceType.EXACT_SPAN):
-                return "STRONG"
+                return "STRONG" if self.confidence >= 0.7 else "WEAK"
             if self.confidence >= 0.5:
                 return "STRONG"
             return "WEAK"

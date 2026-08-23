@@ -276,14 +276,26 @@ class Database:
         self.close()
 
     def get_file_journal(self, path: str) -> Optional[Dict[str, Any]]:
+        norm_path = path.replace(os.sep, "/")
+        try:
+            real_path = os.path.realpath(path).replace(os.sep, "/")
+        except Exception:
+            real_path = norm_path
         row = self.conn.execute(
             "SELECT sha256, size, mtime_ms, generation, reconciled_at "
-            "FROM file_journal WHERE path = ?", (path,)
+            "FROM file_journal WHERE path = ? OR path = ? OR path = ? "
+            "OR path LIKE ? OR path LIKE ? LIMIT 1",
+            (path, norm_path, real_path, f"%/{norm_path.lstrip('/')}", f"%/{path.lstrip('/')}"),
         ).fetchone()
         if row is None:
             return None
-        return {"sha256": row[0], "size": row[1], "mtime_ms": row[2],
-                "generation": row[3], "reconciled_at": row[4]}
+        return {
+            "sha256": row[0],
+            "size": row[1],
+            "mtime_ms": row[2],
+            "generation": row[3],
+            "reconciled_at": row[4],
+        }
 
     def get_all_file_journals(self) -> Dict[str, Dict[str, Any]]:
         rows = self.conn.execute(
@@ -302,6 +314,44 @@ class Database:
 
     def all_journal_paths(self) -> List[str]:
         return [r[0] for r in self.conn.execute("SELECT path FROM file_journal ORDER BY path")]
+
+    def get_node_by_symbol(self, symbol: str) -> Optional[Dict[str, Any]]:
+        row = self.conn.execute(
+            "SELECT id, path, kind, symbol, fqn, line_start, line_end, updated_at "
+            "FROM graph_nodes WHERE symbol = ? OR fqn = ? OR fqn LIKE ? OR symbol LIKE ? LIMIT 1",
+            (symbol, symbol, f"%.{symbol}", f"%.{symbol}"),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "path": row[1],
+            "kind": row[2],
+            "symbol": row[3],
+            "fqn": row[4],
+            "line_start": row[5],
+            "line_end": row[6],
+            "updated_at": row[7],
+        }
+
+    def get_node_by_id(self, node_id: str) -> Optional[Dict[str, Any]]:
+        row = self.conn.execute(
+            "SELECT id, path, kind, symbol, fqn, line_start, line_end, updated_at "
+            "FROM graph_nodes WHERE id = ?",
+            (node_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "path": row[1],
+            "kind": row[2],
+            "symbol": row[3],
+            "fqn": row[4],
+            "line_start": row[5],
+            "line_end": row[6],
+            "updated_at": row[7],
+        }
 
     def delete_path(self, path: str) -> None:
         """Remove a file's rows.
@@ -700,10 +750,10 @@ class Database:
                     ambiguous += 1
                     continue
 
-            # Priority 4: Unique project symbol
+            # Priority 4: Unique project symbol (cross-file only; same-file shadowed calls stay unresolved)
             if chosen is None and len(candidates) == 1:
-                chosen = candidates[0]
-
+                if candidates[0][1] != path:
+                    chosen = candidates[0]
             # Priority 5: Project import to file node
             if chosen is None and relation == "imports" and imp:
                 file_matches = [
@@ -1263,7 +1313,8 @@ class Database:
         base_stats["fts_count"] = fts_count
 
         return {
-            "ok": len(errors) == 0 and quick_check_ok,
+            "ok": len(errors) == 0,
+            "is_healthy": len(errors) == 0,
             "quick_check": "ok" if quick_check_ok else "failed",
             "schema_version": user_ver,
             "expected_schema_version": SCHEMA_VERSION,

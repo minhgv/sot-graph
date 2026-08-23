@@ -47,7 +47,7 @@ class RehomeTests(unittest.TestCase):
         (self.root / "pkg_a" / "hooks.py").unlink()
         cand = self._candidate_for(db, "setup_hook")
         verdict, _, path = TrustVerifier.verify_hit(
-            db, cand, tokenize("setup_hook"), str(self.root))
+            db, cand, tokenize("setup_hook"), str(self.root), auto_heal=True)
 
         self.assertEqual(verdict, "REMOVED")
         self.assertFalse(Path(path).exists() or path.endswith("pkg_b"))
@@ -73,7 +73,7 @@ class RehomeTests(unittest.TestCase):
         (self.root / "pkg_a" / "service.py").rename(moved)
         cand = self._candidate_for(db, "Gateway")
         verdict, _, path = TrustVerifier.verify_hit(
-            db, cand, tokenize("Gateway"), str(self.root))
+            db, cand, tokenize("Gateway"), str(self.root), auto_heal=True)
 
         self.assertEqual(verdict, "REBUILT")
         self.assertTrue(str(path).endswith("pkg_c/service.py"), path)
@@ -105,7 +105,7 @@ class RehomeTests(unittest.TestCase):
         (self.root / "pkg_a" / "notes.py").rename(moved)
         cand = db.search_fts("notes.py", limit=20)[0]
         verdict, _, path = TrustVerifier.verify_hit(
-            db, cand, tokenize("notes"), str(self.root))
+            db, cand, tokenize("notes"), str(self.root), auto_heal=True)
 
         self.assertEqual(verdict, "REBUILT")
         self.assertTrue(str(path).endswith("pkg_b/notes.py"), path)

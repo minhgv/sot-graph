@@ -324,7 +324,9 @@ def build_bundle(
         bundle["trusted_instructions"] = trusted
 
     # Hard token budget enforcement if max_tokens is provided
-    if max_tokens is not None and max_tokens > 0:
+    if max_tokens is not None:
+        if max_tokens < 32:
+            raise PackError("BUDGET_TOO_SMALL", f"max_tokens ({max_tokens}) is too small to fit target block metadata (minimum 32 tokens required)")
         rendered = render_yaml(bundle)
         tok_count = estimate_tokens(rendered)
         while tok_count > max_tokens and stubs:

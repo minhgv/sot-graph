@@ -72,7 +72,7 @@ class TestSotGraphReconciler(unittest.TestCase):
 
         # Verify should detect missing, auto-purge, and return REMOVED
         verdict, cov, real_path = TrustVerifier.verify_hit(
-            self.db, cand, tokenize("temporary_cleanup"), self.test_dir
+            self.db, cand, tokenize("temporary_cleanup"), self.test_dir, auto_heal=True
         )
         self.assertEqual(verdict, "REMOVED")
 

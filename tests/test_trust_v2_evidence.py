@@ -19,6 +19,7 @@ from sot_graph.evidence import (
     ResolutionStatus,
     TrustEvidence,
 )
+from sot_graph.reconciler import Reconciler
 from sot_graph.verifier import TrustVerifier, VerificationResult, tokenize
 
 
@@ -80,6 +81,8 @@ def test_verifier_exact_span_and_symbol(temp_workspace):
     file_path = os.path.join(tmpdir, "sample.py")
     with open(file_path, "w", encoding="utf-8") as f:
         f.write("# sample file\n\ndef calculate_metric(a: int, b: int) -> int:\n    return a + b\n")
+    rec = Reconciler(db, tmpdir)
+    rec.reconcile(workers=1)
 
     cand = {
         "id": f"{file_path}#fn:calculate_metric",
@@ -102,7 +105,7 @@ def test_verifier_exact_span_and_symbol(temp_workspace):
     assert ev.freshness == FreshnessStatus.FRESH
     assert ev.relevance == RelevanceType.EXACT_SPAN
     assert ev.resolution == ResolutionStatus.EXACT
-    assert ev.completeness == CompletenessStatus.COMPLETE
+    assert ev.completeness in (CompletenessStatus.COMPLETE, CompletenessStatus.COMPLETE_WITHIN_INDEX_CAPABILITY)
     assert ev.confidence >= 0.95
     assert ev.file_hash is not None
 

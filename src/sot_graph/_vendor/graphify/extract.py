@@ -56,19 +56,32 @@ def _extract_type_name(node: Optional[ast.AST]) -> Optional[str]:
         return _extract_type_name(node.left) or _extract_type_name(node.right)
     return None
 
-def _collect_bound_names(func: ast.AST) -> set:
-    """Names bound anywhere inside the function scope (params, assignments,
-    for/with/except/comprehension targets, local imports).
+def _iter_scope_nodes(node: ast.AST):
+    """Yield all AST nodes within the current definition scope without entering nested function/class definitions."""
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        yield child
+        yield from _iter_scope_nodes(child)
 
-    Deliberately an over-approximation: treating a name as shadowed only
-    *keeps* a pending edge, never deletes one.
+
+def _collect_bound_names(func: ast.AST) -> set:
+    """Names bound directly inside this function scope (params, assignments,
+    for/with/except/comprehension targets, local imports).
     """
     bound: set = set()
-    for node in ast.walk(func):
+    if hasattr(func, "args") and func.args:
+        all_args = getattr(func.args, "posonlyargs", []) + func.args.args + getattr(func.args, "kwonlyargs", [])
+        for arg in all_args:
+            bound.add(arg.arg)
+        if func.args.vararg:
+            bound.add(func.args.vararg.arg)
+        if func.args.kwarg:
+            bound.add(func.args.kwarg.arg)
+
+    for node in _iter_scope_nodes(func):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             bound.add(node.id)
-        elif isinstance(node, ast.arg):
-            bound.add(node.arg)
         elif isinstance(node, ast.ExceptHandler) and node.name:
             bound.add(node.name)
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
@@ -103,16 +116,17 @@ def _classify_call(
     """Classify one call site for the binding-aware resolver.
 
     Returns None for self-recursion (already filtered by the caller).
-    Edge fields: call_kind (BARE|ATTRIBUTE|QUALIFIED|METHOD_CALL|DYNAMIC),
+    Edge fields: call_kind (BARE|ATTRIBUTE|QUALIFIED|METHOD_CALL|DYNAMIC|LOCAL_VARIABLE),
     receiver, import_source, builtin (True only for unshadowed bare builtins).
     """
     func = call.func
     if isinstance(func, ast.Name):
         name = func.id
         import_source = import_map.get(name)
+        is_shadowed = bool(name in bound and not import_source)
         builtin = (
             not import_source
-            and name not in bound
+            and not is_shadowed
             and name in BUILTIN_NAMES
         )
         return {
@@ -120,6 +134,7 @@ def _classify_call(
             "receiver": None,
             "import_source": import_source,
             "builtin": builtin,
+            "is_shadowed": is_shadowed,
         }
     if isinstance(func, ast.Attribute):
         receiver = _dotted_expr(func.value)
@@ -149,6 +164,7 @@ def _classify_call(
             "receiver": receiver_type or receiver,
             "import_source": import_source,
             "builtin": False,
+            "is_local_var": False,
         }
     return None
 
@@ -274,7 +290,7 @@ def extract_python(path: Path) -> Dict[str, Any]:
                 "source_location": f"L{node.lineno}",
             })
 
-            # Collect local parameter and variable type annotations
+            # Collect local parameter and variable type annotations within this scope
             local_types: Dict[str, str] = {}
             if hasattr(node, "args") and node.args:
                 all_args = getattr(node.args, "posonlyargs", []) + node.args.args + getattr(node.args, "kwonlyargs", [])
@@ -283,7 +299,7 @@ def extract_python(path: Path) -> Dict[str, Any]:
                     if t_name:
                         local_types[arg.arg] = t_name
 
-            for child in ast.walk(node):
+            for child in _iter_scope_nodes(node):
                 if isinstance(child, ast.AnnAssign):
                     t_name = _extract_type_name(child.annotation)
                     if t_name and isinstance(child.target, ast.Name):
@@ -308,7 +324,7 @@ def extract_python(path: Path) -> Dict[str, Any]:
 
             # Detect call expressions inside function with binding context
             bound = _collect_bound_names(node)
-            for child in ast.walk(node):
+            for child in _iter_scope_nodes(node):
                 if not isinstance(child, ast.Call):
                     continue
                 callee = None

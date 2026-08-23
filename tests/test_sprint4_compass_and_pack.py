@@ -17,7 +17,7 @@ from pathlib import Path
 from sot_graph.cli import cmd_explore
 from sot_graph.db import Database
 from sot_graph.mcp_service import McpService
-from sot_graph.pack import build_bundle
+from sot_graph.pack import PackError, build_bundle
 from sot_graph.reconciler import Reconciler
 from sot_graph.repo_map import build_repo_map
 from sot_graph.tokenizer import (
@@ -179,6 +179,36 @@ class Sprint4CompassAndPackTests(unittest.TestCase):
         self.assertTrue(bundle_tight["limits"]["truncated"])
         # Should be within tight budget + small YAML framing tolerance <= 25 tokens
         self.assertLessEqual(tight_tokens, tight_budget + 25)
+
+    def test_pack_budget_too_small_raises_pack_error(self):
+        """Verify build_bundle raises PackError with code BUDGET_TOO_SMALL when max_tokens < 32."""
+        with self.assertRaises(PackError) as ctx:
+            build_bundle(self.db, self.test_dir, "MainService.process", max_tokens=15)
+        self.assertEqual(ctx.exception.code, "BUDGET_TOO_SMALL")
+
+    def test_pack_untrusted_repo_content_policy(self):
+        """Verify pack context bundle marks repo-derived source content as untrusted."""
+        bundle = build_bundle(self.db, self.test_dir, "MainService.process")
+        self.assertTrue(bundle.get("content_is_untrusted"))
+
+    def test_atomic_rehome_content_hash(self):
+        """Verify content-hash atomic rehome when a file is renamed."""
+        old_path = os.path.join(self.test_dir, "pkg", "leaf.py")
+        new_path = os.path.join(self.test_dir, "pkg", "leaf_renamed.py")
+        os.rename(old_path, new_path)
+        
+        self.reconciler.reconcile(workers=1)
+        
+        # Verify node paths moved to new_path
+        nodes = self.db.conn.execute("SELECT path FROM graph_nodes WHERE path LIKE '%leaf_renamed.py'").fetchall()
+        self.assertGreaterEqual(len(nodes), 1)
+        old_nodes = self.db.conn.execute("SELECT path FROM graph_nodes WHERE path LIKE '%pkg/leaf.py'").fetchall()
+        self.assertEqual(len(old_nodes), 0)
+        # Verify DB integrity check passes with 0 orphan edges
+        integrity = self.db.integrity_check()
+        self.assertTrue(integrity["is_healthy"])
+        self.assertEqual(integrity["quick_check"], "ok")
+
     def test_repo_map_language_breakdown_and_token_fit(self):
         """Verify repo map calculates language breakdown and fits token budget."""
         result = build_repo_map(self.db.conn, max_tokens=500, root=self.test_dir)

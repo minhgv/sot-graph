@@ -7,7 +7,7 @@ legacy verdicts ([STRONG], [WEAK], [STALE], [REBUILT], [REMOVED]).
 """
 
 from __future__ import annotations
-
+import ast
 import hashlib
 import os
 import re
@@ -100,6 +100,86 @@ class TrustVerifier:
         return cands[0] if len(cands) == 1 else None
 
     @staticmethod
+    def _verify_ast_declaration(
+        file_path: str,
+        cand_symbol: Optional[str],
+        cand_line: Optional[int],
+        text_content: str,
+        cov: Optional[float],
+        threshold: float,
+    ) -> Tuple[RelevanceType, str]:
+        """
+        Verifies whether cand_symbol genuinely exists as an AST declaration at cand_line,
+        distinguishing true code constructs from comments or stray string literals.
+        """
+        if not cand_symbol or not isinstance(cand_symbol, str):
+            if cov is not None and cov >= threshold:
+                return RelevanceType.FILE_TOKEN, "lexical:file_token"
+            return RelevanceType.UNKNOWN, "lexical:unknown"
+
+        symbol_needle = cand_symbol.rsplit(".", 1)[-1]
+        ext = os.path.splitext(file_path)[1].lower()
+
+        # Python AST analysis
+        if ext == ".py":
+            try:
+                tree = ast.parse(text_content, filename=file_path)
+                exact_span_found = False
+                exact_symbol_found = False
+                for node in ast.walk(tree):
+                    name = None
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                        name = node.name
+                    elif isinstance(node, ast.Assign):
+                        for target in node.targets:
+                            if isinstance(target, ast.Name):
+                                name = target.id
+                                break
+                    elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                        name = node.target.id
+
+                    if name == symbol_needle:
+                        exact_symbol_found = True
+                        node_start = getattr(node, "lineno", 0)
+                        node_end = getattr(node, "end_lineno", node_start)
+                        if cand_line and cand_line > 0:
+                            if (node_start - 2) <= cand_line <= (node_end + 2):
+                                exact_span_found = True
+                                break
+
+                if exact_span_found:
+                    return RelevanceType.EXACT_SPAN, "ast_visitor:exact_span"
+                if exact_symbol_found:
+                    return RelevanceType.EXACT_SYMBOL, "ast_visitor:exact_symbol"
+                # If not found in AST, check if it's merely a comment or string
+                if symbol_needle in text_content:
+                    return RelevanceType.FILE_TOKEN, "lexical:comment_or_literal"
+                return RelevanceType.NAME_ONLY, "ast_visitor:not_found"
+            except SyntaxError:
+                pass  # Fall through to regex/lexical
+
+        # Generic regex declaration check for other languages / fallback
+        decl_pat = re.compile(
+            rf"(?:function|class|def|interface|type|const|let|var|func|fn|struct|enum|trait)\s+{re.escape(symbol_needle)}\b",
+            re.MULTILINE,
+        )
+        if decl_pat.search(text_content):
+            if cand_line and cand_line > 0:
+                lines = text_content.splitlines()
+                start_idx = max(0, cand_line - 5)
+                end_idx = min(len(lines), cand_line + 5)
+                span_text = "\n".join(lines[start_idx:end_idx])
+                if decl_pat.search(span_text) or (symbol_needle in span_text and not span_text.strip().startswith(("#", "//", "/*", "*"))):
+                    return RelevanceType.EXACT_SPAN, "regex_decl:exact_span"
+            return RelevanceType.EXACT_SYMBOL, "regex_decl:exact_symbol"
+
+        if symbol_needle in text_content:
+            return RelevanceType.FILE_TOKEN, "lexical:file_token"
+        if cov and cov >= threshold:
+            return RelevanceType.FILE_TOKEN, "lexical:file_token"
+        return RelevanceType.NAME_ONLY, "lexical:name_only"
+
+    @staticmethod
     def _rehomable(new_path: str, candidate: Dict[str, Any]) -> bool:
         """Guard against basename collisions re-homing nodes onto the wrong file."""
         symbol = candidate.get("symbol")
@@ -114,7 +194,6 @@ class TrustVerifier:
         except OSError:
             return False
         return re.search(rf"\b{re.escape(needle)}\b", content) is not None
-
     @classmethod
     def verify_evidence(
         cls,
@@ -222,61 +301,15 @@ class TrustVerifier:
             else:
                 cov = None
 
-            # Relevance detection
-            cand_symbol = candidate.get("symbol")
-            cand_line = candidate.get("line_start") or candidate.get("line")
-            relevance = RelevanceType.UNKNOWN
-
-            if cand_symbol and isinstance(cand_symbol, str):
-                symbol_needle = cand_symbol.rsplit(".", 1)[-1]
-                if cand_line and isinstance(cand_line, int) and cand_line > 0:
-                    lines = text_content.splitlines()
-                    # Check window of +/- 5 lines around recorded line
-                    start_idx = max(0, cand_line - 5)
-                    end_idx = min(len(lines), cand_line + 5)
-                    span_text = "\n".join(lines[start_idx:end_idx])
-                    if symbol_needle in span_text:
-                        relevance = RelevanceType.EXACT_SPAN
-                    elif symbol_needle in text_content:
-                        relevance = RelevanceType.EXACT_SYMBOL
-                    elif cov and cov >= threshold:
-                        relevance = RelevanceType.FILE_TOKEN
-                    else:
-                        relevance = RelevanceType.NAME_ONLY
-                else:
-                    if symbol_needle in text_content:
-                        relevance = RelevanceType.EXACT_SYMBOL
-                    elif cov and cov >= threshold:
-                        relevance = RelevanceType.FILE_TOKEN
-                    else:
-                        relevance = RelevanceType.NAME_ONLY
-            elif cov is not None and cov >= threshold:
-                relevance = RelevanceType.FILE_TOKEN
-            elif cov is not None and cov > 0:
-                relevance = RelevanceType.NAME_ONLY
-            else:
-                relevance = RelevanceType.EXACT_SYMBOL if candidate.get("kind") == "file" else RelevanceType.UNKNOWN
-
-            # Confidence calculation
-            if relevance == RelevanceType.EXACT_SPAN:
-                confidence = max(0.95, cov or 0.95)
-            elif relevance == RelevanceType.EXACT_SYMBOL:
-                confidence = max(0.85, cov or 0.85)
-            elif relevance == RelevanceType.FILE_TOKEN:
-                confidence = cov if cov is not None else 0.7
-            elif candidate.get("kind") == "file":
-                confidence = 0.9 if cov is None or cov >= threshold else max(0.6, cov)
-            else:
-                confidence = 0.3
-
-            # Check freshness against file_journal in DB if available
-            freshness = FreshnessStatus.FRESH
+            # Check freshness strictly against file_journal in DB
             rel_path = os.path.relpath(requested, root).replace(os.sep, "/")
+            freshness = FreshnessStatus.FRESH
             is_stale = False
+            journal_sha256 = None
             if db is not None:
                 journal_row = None
                 if hasattr(db, "get_file_journal"):
-                    journal_row = db.get_file_journal(rel_path) or db.get_file_journal(requested)
+                    journal_row = db.get_file_journal(rel_path) or db.get_file_journal(requested) or db.get_file_journal(str(path))
                 elif hasattr(db, "conn"):
                     try:
                         row = db.conn.execute(
@@ -287,11 +320,14 @@ class TrustVerifier:
                             journal_row = {"sha256": row[0], "size": row[1], "mtime_ms": row[2]}
                     except Exception:
                         journal_row = None
-                if journal_row is not None:
+
+                if journal_row is None:
+                    freshness = FreshnessStatus.UNKNOWN
+                else:
+                    journal_sha256 = journal_row.get("sha256")
                     disk_mtime_ms = int(st.st_mtime * 1000)
                     journal_mtime_ms = int(journal_row.get("mtime_ms", 0))
-                    journal_sha256 = journal_row.get("sha256")
-                    if disk_mtime_ms != journal_mtime_ms or (journal_sha256 and file_hash != journal_sha256):
+                    if (journal_sha256 and file_hash != journal_sha256) or (not journal_sha256 and disk_mtime_ms != journal_mtime_ms):
                         is_stale = True
                         if jit_reconcile and not getattr(db, "_read_only", False):
                             try:
@@ -304,22 +340,61 @@ class TrustVerifier:
                                 freshness = FreshnessStatus.STALE
                         else:
                             freshness = FreshnessStatus.STALE
+                    else:
+                        freshness = FreshnessStatus.FRESH
+            else:
+                freshness = FreshnessStatus.UNKNOWN
 
-            # Adjust confidence if stale
-            if is_stale:
-                confidence = min(confidence, 0.4)
+            # Relevance detection via AST declaration verification
+            cand_symbol = candidate.get("symbol")
+            cand_line = candidate.get("line_start") or candidate.get("line")
+            if candidate.get("kind") == "file":
+                relevance = RelevanceType.EXACT_SYMBOL if cov is None or cov >= threshold else RelevanceType.FILE_TOKEN
+                prov = "file_node"
+            else:
+                relevance, prov = cls._verify_ast_declaration(
+                    requested, cand_symbol, cand_line, text_content, cov, threshold
+                )
+
+            # Stale files MUST NOT claim EXACT_SPAN
+            if is_stale or freshness != FreshnessStatus.FRESH:
+                if relevance == RelevanceType.EXACT_SPAN:
+                    relevance = RelevanceType.FILE_TOKEN
+
+            # Confidence calculation
+            if freshness == FreshnessStatus.FRESH:
+                if relevance == RelevanceType.EXACT_SPAN:
+                    confidence = max(0.95, cov or 0.95)
+                elif relevance == RelevanceType.EXACT_SYMBOL:
+                    confidence = max(0.85, cov or 0.85)
+                elif relevance == RelevanceType.FILE_TOKEN:
+                    confidence = min(0.65, cov or 0.6)
+                elif candidate.get("kind") == "file":
+                    confidence = 0.9 if cov is None or cov >= threshold else max(0.6, cov)
+                else:
+                    confidence = 0.25
+            elif freshness == FreshnessStatus.STALE:
+                confidence = min(0.35, (cov or 0.5) * 0.5)
+            else:  # UNKNOWN
+                confidence = min(0.5, cov or 0.4)
 
             return TrustEvidence(
                 freshness=freshness,
                 relevance=relevance,
-                resolution=ResolutionStatus.EXACT,
-                completeness=CompletenessStatus.COMPLETE if not is_stale else CompletenessStatus.PARTIAL,
+                resolution=ResolutionStatus.EXACT if candidate.get("kind") != "file" else ResolutionStatus.NOT_APPLICABLE,
+                completeness=CompletenessStatus.COMPLETE_WITHIN_INDEX_CAPABILITY if not is_stale else CompletenessStatus.PARTIAL,
                 confidence=min(1.0, max(0.0, confidence)),
-                provenance="trust_verifier:v2" if not is_stale else "trust_verifier:jit_stale",
+                provenance=prov,
                 file_path=requested,
                 file_hash=file_hash,
                 coverage=cov,
-                details={"mtime_ms": int(st.st_mtime * 1000), "size": st.st_size, "stale": is_stale},
+                details={
+                    "mtime_ms": int(st.st_mtime * 1000),
+                    "size": st.st_size,
+                    "stale": is_stale,
+                    "indexed_sha": journal_sha256,
+                    "current_sha": file_hash,
+                },
             )
         # 2. File is MISSING on disk
         if not auto_heal or db is None:
@@ -373,7 +448,7 @@ class TrustVerifier:
         query_tokens: Set[str],
         project_root: str,
         threshold: float = 0.5,
-        auto_heal: bool = True,
+        auto_heal: bool = False,
         jit_reconcile: bool = False,
     ) -> VerificationResult:
         """

@@ -273,7 +273,7 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
         line_no = int(re.search(r"L(\d+)", loc).group(1)) if re.search(r"L(\d+)", loc) else None
         receiver = re_edge.get("receiver")
 
-        if dst_raw in symbol_to_node_id:
+        if dst_raw in symbol_to_node_id and not re_edge.get("is_shadowed"):
             # Resolved intra-file edge
             edges.append({
                 "src": src_id,
