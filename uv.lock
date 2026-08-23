@@ -1313,6 +1313,27 @@ version = "0.1.0"
 source = { editable = "." }
 
 [package.optional-dependencies]
+all = [
+    { name = "mcp" },
+    { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "networkx", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "sqlite-vec" },
+    { name = "tree-sitter" },
+    { name = "tree-sitter-c-sharp" },
+    { name = "tree-sitter-go" },
+    { name = "tree-sitter-java" },
+    { name = "tree-sitter-javascript" },
+    { name = "tree-sitter-kotlin" },
+    { name = "tree-sitter-php" },
+    { name = "tree-sitter-python" },
+    { name = "tree-sitter-rust" },
+    { name = "tree-sitter-swift" },
+    { name = "tree-sitter-typescript" },
+    { name = "watchfiles" },
+]
 analytics = [
     { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "networkx", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -1345,24 +1366,40 @@ watch = [
 
 [package.metadata]
 requires-dist = [
+    { name = "mcp", marker = "extra == 'all'", specifier = ">=1.3,<2" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.3,<2" },
+    { name = "networkx", marker = "extra == 'all'", specifier = ">=3.0" },
     { name = "networkx", marker = "extra == 'analytics'", specifier = ">=3.0" },
+    { name = "scipy", marker = "extra == 'all'", specifier = ">=1.10" },
     { name = "scipy", marker = "extra == 'analytics'", specifier = ">=1.10" },
+    { name = "sqlite-vec", marker = "extra == 'all'", specifier = ">=0.1.6" },
     { name = "sqlite-vec", marker = "extra == 'vector'", specifier = ">=0.1.6" },
+    { name = "tree-sitter", marker = "extra == 'all'", specifier = ">=0.25,<0.30" },
     { name = "tree-sitter", marker = "extra == 'tree-sitter'", specifier = ">=0.25,<0.30" },
+    { name = "tree-sitter-c-sharp", marker = "extra == 'all'", specifier = ">=0.23" },
     { name = "tree-sitter-c-sharp", marker = "extra == 'tree-sitter'", specifier = ">=0.23" },
+    { name = "tree-sitter-go", marker = "extra == 'all'", specifier = ">=0.23" },
     { name = "tree-sitter-go", marker = "extra == 'tree-sitter'", specifier = ">=0.23" },
+    { name = "tree-sitter-java", marker = "extra == 'all'", specifier = ">=0.23" },
     { name = "tree-sitter-java", marker = "extra == 'tree-sitter'", specifier = ">=0.23" },
+    { name = "tree-sitter-javascript", marker = "extra == 'all'", specifier = ">=0.23" },
     { name = "tree-sitter-javascript", marker = "extra == 'tree-sitter'", specifier = ">=0.23" },
+    { name = "tree-sitter-kotlin", marker = "extra == 'all'", specifier = ">=0.7" },
     { name = "tree-sitter-kotlin", marker = "extra == 'tree-sitter'", specifier = ">=0.7" },
+    { name = "tree-sitter-php", marker = "extra == 'all'", specifier = ">=0.23" },
     { name = "tree-sitter-php", marker = "extra == 'tree-sitter'", specifier = ">=0.23" },
+    { name = "tree-sitter-python", marker = "extra == 'all'", specifier = ">=0.23" },
     { name = "tree-sitter-python", marker = "extra == 'tree-sitter'", specifier = ">=0.23" },
+    { name = "tree-sitter-rust", marker = "extra == 'all'", specifier = ">=0.23" },
     { name = "tree-sitter-rust", marker = "extra == 'tree-sitter'", specifier = ">=0.23" },
+    { name = "tree-sitter-swift", marker = "extra == 'all'", specifier = ">=0.7" },
     { name = "tree-sitter-swift", marker = "extra == 'tree-sitter'", specifier = ">=0.7" },
+    { name = "tree-sitter-typescript", marker = "extra == 'all'", specifier = ">=0.23" },
     { name = "tree-sitter-typescript", marker = "extra == 'tree-sitter'", specifier = ">=0.23" },
+    { name = "watchfiles", marker = "extra == 'all'", specifier = ">=0.21" },
     { name = "watchfiles", marker = "extra == 'watch'", specifier = ">=0.21" },
 ]
-provides-extras = ["mcp", "analytics", "watch", "vector", "tree-sitter"]
+provides-extras = ["mcp", "analytics", "watch", "vector", "tree-sitter", "all"]
 
 [[package]]
 name = "sqlite-vec"

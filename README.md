@@ -22,40 +22,80 @@ Traditional agent memory and RAG tools suffer from **Phantom Anchors and Halluci
 2. **Trust Verdict System**: Every search result is physically checked against the filesystem before the agent sees it (`[STRONG]`, `[WEAK]`, `[REBUILT]`, `[REMOVED]`, `[NOPATH]`).
 3. **Two-Tiered Hybrid AST Engine**:
    - **Tier 1 (High-Fidelity Tree-Sitter)**: Real concrete syntax tree parsing for **PHP (5.4–8.3), TypeScript, TSX, JavaScript, Python (3.8–3.12+), C# (.NET), Go, Rust, Java, Kotlin, Swift**.
-   - **Tier 2 (Zero-Dependency State Machine)**: Resilient fallback engine handling codebases even without native compiled grammar libraries installed.
+   - **Tier 2 (Resilient State Machine Fallback)**: Tokenizer state machine handling codebases if tree-sitter grammars are not yet installed.
 4. **Binding-Aware Dependency Tracing**: Cross-file edges resolve via lexical scopes, call types, receivers, and import aliases—never by bare string matching.
 5. **LLM Context Optimization (`sot pack` / `sot bundle`)**: Slices k-hop subgraphs into bounded, untrusted-flagged YAML/Markdown context bundles, saving up to 70% of LLM prompt tokens compared to dumping raw source files.
-6. **Sub-millisecond Performance**: SQLite WAL mode + FTS5 full-text search ($< 1.5\text{ ms}$ retrieval), bounded connection caches ($\le 8\text{MB}$), zero background daemons.
+6. **Sub-millisecond Performance**: SQLite WAL mode + FTS5 full-text search ($< 1.5\text{ ms}$ retrieval), bounded connection caches ($\le 8\text{MB}$), zero external server daemons.
 
 ---
 
 ## ⚡ Quick Start & Installation
 
 ### Prerequisites
-- **Python 3.10+** (Zero external dependencies for core CLI and regex indexing).
-- Standard **SQLite3 with FTS5** (built into standard Python distributions).
+- **Python 3.10+** (CPython 3.10, 3.11, or 3.12).
+- Standard **SQLite3 with FTS5 module enabled** (included by default in official Python distributions).
 
-### Installation Options
+---
 
-#### 1. Core Installation (Zero-Dependency Core)
+### 📦 Installation Guide
+
+#### 1. Full Installation with Tree-Sitter & All Agent Extras (Recommended)
+Installs Tree-Sitter parsers for all 12+ languages, MCP protocol server, graph analytics, real-time file watcher, and hybrid vector search:
+
 ```bash
 # Clone the repository
 git clone https://github.com/minhgv/sot-graph.git
 cd sot-graph
 chmod +x bin/sot
 
-# Install core package in editable mode
-pip install -e .
+# Install all dependencies with pip
+pip install -e '.[all]'
+
+# Or using uv (ultra-fast installer)
+uv pip install -e '.[all]'
 ```
 
-#### 2. Full Tree-Sitter & AI Agent Extras (Recommended)
+---
+
+#### 2. Installing Tree-Sitter & Specific Dependency Groups
+
+`sot-graph` organizes optional components into distinct extras in `pyproject.toml`:
+
 ```bash
-# Install with Tree-Sitter AST grammars, MCP server, Graph Analytics & Hybrid Vector search
-pip install -e '.[tree-sitter,mcp,analytics,vector,watch]'
+# Install Tree-Sitter AST extractors only (12+ languages)
+pip install -e '.[tree-sitter]'
 
-# Or using uv (ultra-fast Python package installer)
-uv pip install -e '.[tree-sitter,mcp,analytics,vector,watch]'
+# Install MCP stdio server only (for Claude Code, Cursor, Windsurf)
+pip install -e '.[mcp]'
+
+# Install Graph Analytics only (NetworkX & SciPy for Louvain Modularity)
+pip install -e '.[analytics]'
+
+# Install Real-Time File Watcher only (watchfiles for sot watch)
+pip install -e '.[watch]'
+
+# Install Hybrid Vector Search only (sqlite-vec for BM25 + Cosine fusion)
+pip install -e '.[vector]'
 ```
+
+#### 🧩 Detailed Tree-Sitter Language Grammars Included in `[tree-sitter]`
+
+When you install `sot-graph[tree-sitter]`, the following official grammar packages are installed:
+
+| Language | Tree-Sitter Grammar Package | Supported Language Features |
+| :--- | :--- | :--- |
+| **PHP** | `tree-sitter-php>=0.23` | PHP 5.4–8.3, Attributes `#[Route]`, `enum`, Readonly classes, Match expressions, Arrow functions |
+| **TypeScript / TSX** | `tree-sitter-typescript>=0.23` | TS Interfaces, Type Aliases, Generic constraints, Decorators, TSX/JSX components |
+| **JavaScript** | `tree-sitter-javascript>=0.23` | ES6+ Classes, Modules (ESM/CJS), Arrow functions, Object destructuring |
+| **Python** | `tree-sitter-python>=0.23` | Python 3.8–3.12+, PEP 695 `type` statements, Async functions, Decorators |
+| **C# (.NET)** | `tree-sitter-c-sharp>=0.23` | Records, Structs, File-scoped namespaces, Generic base types, Properties |
+| **Go** | `tree-sitter-go>=0.23` | Structs, Interfaces, Receiver methods, Type declarations, Generics |
+| **Rust** | `tree-sitter-rust>=0.23` | Structs, Enums, Traits, `impl` blocks, Function signatures |
+| **Java** | `tree-sitter-java>=0.23` | Classes, Interfaces, Records, Generics, Method overrides |
+| **Kotlin** | `tree-sitter-kotlin>=0.7` | Classes, Data classes, Companion objects, Extension functions |
+| **Swift** | `tree-sitter-swift>=0.7` | Protocols, Structs, Classes, Extensions, Actor declarations |
+
+*(Other languages such as Ruby, Dart, C/C++ are extracted via high-fidelity token state machines in `src/sot_graph/_vendor/graphify/extract.py`).*
 
 ---
 
@@ -300,7 +340,7 @@ When requested to review or synthesize architecture documentation for a reposito
 ```
 
 - **Default Location**: `<project-root>/.sot/sot.db`
-- **Zero Central Daemons**: No background daemon, socket, or global database shared across repos.
+- **Zero Central Server Daemons**: Operates purely in-process via SQLite. No separate database server process, socket, or global database shared across repos.
 - **Versioned Schema (v3)**: `graph_nodes` stores FQNs, signatures, and exact spans; `pending_edges` stores call contexts (kind/receiver/import source).
 - **Disposable Index**: The filesystem is the single source of truth. If `.sot/sot.db` is deleted, running `sot reconcile` reconstructs the entire graph index in milliseconds.
 
@@ -318,7 +358,7 @@ The test suite covers idempotency, trust scoring, AST extractions across 12+ lan
 
 ```bash
 # Run full test suite with uv
-uv run --all-extras --with pytest --with pytest-asyncio pytest tests/ -v
+uv run --extra all --with pytest --with pytest-asyncio pytest tests/ -v
 ```
 
 ```text
@@ -327,14 +367,14 @@ uv run --all-extras --with pytest --with pytest-asyncio pytest tests/ -v
 
 ---
 
-## 📜 Attribution & Third-Party Credits
+## 📜 Attribution & Third-Party Licenses
 
-`sot-graph` builds upon the foundational work of the open-source community:
+`sot-graph` acknowledges and credits the following open-source projects:
 
-1. **[Graphify](https://github.com/voidshard/graphify)** (MIT License): AST extraction logic foundation (`src/sot_graph/_vendor/graphify/`).
-2. **[Tree-sitter](https://tree-sitter.github.io/tree-sitter/)** (MIT License): Incremental parsing system for high-fidelity syntax tree extraction.
+1. **[Graphify](https://github.com/voidshard/graphify)** (MIT License): AST extraction logic foundation and multi-language tokenizers (`src/sot_graph/_vendor/graphify/`).
+2. **[Tree-sitter](https://tree-sitter.github.io/tree-sitter/)** (MIT License): Incremental concrete syntax tree parsing system for polyglot AST extractors.
 3. **[D3.js](https://d3js.org/)** (ISC / BSD-3-Clause License): Standalone force-directed graph visualizer (`sot viz`).
-4. **[SQLite](https://www.sqlite.org/)** (Public Domain): Relational, FTS5 full-text indexing, and Write-Ahead Logging (WAL) engine.
+4. **[SQLite](https://www.sqlite.org/)** (Public Domain): Embedded relational, FTS5 full-text indexing, and Write-Ahead Logging (WAL) engine.
 
 ---
 
