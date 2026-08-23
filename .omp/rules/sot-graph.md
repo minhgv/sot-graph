@@ -6,27 +6,29 @@
 
 ## 2. Knowledge Reuse Protocol (Mandatory Before Implementation)
 Before writing any new utility, helper function, or class:
-1. Run `sot search "<keyword>"` or use the `sot_search` tool.
-2. Check Trust Verdicts:
-   - `[STRONG]`: Code physically exists and is verified on disk.
-   - `[WEAK]`: Semantic match only; inspect the file.
-   - `[REBUILT]`: File was moved; use the updated path.
-   - `[REMOVED]`: Node deleted on disk; do NOT reference.
+1. Run `sot search "<keyword>"` or use the `sot_search` tool (Pure-Read Search; never mutates SQLite).
+2. Check Multi-Dimensional Trust Evidence v2:
+   - `[STRONG]`: Code physically exists on disk, hash matches journal, AST span verified (`confidence ≥ 0.9`).
+   - `[WEAK]`: Semantic/partial match only; inspect the file snippet before reusing.
+   - `[REBUILT]`: File was moved; use the updated path reported by atomic hash rehome.
+   - `[REMOVED]`: Node deleted on disk; do NOT reference or hallucinate.
    - `[NOPATH]`: Virtual/inline node; verify origin.
 
-## 3. Dependency Impact & Safe Refactoring Protocol
+## 3. Dependency Impact & Safe Refactoring Protocol (Honest Usages)
 Before modifying, refactoring, or renaming core functions/classes:
-1. Run `sot explore "<symbol>"` or `sot usages "<symbol>"` to inspect both Outward Calls and Incoming References.
-2. When working with interfaces or abstract classes, run `sot implementations "<interface>"` to identify all concrete implementations.
-3. Ensure you understand all upstream callers before changing signatures.
+1. Run `sot explore "<symbol>" --depth 2` or `sot usages "<symbol>"`.
+2. Inspect `status` and `unresolved_count`:
+   - If `status == "PARTIAL"`: There are `UNRESOLVED` or `AMBIGUOUS` candidate callers in `pending_edges`. NEVER assume 0 callers; inspect candidates before refactoring.
+3. When working with interfaces or abstract classes, run `sot implementations "<interface>"` to identify all concrete implementations.
 
-## 4. Context Isolation & Subgraph Packaging Protocol
-- When modifying multi-module features, avoid reading dozens of raw source files sequentially.
-- Run `sot pack "<symbol>" --depth 2` to generate a token-efficient YAML ContextBundle for subagents.
+## 4. Context Isolation & Hard-Budget Subgraph Packaging
+- When delegating multi-module tasks to subagents (`task`/`worker`), avoid dumping dozens of raw source files.
+- Run `sot pack "<symbol>" --tokens 1500 -o context.yaml` to generate a live-verified ContextBundle bounded strictly by token ceiling.
 
-## 5. Self-Healing & Drift Reconciliation
+## 5. Self-Healing & Storage Integrity
 - If you create, move, or delete files, run:
-  `sot reconcile` or `sot_reconcile` tool (or `sot batch-reconcile` for monorepo roots).
+  `sot reconcile` or `sot_reconcile` tool (or `sot batch-reconcile` for monorepo roots) for atomic content-hash rehoming.
+- Check database health with `sot doctor` (runs `PRAGMA quick_check;` and verifies schema consistency).
 - After completing tricky bugs or complex architectural designs, record knowledge:
   `sot insert --title "..." --body "..." --keywords "..."`.
 

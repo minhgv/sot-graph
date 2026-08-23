@@ -124,6 +124,7 @@ class TrustVerifier:
         threshold: float = 0.5,
         db: Optional[Database] = None,
         auto_heal: bool = False,
+        jit_reconcile: bool = False,
     ) -> TrustEvidence:
         """
         Produce a multi-dimensional TrustEvidence object for a candidate hit.
@@ -268,19 +269,58 @@ class TrustVerifier:
             else:
                 confidence = 0.3
 
+            # Check freshness against file_journal in DB if available
+            freshness = FreshnessStatus.FRESH
+            rel_path = os.path.relpath(requested, root).replace(os.sep, "/")
+            is_stale = False
+            if db is not None:
+                journal_row = None
+                if hasattr(db, "get_file_journal"):
+                    journal_row = db.get_file_journal(rel_path) or db.get_file_journal(requested)
+                elif hasattr(db, "conn"):
+                    try:
+                        row = db.conn.execute(
+                            "SELECT sha256, size, mtime_ms FROM file_journal WHERE path = ? OR path = ?",
+                            (rel_path, requested),
+                        ).fetchone()
+                        if row:
+                            journal_row = {"sha256": row[0], "size": row[1], "mtime_ms": row[2]}
+                    except Exception:
+                        journal_row = None
+                if journal_row is not None:
+                    disk_mtime_ms = int(st.st_mtime * 1000)
+                    journal_mtime_ms = int(journal_row.get("mtime_ms", 0))
+                    journal_sha256 = journal_row.get("sha256")
+                    if disk_mtime_ms != journal_mtime_ms or (journal_sha256 and file_hash != journal_sha256):
+                        is_stale = True
+                        if jit_reconcile and not getattr(db, "_read_only", False):
+                            try:
+                                from sot_graph.reconciler import Reconciler
+                                rec = Reconciler(db, root)
+                                rec.reconcile(paths=[requested], workers=1)
+                                freshness = FreshnessStatus.FRESH
+                                is_stale = False
+                            except Exception:
+                                freshness = FreshnessStatus.STALE
+                        else:
+                            freshness = FreshnessStatus.STALE
+
+            # Adjust confidence if stale
+            if is_stale:
+                confidence = min(confidence, 0.4)
+
             return TrustEvidence(
-                freshness=FreshnessStatus.FRESH,
+                freshness=freshness,
                 relevance=relevance,
                 resolution=ResolutionStatus.EXACT,
-                completeness=CompletenessStatus.COMPLETE,
+                completeness=CompletenessStatus.COMPLETE if not is_stale else CompletenessStatus.PARTIAL,
                 confidence=min(1.0, max(0.0, confidence)),
-                provenance="trust_verifier:v2",
+                provenance="trust_verifier:v2" if not is_stale else "trust_verifier:jit_stale",
                 file_path=requested,
                 file_hash=file_hash,
                 coverage=cov,
-                details={"mtime_ms": int(st.st_mtime * 1000), "size": st.st_size},
+                details={"mtime_ms": int(st.st_mtime * 1000), "size": st.st_size, "stale": is_stale},
             )
-
         # 2. File is MISSING on disk
         if not auto_heal or db is None:
             return TrustEvidence(
@@ -334,6 +374,7 @@ class TrustVerifier:
         project_root: str,
         threshold: float = 0.5,
         auto_heal: bool = True,
+        jit_reconcile: bool = False,
     ) -> VerificationResult:
         """
         Verify a search hit against disk reality. Returns VerificationResult
@@ -346,6 +387,7 @@ class TrustVerifier:
             threshold=threshold,
             db=db,
             auto_heal=auto_heal,
+            jit_reconcile=jit_reconcile,
         )
         verdict = evidence.to_legacy_verdict()
         return VerificationResult(verdict, evidence.coverage, evidence.file_path, evidence)

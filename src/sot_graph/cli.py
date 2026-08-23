@@ -150,15 +150,15 @@ def cmd_search(args: argparse.Namespace, db: Database, root: str) -> int:
 
     verified = []
     has_stale = False
+    jit_enabled = getattr(args, "jit", True)
     for cand in candidates:
         res = TrustVerifier.verify_hit(
-            db, cand, q_toks, root, threshold=args.threshold, auto_heal=False
+            db, cand, q_toks, root, threshold=args.threshold, auto_heal=False, jit_reconcile=jit_enabled
         )
         verdict, cov, real_path = res
         evidence = res.evidence
         if evidence.freshness.value in ("STALE", "MISSING"):
             has_stale = True
-
         verified.append({
             "verdict": verdict,
             "coverage": f"{int((cov or 0) * 100)}%",
@@ -1202,8 +1202,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("--scope", default=None, help="Filter by path or keyword substring")
     p_search.add_argument("--threshold", type=float, default=0.5, help="Coverage threshold for STRONG verdict")
     p_search.add_argument("--hybrid", action="store_true", help="Fuse BM25 with vector similarity (needs [vector] extra + `sot embed`)")
+    p_search.add_argument("--jit", dest="jit", action="store_true", default=True, help="Enable JIT Micro-Reconciliation for modified files (default: True)")
+    p_search.add_argument("--no-jit", dest="jit", action="store_false", help="Disable JIT Micro-Reconciliation")
     p_search.add_argument("--json", action="store_true", help="Output JSON format")
-
     # embed
     p_emb = subparsers.add_parser("embed", help="Build/refresh the optional vector index ([vector] extra)")
     p_emb.add_argument("--limit", type=int, default=5000, help="Maximum nodes to embed (default: 5000)")

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sot-graph"
-version = "0.1.0"
+version = "0.2.0"
 description = "Verified, self-healing Source-of-Truth knowledge graph for AI coding agents."
 readme = "README.md"
 authors = [{ name = "Minh Giap", email = "minhgv@users.noreply.github.com" }]

@@ -236,6 +236,7 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
       properties: {
         target: { type: "string", description: "Target root symbol or fully-qualified name" },
         depth: { type: "number", description: "Graph traversal depth (default: 2)" },
+        tokens: { type: "number", description: "Hard token budget limit for context bundle (default: 1500)" },
         output: { type: "string", description: "Optional output file path" },
       },
       required: ["target"],
@@ -244,6 +245,7 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
       const target = String(params.target || "");
       const args = ["pack", target];
       if (params.depth) args.push("--depth", String(params.depth));
+      if (params.tokens) args.push("--max-tokens", String(params.tokens));
       if (params.output) args.push("-o", String(params.output));
 
       const { ok, output } = await runCmd(getSotBin(), args);
@@ -679,8 +681,35 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // Optional Hook: check graph status on session start
+  // Post-Mutation Hook (Solution A): Auto-reconcile on file mutation tools & session start
   if (typeof pi.on === "function") {
+    let debounceTimer: NodeJS.Timeout | number | null = null;
+    const triggerReconcile = (paths?: string[]) => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(async () => {
+        try {
+          const cwd = process.cwd();
+          const dbPath = join(cwd, ".sot", "sot.db");
+          if (existsSync(dbPath)) {
+            const bin = resolveSotBinary(cwd);
+            const args = paths && paths.length > 0 ? ["reconcile", ...paths] : ["reconcile"];
+            await runCmd(bin, args, cwd);
+          }
+        } catch {
+          // Non-blocking background reconcile
+        }
+      }, 200);
+    };
+
+    // Hook mutating tool results
+    pi.on("tool_result", (event: Record<string, unknown>) => {
+      const tool = String(event.tool || event.name || "");
+      if (["write", "edit", "ast_edit", "patch"].includes(tool)) {
+        const path = typeof event.path === "string" ? event.path : undefined;
+        triggerReconcile(path ? [path] : undefined);
+      }
+    });
+
     pi.on("session_start", async () => {
       try {
         const cwd = process.cwd();

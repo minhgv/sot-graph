@@ -228,7 +228,7 @@ class McpService:
             for row, bucket in zip(rows, buckets):
                 candidate = dict(row)
                 res = TrustVerifier.verify_hit(
-                    cast(Database, None), candidate, tokenize(query), self.project_root,
+                    cast(Database, _ConnView(conn)), candidate, tokenize(query), self.project_root,
                     threshold=threshold, auto_heal=False,
                 )
                 verdict, coverage, real = res
