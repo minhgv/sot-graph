@@ -614,8 +614,77 @@ def cmd_pack(args: argparse.Namespace, db: Database, root: str) -> int:
 
 
 def cmd_watch(args: argparse.Namespace, reconciler: Reconciler, root: str) -> int:
-    from sot_graph.watcher import run_watch
+    from sot_graph.watcher import (
+        run_watch, run_watch_multi, discover_sot_projects,
+        start_daemon, stop_daemon, status_daemon,
+        install_service, uninstall_service
+    )
 
+    is_all = getattr(args, "all", False)
+    base_dir = getattr(args, "dir", None) or root
+
+    # 1. Handle background service install / uninstall
+    if getattr(args, "service", None) == "install":
+        msg = install_service(base_dir=base_dir, python_bin=sys.executable)
+        print(msg)
+        return 0
+    elif getattr(args, "service", None) == "uninstall":
+        msg = uninstall_service()
+        print(msg)
+        return 0
+
+    # 2. Handle daemon stop
+    if getattr(args, "stop", False):
+        ok, msg = stop_daemon(root, is_all=is_all)
+        print(msg)
+        return 0 if ok else 1
+
+    # 3. Handle daemon status
+    if getattr(args, "status", False):
+        st = status_daemon(root, is_all=is_all)
+        print(f"📊 SOT Watcher Daemon Status ({'Global Multi-Project' if is_all else 'Local Project'}):")
+        print(f"   Status:   {'🟢 ACTIVE' if st['running'] else '⚪ STOPPED'}")
+        if st['pid']:
+            print(f"   PID:      {st['pid']}")
+        print(f"   Logs:     {st['log_path']}")
+        print(f"   Message:  {st['message']}")
+        return 0 if st['running'] else 1
+
+    # 4. Handle daemon start
+    if getattr(args, "daemon", False):
+        ok, msg = start_daemon(
+            root=root,
+            is_all=is_all,
+            base_dir=base_dir,
+            debounce_ms=args.debounce_ms,
+            interval_ms=args.interval_ms,
+            backend=args.backend,
+        )
+        print(msg)
+        return 0 if ok else 1
+
+    # 5. Handle multi-project watch in foreground
+    if is_all:
+        roots = discover_sot_projects(base_dir)
+        if not roots:
+            print(f"⚠️ No initialized SOT projects found under {base_dir}")
+            return 1
+        try:
+            run_watch_multi(
+                roots=roots,
+                debounce_ms=args.debounce_ms,
+                backend=args.backend,
+                interval_ms=args.interval_ms,
+            )
+        except KeyboardInterrupt:
+            print("\n👋 sot watch --all stopped.")
+            return 0
+        except RuntimeError as exc:
+            print(f"❌ {exc}")
+            return 2
+        return 0
+
+    # 6. Default foreground single-project watch
     try:
         run_watch(
             reconciler, root,
@@ -630,7 +699,6 @@ def cmd_watch(args: argparse.Namespace, reconciler: Reconciler, root: str) -> in
         print(f"❌ {exc}")
         return 2
     return 0
-
 
 
 
@@ -1192,14 +1260,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_pack.add_argument("--max-bytes", type=int, default=65536, help="Byte cap (default: 64KB)")
 
     p_watch = subparsers.add_parser(
-        "watch", help="Watch filesystem and reconcile in real time (daemon)")
+        "watch", help="Watch filesystem and reconcile in real time (daemon & multi-project support)")
     p_watch.add_argument("--debounce-ms", type=int, default=200,
                          help="Event folding window (default: 200ms)")
     p_watch.add_argument("--backend", choices=("auto", "watchfiles", "poll"), default="auto",
                          help="Watcher backend (default: auto = watchfiles if installed)")
     p_watch.add_argument("--interval-ms", type=int, default=500,
                          help="Polling interval for the poll backend (default: 500ms)")
-
+    p_watch.add_argument("-d", "--daemon", action="store_true",
+                         help="Run watcher as a detached background daemon process")
+    p_watch.add_argument("--stop", action="store_true",
+                         help="Stop the running background watcher daemon")
+    p_watch.add_argument("--status", action="store_true",
+                         help="Check status of the background watcher daemon")
+    p_watch.add_argument("--all", action="store_true",
+                         help="Auto-discover and watch ALL indexed SOT projects in workspace/directory")
+    p_watch.add_argument("--dir", type=str, default=None,
+                         help="Base directory to search for SOT projects when using --all (default: current directory)")
+    p_watch.add_argument("--service", choices=("install", "uninstall"), default=None,
+                         help="Install/uninstall persistent background service (macOS LaunchAgent / systemd)")
     # trace
     p_trace = subparsers.add_parser("trace", help="Extract Full-Stack execution path, UI decisions, API binding, and Mermaid diagrams")
     p_trace.add_argument("target", help="Ticket ID, keyword, symbol, or endpoint to trace")
