@@ -49,3 +49,9 @@ When requested to review or synthesize comprehensive architecture documentation 
 3. **Markdown Tables & Formatting:**
    - In table cells, escape comparison operators: use `&lt;`, `&gt;` or Unicode `≤`, `≥`.
    - Escape table cell pipes `\|` to preserve table column alignments.
+
+## 8. Graph-First Code Investigation Protocol (Zero-Discovery Invariant)
+When investigating, reverse-engineering, or auditing a Symbol, Class, God Node, or Module:
+1. **Graph Query First (Mandatory):** ALWAYS query SOT-Graph (`sot explore "<symbol>"`, `sot usages "<symbol>"`, or read `.sot/bundle/` fact files) FIRST to extract method inventories, callers, and blast radius in 0.1s.
+2. **Zero Blind Glob / Grep:** NEVER spawn Scouts or run exploratory `glob`/`grep` commands across the codebase when `sot.db` or Fact Bundles already exist.
+3. **Pinpointed Range Reading:** If code implementation details (side effects, inline comments, body logic) must be audited, Scouts MUST ONLY use exact line ranges (`file:start-end`) based on coordinates provided by SOT-Graph.

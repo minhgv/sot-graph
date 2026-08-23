@@ -79,6 +79,12 @@ Search results provide structured, multi-dimensional trust evidence instead of r
    - SOT-Graph performs atomic content-hash rehoming in 1 transaction without losing edge relationships.
 2. Periodically verify graph health with `sot doctor`.
 
+### Workflow F: Symbol & God Node Auditing (Zero Blind Discovery)
+1. When asked to audit, inspect, or understand God Nodes, Classes, or Modules:
+   - **Step 1 (Graph Query):** Run `sot explore "<symbol>" --depth 2` or `sot usages "<symbol>"` (or inspect `.sot/bundle/` fact files). Extract method inventories, callers, and blast radius instantly (0.1s).
+   - **Step 2 (Zero Blind File Discovery):** Do NOT spawn Scouts to run `glob`/`grep` across the repository when `sot.db` exists.
+   - **Step 3 (Pinpointed Range Reads):** Scouts MUST ONLY read exact line numbers (`file:start-end`) for methods requiring deep body logic verification.
+
 ---
 
 ## 3. CLI & Native Tool Device Reference
