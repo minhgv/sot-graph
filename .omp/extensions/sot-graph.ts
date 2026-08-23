@@ -3,15 +3,23 @@
  * 
  * Exposes SOT-Graph capabilities as native agent tools:
  * - sot_search: Verified Knowledge & AST Symbol Search with Trust Verdicts
+ * - sot_map: Token-budgeted PageRank Architectural Repository Mapping
  * - sot_explore: Cross-file AST Call Graph & Dependency Exploration
+ * - sot_usages: Exact Call-site and Reference Site Inspection
+ * - sot_implementations: Interface and Subclass Implementation Traversal
+ * - sot_rename: Safe Structural Symbol Rename Planning
+ * - sot_pack: k-Hop Subgraph ContextBundle Packaging for Prompt Compression
  * - sot_reconcile: Idempotent Single-Writer Knowledge Graph Synchronization
  * - sot_verify: Real-time Disk Verification & Drift Detection
  * - sot_doctor: Database Diagnostics & Graph Health Statistics
+ * - sot_clean: Stale Data & Deleted File Purging
+ * - sot_vacuum: SQLite Freelist Compaction & Storage Optimization
  * - sot_insert: Persistent Knowledge Anchors & Note Recording
  * - sot_cluster: Louvain / Label Propagation Community Detection
  * - sot_report: Architecture Assessment & God Node Blast Radius
  * - sot_viz: Interactive D3.js Knowledge Graph Visualizer Generation
- * - sot_export: Multi-format Graph Export (GraphRAG JSON, Obsidian, GraphML)
+ * - sot_export: Multi-format Graph Export (GraphRAG JSON, Obsidian, GraphML, SCIP)
+ * - sot_bundle: Architecture Fact Bundler for LLM Report Synthesis
  */
 import { execFile } from "node:child_process";
 import { join } from "node:path";
@@ -79,6 +87,7 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
         limit: { type: "number", description: "Maximum number of results to return (default: 6)" },
         scope: { type: "string", description: "Optional directory or path prefix filter (e.g. 'src/sot_graph/')" },
         threshold: { type: "number", description: "Minimum content coverage score (0.0 - 1.0, default: 0.1)" },
+        hybrid: { type: "boolean", description: "Enable hybrid vector + FTS5 search (if vector extra installed)" },
       },
       required: ["query"],
     },
@@ -88,13 +97,38 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
       const args = ["search", query, "-n", String(limit)];
       if (params.scope) args.push("--scope", String(params.scope));
       if (params.threshold !== undefined) args.push("--threshold", String(params.threshold));
+      if (params.hybrid) args.push("--hybrid");
 
       const { ok, output } = await runCmd(getSotBin(), args);
       return { content: [{ type: "text", text: output.trim() }], details: { ok } };
     },
   });
 
-  // 2. sot_explore: AST Cross-file Graph Traversal
+  // 2. sot_map: Token-budgeted PageRank Repository Mapping
+  pi.registerTool({
+    name: "sot_map",
+    label: "SOT Repository Map",
+    description:
+      "Generate a token-budgeted architectural repository map ranked by personalized PageRank. Use for top-down orientation across unfamiliar codebases.",
+    promptSnippet: "Generate PageRank-ranked repository architecture map",
+    parameters: {
+      type: "object",
+      properties: {
+        focus: { type: "string", description: "Comma-separated symbols or topics to personalize ranking" },
+        tokens: { type: "number", description: "Approximate token budget (default: 1024)" },
+      },
+    },
+    async execute(_id, params) {
+      const args = ["map"];
+      if (params.focus) args.push("--focus", String(params.focus));
+      if (params.tokens) args.push("--tokens", String(params.tokens));
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
+  // 3. sot_explore: AST Cross-file Graph Traversal
   pi.registerTool({
     name: "sot_explore",
     label: "SOT Graph Explore",
@@ -119,7 +153,105 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // 3. sot_reconcile: Sync Knowledge Graph with Filesystem
+  // 4. sot_usages: Inspect Exact Call-Sites & References
+  pi.registerTool({
+    name: "sot_usages",
+    label: "SOT Symbol Usages",
+    description:
+      "List every physical reference site and invocation of a symbol across the codebase, grouped by caller. Essential before changing signatures.",
+    promptSnippet: "List all call-sites and reference locations of a symbol",
+    parameters: {
+      type: "object",
+      properties: {
+        target: { type: "string", description: "Symbol, function name, or class to inspect" },
+      },
+      required: ["target"],
+    },
+    async execute(_id, params) {
+      const target = String(params.target || "");
+      const args = ["usages", target];
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
+  // 5. sot_implementations: Interface and Inheritance Discovery
+  pi.registerTool({
+    name: "sot_implementations",
+    label: "SOT Implementations",
+    description:
+      "Discover all concrete classes implementing an interface/trait or extending a base class across modules.",
+    promptSnippet: "List concrete classes implementing an interface or base class",
+    parameters: {
+      type: "object",
+      properties: {
+        target: { type: "string", description: "Base class, interface, or trait name to inspect" },
+      },
+      required: ["target"],
+    },
+    async execute(_id, params) {
+      const target = String(params.target || "");
+      const args = ["implementations", target];
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
+  // 6. sot_rename: Safe Structural Symbol Rename Planning
+  pi.registerTool({
+    name: "sot_rename",
+    label: "SOT Rename Impact",
+    description:
+      "Generate an impact plan and preview call-site updates for renaming a symbol across the codebase.",
+    promptSnippet: "Plan and inspect symbol rename impact across codebase",
+    parameters: {
+      type: "object",
+      properties: {
+        target: { type: "string", description: "Current symbol name to rename" },
+        to: { type: "string", description: "Proposed new symbol name" },
+      },
+      required: ["target"],
+    },
+    async execute(_id, params) {
+      const target = String(params.target || "");
+      const args = ["rename", target];
+      if (params.to) args.push("--to", String(params.to));
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
+  // 7. sot_pack: k-Hop Subgraph ContextBundle Packaging
+  pi.registerTool({
+    name: "sot_pack",
+    label: "SOT Pack ContextBundle",
+    description:
+      "Package a k-hop Subgraph ContextBundle (YAML/Markdown) for AI agent prompt registers. Reduces context token consumption by ~70% compared to reading raw files.",
+    promptSnippet: "Package k-hop subgraph context bundle for token efficiency",
+    parameters: {
+      type: "object",
+      properties: {
+        target: { type: "string", description: "Target root symbol or fully-qualified name" },
+        depth: { type: "number", description: "Graph traversal depth (default: 2)" },
+        output: { type: "string", description: "Optional output file path" },
+      },
+      required: ["target"],
+    },
+    async execute(_id, params) {
+      const target = String(params.target || "");
+      const args = ["pack", target];
+      if (params.depth) args.push("--depth", String(params.depth));
+      if (params.output) args.push("-o", String(params.output));
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
+  // 8. sot_reconcile: Sync Knowledge Graph with Filesystem
   pi.registerTool({
     name: "sot_reconcile",
     label: "SOT Reconcile",
@@ -151,7 +283,7 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // 4. sot_verify: Real-time Disk Verification & Drift Detection
+  // 9. sot_verify: Real-time Disk Verification & Drift Detection
   pi.registerTool({
     name: "sot_verify",
     label: "SOT Verify Drift",
@@ -173,7 +305,7 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // 5. sot_doctor: Database Diagnostics & Statistics
+  // 10. sot_doctor: Database Diagnostics & Statistics
   pi.registerTool({
     name: "sot_doctor",
     label: "SOT Doctor",
@@ -190,7 +322,57 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // 6. sot_insert: Record Knowledge Node / Architectural Anchor
+  // 11. sot_clean: Stale Data & Deleted File Purging
+  pi.registerTool({
+    name: "sot_clean",
+    label: "SOT Clean Stale Data",
+    description:
+      "Safely purge stale nodes, dangling edges, or reset generated graph data.",
+    promptSnippet: "Clean stale nodes or reset graph data safely",
+    parameters: {
+      type: "object",
+      properties: {
+        all: { type: "boolean", description: "Reset all generated graph data" },
+        include_notes: { type: "boolean", description: "Include persistent notes in reset" },
+        dry_run: { type: "boolean", description: "Preview clean plan without modifying database" },
+      },
+    },
+    async execute(_id, params) {
+      const args = ["clean"];
+      if (params.all) args.push("--all");
+      if (params.include_notes) args.push("--include-notes");
+      if (params.dry_run) args.push("--dry-run");
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
+  // 12. sot_vacuum: SQLite Storage Compaction
+  pi.registerTool({
+    name: "sot_vacuum",
+    label: "SOT Vacuum Database",
+    description:
+      "Compact SQLite database file and reclaim unallocated freelist pages.",
+    promptSnippet: "Compact SQLite database and optimize freelist pages",
+    parameters: {
+      type: "object",
+      properties: {
+        analyze: { type: "boolean", description: "Run PRAGMA optimize after vacuum" },
+        dry_run: { type: "boolean", description: "Report reclaimable space without mutating" },
+      },
+    },
+    async execute(_id, params) {
+      const args = ["vacuum"];
+      if (params.analyze) args.push("--analyze");
+      if (params.dry_run) args.push("--dry-run");
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
+  // 13. sot_insert: Record Knowledge Node / Architectural Anchor
   pi.registerTool({
     name: "sot_insert",
     label: "SOT Insert Note",
@@ -217,7 +399,7 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // 7. sot_cluster: Community Detection & Modularity Q
+  // 14. sot_cluster: Community Detection & Modularity Q
   pi.registerTool({
     name: "sot_cluster",
     label: "SOT Cluster Graph",
@@ -228,18 +410,20 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
       type: "object",
       properties: {
         scope: { type: "string", description: "Optional directory prefix to restrict clustering scope" },
+        min_size: { type: "number", description: "Minimum community size (default: 1)" },
       },
     },
     async execute(_id, params) {
       const args = ["cluster"];
       if (params.scope) args.push("--scope", String(params.scope));
+      if (params.min_size) args.push("--min-size", String(params.min_size));
 
       const { ok, output } = await runCmd(getSotBin(), args);
       return { content: [{ type: "text", text: output.trim() }], details: { ok } };
     },
   });
 
-  // 8. sot_report: Architecture Health & God Node Blast Radius
+  // 15. sot_report: Architecture Health & God Node Blast Radius
   pi.registerTool({
     name: "sot_report",
     label: "SOT Architecture Report",
@@ -263,7 +447,7 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // 9. sot_viz: Interactive D3.js Visualizer
+  // 16. sot_viz: Interactive D3.js Visualizer
   pi.registerTool({
     name: "sot_viz",
     label: "SOT Generate HTML Visualizer",
@@ -273,7 +457,7 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
     parameters: {
       type: "object",
       properties: {
-        output: { type: "string", description: "Output HTML file path (default: sot_graph.html)" },
+        output: { type: "string", description: "Output HTML file path (default: graph.html)" },
         open: { type: "boolean", description: "Automatically open in default web browser" },
       },
     },
@@ -287,20 +471,20 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // 10. sot_export: Multi-Format Knowledge Graph Exporter
+  // 17. sot_export: Multi-Format Knowledge Graph Exporter
   pi.registerTool({
     name: "sot_export",
     label: "SOT Export Graph",
     description:
-      "Export the knowledge graph in standard open formats: 'graphrag' (hierarchical JSON dataset), 'obsidian' (Markdown vault), or 'graphml' (Gephi / Cytoscape XML).",
-    promptSnippet: "Export knowledge graph to GraphRAG JSON, Obsidian Vault, or GraphML",
+      "Export the knowledge graph in standard open formats: 'graphrag' (hierarchical JSON dataset), 'obsidian' (Markdown vault), 'graphml' (Gephi / Cytoscape XML), or 'scip'.",
+    promptSnippet: "Export knowledge graph to GraphRAG JSON, Obsidian Vault, GraphML, or SCIP",
     parameters: {
       type: "object",
       properties: {
         format: {
           type: "string",
-          enum: ["graphrag", "obsidian", "graphml"],
-          description: "Target export format (graphrag | obsidian | graphml)",
+          enum: ["graphrag", "obsidian", "graphml", "scip"],
+          description: "Target export format (graphrag | obsidian | graphml | scip)",
         },
         output: { type: "string", description: "Destination file or directory path" },
         scope: { type: "string", description: "Optional directory prefix filter" },
@@ -316,7 +500,8 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
       return { content: [{ type: "text", text: output.trim() }], details: { ok } };
     },
   });
-  // 11. sot_bundle: Fact Bundle Extractor for LLM Architecture Reports
+
+  // 18. sot_bundle: Fact Bundle Extractor for LLM Architecture Reports
   pi.registerTool({
     name: "sot_bundle",
     label: "SOT Architecture Fact Bundler",
@@ -339,7 +524,6 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
       return { content: [{ type: "text", text: output.trim() }], details: { ok } };
     },
   });
-
 
   // Optional Hook: check graph status on session start
   if (typeof pi.on === "function") {
