@@ -135,6 +135,41 @@ class TreeSitterExtractionTests(unittest.TestCase):
                  for e in parsed["edges"] if e["relation"] == "calls"}
         self.assertIn(("Greeter.greet", "Greeter.helper"), calls)
 
+    def test_java_inheritance_edges_extracted(self):
+        if not LANGS.get("java"):
+            self.skipTest("grammar for java not installed")
+        code = '''package p;
+
+public interface MpsService {}
+
+public interface Combo extends MpsService {}
+
+public class BaseService {}
+
+public class MpsServiceImpl extends BaseService
+        implements MpsService, Combo {}
+
+public class GenericRepo extends java.util.AbstractMap<String, String>
+        implements MpsService {}
+'''
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        target = Path(directory) / "sample.java"
+        target.write_text(code, encoding="utf-8")
+        parsed = parse_file_graph(str(target), directory)
+        pending_rel = {(p["src"].rsplit(":", 1)[-1], p["dst_symbol"], p["relation"])
+                       for p in parsed["pending"]}
+        edge_rel = {(e["src"].rsplit(":", 1)[-1], e["dst"].rsplit(":", 1)[-1], e["relation"])
+                    for e in parsed["edges"]}
+        found = {(s, d, r) for s, d, r in pending_rel | edge_rel
+                 if r in ("extends", "implements")}
+        self.assertIn(("MpsServiceImpl", "BaseService", "extends"), found)
+        self.assertIn(("MpsServiceImpl", "MpsService", "implements"), found)
+        self.assertIn(("MpsServiceImpl", "Combo", "implements"), found)
+        self.assertIn(("Combo", "MpsService", "extends"), found)
+        self.assertIn(("GenericRepo", "AbstractMap", "extends"), found)
+        self.assertIn(("GenericRepo", "MpsService", "implements"), found)
+
     def test_go_method_qualified_by_receiver_type(self):
         if not LANGS.get("go"):
             self.skipTest("grammar for go not installed")

@@ -372,14 +372,27 @@ def extract_js(path: Path) -> Dict[str, Any]:
     return _extract_regex_patterns(path, patterns)
 
 
-def _ts_or_regex(path: Path, language: str, patterns: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Prefer the optional tree-sitter AST extractor; fall back to regex."""
+def _ts_or_regex(
+    path: Path,
+    language: str,
+    patterns: List[Dict[str, Any]],
+    regex_postprocess=None,
+) -> Dict[str, Any]:
+    """Prefer the optional tree-sitter AST extractor; fall back to regex.
+
+    ``regex_postprocess(path, result)`` augments the regex result only — used
+    for relations the generic pattern engine cannot express (e.g. Java
+    inheritance clauses).
+    """
     try:
         from sot_graph.ts_extract import extract_ts
 
         return extract_ts(path, language)
     except Exception:
-        return _extract_regex_patterns(path, patterns)
+        result = _extract_regex_patterns(path, patterns)
+        if regex_postprocess is not None:
+            regex_postprocess(path, result)
+        return result
 
 
 def extract_go(path: Path) -> Dict[str, Any]:
@@ -420,13 +433,76 @@ def extract_cpp(path: Path) -> Dict[str, Any]:
     return _extract_regex_patterns(path, patterns)
 
 
+JAVA_TYPE_HEADER_PAT = re.compile(
+    r"\b(?:class|interface|enum|record)\s+([A-Za-z_][A-Za-z0-9_]*)"
+    r"(?:<(?:[^<>]*<[^<>]*>)?[^<>]*>)?"      # type parameters, one nesting level
+    r"(?:\s*\([^)]*\))?"                     # record component list
+    r"(?:\s+extends\s+([A-Za-z_][A-Za-z0-9_.<>,\s]*?))?"
+    r"(?:\s+implements\s+([A-Za-z_][A-Za-z0-9_.<>,\s]*?))?"
+    r"\s*\{"
+)
+
+
+def _java_short_type(raw: str) -> str:
+    raw = re.split(r"<", raw.strip(), maxsplit=1)[0].strip()
+    raw = raw.rsplit(".", 1)[-1].strip()
+    # Only whole identifiers survive; stray generics debris does not.
+    return raw if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", raw) else ""
+
+
+def _java_split_types(clause: str) -> List[str]:
+    # Split on commas that sit outside generic angle brackets, so
+    # BaseRepo<Map<String, String>> stays a single type.
+    parts: List[str] = []
+    depth = 0
+    current: List[str] = []
+    for ch in clause:
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+        if ch == "," and depth == 0:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(ch)
+    parts.append("".join(current))
+    return parts
+
+
+def _java_inheritance_edges(path: Path, result: Dict[str, Any]) -> None:
+    """Augment the regex fallback with extends/implements header edges."""
+    try:
+        source_text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    for match in JAVA_TYPE_HEADER_PAT.finditer(source_text):
+        name, extends_clause, implements_clause = match.groups()
+        line_no = source_text.count("\n", 0, match.start()) + 1
+        for relation, clause in (
+            ("extends", extends_clause),
+            ("implements", implements_clause),
+        ):
+            if not clause:
+                continue
+            for base in _java_split_types(clause):
+                base = _java_short_type(base)
+                if base:
+                    result["edges"].append({
+                        "source": name,
+                        "target": base,
+                        "relation": relation,
+                        "source_location": f"L{line_no}",
+                    })
+
+
 def extract_java(path: Path) -> Dict[str, Any]:
     patterns = [
         {"regex": r"(?:public|protected|private)?\s*class\s+([a-zA-Z0-9_]+)", "kind": "class", "prefix": "class"},
         {"regex": r"(?:public|protected|private)?\s*interface\s+([a-zA-Z0-9_]+)", "kind": "interface", "prefix": "interface"},
         {"regex": r"(?:public|protected|private|static|\s)+[a-zA-Z0-9_<>\[\]]+\s+([a-zA-Z0-9_]+)\s*\([^)]*\)\s*\{?", "kind": "function", "prefix": "method"},
     ]
-    return _ts_or_regex(path, "java", patterns)
+    return _ts_or_regex(path, "java", patterns, regex_postprocess=_java_inheritance_edges)
 
 
 def extract_ruby(path: Path) -> Dict[str, Any]:

@@ -47,6 +47,15 @@ CONFIGS: Dict[str, Dict[str, Any]] = {
         },
         "calls": {"type": "method_invocation", "field": "name", "receiver_field": "object"},
         "imports": [r"\bimport\s+(?:static\s+)?([\w.]+)\s*;"],
+        "inheritance": {
+            "types": {"class_declaration", "interface_declaration",
+                      "enum_declaration", "record_declaration"},
+            # class/enum/record: `extends X` + `implements A, B` are fields;
+            # interface `extends A, B` is a bare extends_interfaces child node.
+            "extends_fields": ("superclass",),
+            "extends_child_types": ("extends_interfaces",),
+            "implements_fields": ("interfaces",),
+        },
     },
     "kotlin": {
         "module": "tree_sitter_kotlin",
@@ -127,6 +136,52 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
         match = re.match(r"[A-Za-z_][A-Za-z0-9_]*", text(child).strip())
         return match.group(0) if match else None
 
+    def collect_bases(node: Any) -> List[str]:
+        # Flatten a superclass/interfaces clause into base type names:
+        # generics drop their type_arguments and qualified names keep the
+        # last segment, matching how the pending-edge resolver matches symbols.
+        if node.type == "type_identifier":
+            return [text(node).strip()]
+        if node.type == "scoped_type_identifier":
+            return [text(node).strip().rsplit(".", 1)[-1]]
+        if node.type == "generic_type":
+            for child in node.children:
+                if child.type != "type_arguments":
+                    inner = collect_bases(child)
+                    if inner:
+                        return inner
+            return []
+        found: List[str] = []
+        for child in node.children:
+            found.extend(collect_bases(child))
+        return found
+
+    def emit_inheritance(node: Any, node_type: str, source_id: str) -> None:
+        inh = cfg.get("inheritance")
+        if not inh or node_type not in inh["types"]:
+            return
+        extends_nodes = [node.child_by_field_name(f)
+                         for f in inh.get("extends_fields", ())]
+        extends_nodes += [c for c in node.children
+                          if c.type in inh.get("extends_child_types", ())]
+        implements_nodes = [node.child_by_field_name(f)
+                            for f in inh.get("implements_fields", ())]
+        for relation, clause_nodes in (
+            ("extends", extends_nodes),
+            ("implements", implements_nodes),
+        ):
+            for clause in clause_nodes:
+                if clause is None:
+                    continue
+                for base in collect_bases(clause):
+                    if base:
+                        edges.append({
+                            "source": source_id,
+                            "target": base,
+                            "relation": relation,
+                            "source_location": f"L{line(node)}",
+                        })
+
     def walk(node: Any, containers: Tuple[str, ...], current_def: Optional[str]) -> None:
         node_type = node.type
 
@@ -164,6 +219,7 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
                         "relation": "defines",
                         "source_location": f"L{line(node)}",
                     })
+                    emit_inheritance(node, node_type, raw_id)
                 next_containers = containers + (name,) if kind == "class" else containers
                 for child in node.children:
                     walk(child, next_containers, raw_id if kind != "class" else current_def)
