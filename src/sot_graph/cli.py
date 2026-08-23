@@ -952,6 +952,22 @@ def main() -> int:
     db = Database(db_path)
     reconciler = Reconciler(db, root)
 
+    if db.schema_was_reset:
+        print("⚠️  LEGACY SCHEMA RESET: this project's index used an outdated schema "
+              "and was rebuilt empty.")
+        if args.command in ("reconcile", "clean"):
+            # `reconcile` is about to refill the graph itself, and `clean` was
+            # explicitly asked to prune/reset — auto-refilling would undo it.
+            print("   Run `sot reconcile` to repopulate the graph.")
+        else:
+            print("   Rebuilding the index automatically (one-time)…")
+            try:
+                summary = reconciler.reconcile()
+                print(f"   ✅ Auto-reconciled: {summary.updated} indexed/updated, "
+                      f"{summary.failed} failed.")
+            except (OSError, sqlite3.Error) as exc:
+                print(f"   ⚠ Auto-reconcile failed: {exc}; run `sot reconcile` manually.")
+
     try:
         if args.command == "search":
             return cmd_search(args, db, root)

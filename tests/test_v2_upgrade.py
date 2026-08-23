@@ -118,6 +118,63 @@ class SchemaV2Tests(TempProject):
             Database(str(db_path), read_only=True)
 
 
+class LegacyResetHealingTests(TempProject):
+    """A legacy (user_version=0) index must heal loudly, never silently."""
+
+    def seed_legacy_db(self):
+        db_path = self.root / ".sot" / "sot.db"
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        legacy = sqlite3.connect(str(db_path))
+        legacy.executescript(
+            "CREATE TABLE graph_nodes (id TEXT PRIMARY KEY, path TEXT, kind TEXT,"
+            " symbol TEXT, label TEXT, body TEXT, keywords TEXT, line_start INTEGER,"
+            " updated_at INTEGER);"
+            "INSERT INTO graph_nodes VALUES ('x','p','function','old','l','b',NULL,1,0);"
+        )
+        legacy.commit()
+        legacy.close()
+        return str(db_path)
+
+    def run_cli(self, *argv):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from sot_graph import cli
+        saved = sys.argv
+        sys.argv = ["sot", *argv]
+        out = StringIO()
+        try:
+            with redirect_stdout(out):
+                code = cli.main()
+        finally:
+            sys.argv = saved
+        return code, out.getvalue()
+
+    def test_legacy_reset_auto_reconciles_in_main(self):
+        db_path = self.seed_legacy_db()
+        self.write("app.py", "def main():\n    return 1\n")
+        code, out = self.run_cli("--root", str(self.root), "doctor")
+        self.assertEqual(code, 0)
+        self.assertIn("LEGACY SCHEMA RESET", out)
+        self.assertIn("Auto-reconciled", out)
+        with sqlite3.connect(str(db_path)) as conn:
+            nodes = conn.execute(
+                "SELECT COUNT(*) FROM graph_nodes WHERE symbol='main'").fetchone()[0]
+        self.assertGreater(nodes, 0)
+
+    def test_clean_does_not_auto_refill_after_reset(self):
+        # `clean` was explicitly asked to prune; refilling would undo it.
+        db_path = self.seed_legacy_db()
+        self.write("app.py", "def main():\n    return 1\n")
+        code, out = self.run_cli("--root", str(self.root), "clean", "--dry-run")
+        self.assertEqual(code, 0)
+        self.assertIn("LEGACY SCHEMA RESET", out)
+        self.assertIn("Run `sot reconcile`", out)
+        with sqlite3.connect(str(db_path)) as conn:
+            rows = conn.execute(
+                "SELECT COUNT(*) FROM graph_nodes").fetchone()[0]
+        self.assertEqual(rows, 0)
+
+
 def textwrap_dedent(text):
     return text
 
