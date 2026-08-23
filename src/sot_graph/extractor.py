@@ -36,6 +36,7 @@ EXT_DISPATCH = {
     ".kt": "extract_kotlin",
     ".kts": "extract_kotlin",
     ".dart": "extract_dart",
+    ".cs": "extract_c_sharp",
 }
 
 LANGUAGE_MAP = {
@@ -59,6 +60,7 @@ LANGUAGE_MAP = {
     ".kt": "kotlin",
     ".kts": "kotlin",
     ".dart": "dart",
+    ".cs": "c_sharp",
     ".arb": "json",
     ".md": "markdown",
     ".json": "json",

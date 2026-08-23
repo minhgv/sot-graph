@@ -299,6 +299,25 @@ def extract_python(path: Path) -> Dict[str, Any]:
                     "source_location": f"L{node.lineno}",
                     "import_source": ("." * node.level) + mod,
                 })
+        def visit_TypeAlias(self, node: Any):
+            name = getattr(node.name, "id", str(getattr(node, "name", "")))
+            if name:
+                nodes.append({
+                    "id": name,
+                    "label": f"type {name}",
+                    "kind": "class",
+                    "source_location": f"L{node.lineno}",
+                    "doc": "",
+                    "signature": f"type {name}",
+                    **_span_fields(node),
+                })
+                edges.append({
+                    "source": self.scope_stack[-1],
+                    "target": name,
+                    "relation": "defines",
+                    "source_location": f"L{node.lineno}",
+                })
+            self.generic_visit(node)
 
     visitor = PythonVisitor()
     visitor.visit(tree)
@@ -370,30 +389,48 @@ def extract_js(path: Path) -> Dict[str, Any]:
         {"regex": r"(?:export\s+)?(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?(?:<[^>]*>)?\s*(?:\([^)]*\)|[a-zA-Z0-9_$]+)(?:\s*:\s*[^=>]+)?\s*=>", "kind": "function", "prefix": "arrow_func"},
         {"regex": r"import\s+.*?from\s+['\"]([^'\"]+)['\"]", "kind": "import", "prefix": "import"},
     ]
-    return _extract_regex_patterns(path, patterns)
+    ext = path.suffix.lower()
+    ts_lang = "tsx" if ext == ".tsx" else ("typescript" if ext == ".ts" else "javascript")
+    return _ts_or_regex(path, ts_lang, patterns)
+
 
 def _ts_or_regex(
     path: Path,
     language: str,
-    patterns: List[Dict[str, Any]],
+    patterns: Optional[List[Dict[str, Any]]] = None,
     regex_postprocess=None,
+    regex_fallback_fn=None,
 ) -> Dict[str, Any]:
-    """Prefer the optional tree-sitter AST extractor; fall back to regex.
-
-    ``regex_postprocess(path, result)`` augments the regex result only — used
-    for relations the generic pattern engine cannot express (e.g. Java
-    inheritance clauses).
-    """
+    """Prefer the optional tree-sitter AST extractor; fall back to regex."""
     try:
         from sot_graph.ts_extract import extract_ts
 
-        return extract_ts(path, language)
+        res = extract_ts(path, language)
+        if not res.get("error") and (res.get("nodes") or res.get("edges")):
+            return res
     except Exception:
-        result = _extract_regex_patterns(path, patterns)
-        if regex_postprocess is not None:
-            regex_postprocess(path, result)
-        return result
+        pass
 
+    if regex_fallback_fn is not None:
+        return regex_fallback_fn(path)
+
+    result = _extract_regex_patterns(path, patterns or [])
+    if regex_postprocess is not None:
+        regex_postprocess(path, result)
+    return result
+
+
+def extract_c_sharp(path: Path) -> Dict[str, Any]:
+    """C# extractor (tree-sitter when available, regex fallback)."""
+    patterns = [
+        {"regex": r"(?:public|protected|private|internal|static)?\s*class\s+([a-zA-Z0-9_]+)", "kind": "class", "prefix": "class"},
+        {"regex": r"(?:public|protected|private|internal)?\s*interface\s+([a-zA-Z0-9_]+)", "kind": "interface", "prefix": "interface"},
+        {"regex": r"(?:public|protected|private|internal)?\s*record\s+(?:class\s+|struct\s+)?([a-zA-Z0-9_]+)", "kind": "record", "prefix": "record"},
+        {"regex": r"(?:public|protected|private|internal)?\s*struct\s+([a-zA-Z0-9_]+)", "kind": "struct", "prefix": "struct"},
+        {"regex": r"(?:public|protected|private|internal)?\s*enum\s+([a-zA-Z0-9_]+)", "kind": "enum", "prefix": "enum"},
+        {"regex": r"(?:public|protected|private|internal|static|async|\s)+[a-zA-Z0-9_<>\[\],\s]+\s+([a-zA-Z0-9_]+)\s*\([^)]*\)\s*\{?", "kind": "function", "prefix": "method"},
+    ]
+    return _ts_or_regex(path, "c_sharp", patterns)
 
 def extract_go(path: Path) -> Dict[str, Any]:
     """Go language extractor (tree-sitter when [tree-sitter] extra is present)."""
@@ -526,10 +563,7 @@ PHP_IMPLEMENTS_PAT = re.compile(r"\bimplements\s+([A-Za-z0-9_\\,\s]+)")
 PHP_USE_IN_TYPE_PAT = re.compile(
     r"^use\s+([A-Za-z_][A-Za-z0-9_\\]*)((?:\s*,\s*[A-Za-z_][A-Za-z0-9_\\]*)*)\s*;"
 )
-PHP_USE_IMPORT_PAT = re.compile(
-    r"^use\s+(?:function\s+|const\s+)?([A-Za-z_][A-Za-z0-9_\\]*)"
-    r"(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?\s*;"
-)
+PHP_USE_IMPORT_PAT = re.compile(r"^\s*use\s+(?:function\s+|const\s+)?([A-Za-z0-9_\\]+)")
 PHP_METHOD_PAT = re.compile(
     r"^(?:(?:public|protected|private|static|abstract|final|readonly)\s+)*"
     r"function\s+(&?[A-Za-z_][A-Za-z0-9_]*)\s*\("
@@ -547,13 +581,10 @@ def _php_short_name(fqn: str) -> str:
 
 
 def extract_php(path: Path) -> Dict[str, Any]:
-    """PHP extractor: classes, interfaces, traits, enums, class-qualified
-    methods, inheritance/trait edges, imports, and scoped call sites.
-
-    Line-based state machine in the spirit of the Dart extractor: comments are
-    stripped, brace depth tracks the enclosing type/method so symbols get
-    stable ids ('PaymentGateway.charge') instead of colliding bare names.
-    """
+    """PHP extractor: high-fidelity state machine for PHP 5.4-8.3."""
+    return _extract_php_regex(path)
+def _extract_php_regex(path: Path) -> Dict[str, Any]:
+    """Fallback line-based state machine for PHP."""
     try:
         content = path.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
@@ -634,6 +665,7 @@ def extract_php(path: Path) -> Dict[str, Any]:
                 "kind": kind,
                 "source_location": f"L{i - lookahead}",
                 "doc": line,
+                "signature": f"{kind} {name}",
             })
             edges.append({
                 "source": path.name,
@@ -704,6 +736,7 @@ def extract_php(path: Path) -> Dict[str, Any]:
                     "kind": "method",
                     "source_location": f"L{i}",
                     "doc": line,
+                    "signature": f"function {func_name}",
                 })
                 edges.append({
                     "source": current_type,
@@ -719,6 +752,7 @@ def extract_php(path: Path) -> Dict[str, Any]:
                     "kind": "function",
                     "source_location": f"L{i}",
                     "doc": line,
+                    "signature": f"function {func_name}",
                 })
                 edges.append({
                     "source": path.name,

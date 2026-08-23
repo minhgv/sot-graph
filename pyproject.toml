@@ -32,6 +32,11 @@ vector = ["sqlite-vec>=0.1.6"]
     "tree-sitter-java>=0.23",
     "tree-sitter-kotlin>=0.7",
     "tree-sitter-swift>=0.7",
+    "tree-sitter-php>=0.23",
+    "tree-sitter-typescript>=0.23",
+    "tree-sitter-javascript>=0.23",
+    "tree-sitter-python>=0.23",
+    "tree-sitter-c-sharp>=0.23",
 ]
 
 
