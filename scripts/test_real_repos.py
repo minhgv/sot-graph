@@ -17,6 +17,7 @@ Tests 15 distinct feature pipelines across 12 real repositories:
 14. Maintenance (clean & vacuum)
 15. Incremental Reconciler & Self-Healing (create, edit, delete, reconcile)
 """
+import argparse
 import json
 import os
 import shutil
@@ -48,71 +49,49 @@ from sot_graph.repo_map import build_repo_map
 from sot_graph import vector
 
 
-REPOS_TO_TEST = [
-    {
-        "name": "lazzybee",
-        "path": "/Users/giapminh79/code/GitHub/lazzybee",
-        "lang": "Dart/Flutter",
-    },
-    {
-        "name": "mini_appstore_flutter",
-        "path": "/Users/giapminh79/code/GitHub/mini_appstore_flutter",
-        "lang": "Dart/Flutter",
-    },
-    {
-        "name": "ai-scaffold",
-        "path": "/Users/giapminh79/code/GitHub/ai-scaffold",
-        "lang": "TypeScript/Node",
-    },
-    {
-        "name": "ban-hoc-toan",
-        "path": "/Users/giapminh79/code/GitHub/ban-hoc-toan",
-        "lang": "JS/TS/Web (Vietnamese)",
-    },
-    {
-        "name": "uniservices-php",
-        "path": "/Users/giapminh79/code/GitHub/uniservices-php",
-        "lang": "PHP/Backend",
-    },
-    {
-        "name": "crm",
-        "path": "/Users/giapminh79/code/GitHub/crm",
-        "lang": "PHP/Enterprise CRM",
-    },
-    {
-        "name": "unipay",
-        "path": "/Users/giapminh79/code/GitHub/unipay",
-        "lang": "PHP/Financial Backend",
-    },
-    {
-        "name": "md2docx",
-        "path": "/Users/giapminh79/code/GitHub/md2docx",
-        "lang": "Python",
-    },
-    {
-        "name": "antigravity-sdk-python",
-        "path": "/Users/giapminh79/code/GitHub/antigravity-sdk-python",
-        "lang": "Python/AI SDK",
-    },
-    {
-        "name": "odoo-itpro",
-        "path": "/Users/giapminh79/code/GitHub/odoo-itpro",
-        "lang": "Python/Odoo",
-    },
-    {
-        "name": "google-antigravity-auth",
-        "path": "/Users/giapminh79/code/GitHub/google-antigravity-auth",
-        "lang": "TypeScript",
-    },
-    {
-        "name": "auth-net",
-        "path": "/Users/giapminh79/code/GitHub/auth-net",
-        "lang": "C#/.NET",
-    },
+KNOWN_BENCHMARK_SPECS = [
+    {"name": "lazzybee", "lang": "Dart/Flutter"},
+    {"name": "mini_appstore_flutter", "lang": "Dart/Flutter"},
+    {"name": "ai-scaffold", "lang": "TypeScript/Node"},
+    {"name": "ban-hoc-toan", "lang": "JS/TS/Web (Vietnamese)"},
+    {"name": "uniservices-php", "lang": "PHP/Backend"},
+    {"name": "crm", "lang": "PHP/Enterprise CRM"},
+    {"name": "unipay", "lang": "PHP/Financial Backend"},
+    {"name": "md2docx", "lang": "Python"},
+    {"name": "antigravity-sdk-python", "lang": "Python/AI SDK"},
+    {"name": "odoo-itpro", "lang": "Python/Odoo"},
+    {"name": "google-antigravity-auth", "lang": "TypeScript"},
+    {"name": "auth-net", "lang": "C#/.NET"},
 ]
 
 
-def test_repo(repo_info):
+def resolve_benchmark_repos(base_dir: Path | None = None, manifest_path: Path | None = None, repo_filter: str | None = None):
+    if manifest_path and manifest_path.exists():
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            specs = json.load(f)
+            return specs
+
+    if base_dir is None:
+        env_dir = os.environ.get("SOT_BENCHMARK_REPOS_DIR")
+        if env_dir:
+            base_dir = Path(env_dir)
+        else:
+            base_dir = Path(__file__).parent.parent.parent
+
+    repos = []
+    for spec in KNOWN_BENCHMARK_SPECS:
+        if repo_filter and spec["name"] != repo_filter:
+            continue
+        target_path = base_dir / spec["name"]
+        repos.append({
+            "name": spec["name"],
+            "path": str(target_path),
+            "lang": spec["lang"],
+        })
+    return repos
+
+
+def benchmark_repo(repo_info):
     repo_path = Path(repo_info["path"])
     repo_name = repo_info["name"]
     lang = repo_info["lang"]
@@ -463,17 +442,28 @@ def test_repo(repo_info):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="SOT-Graph real-world multi-repo verification harness")
+    parser.add_argument("--repos-dir", type=Path, default=None, help="Base directory containing benchmark repositories")
+    parser.add_argument("--manifest", type=Path, default=None, help="JSON manifest specifying repo paths and languages")
+    parser.add_argument("--repo", type=str, default=None, help="Run only for a specific repository name")
+    args = parser.parse_args()
+
     print("=" * 60)
     print("🌟 SOT-GRAPH REAL-WORLD MULTI-REPO VERIFICATION HARNESS 🌟")
     print("=" * 60)
     
+    repos = resolve_benchmark_repos(base_dir=args.repos_dir, manifest_path=args.manifest, repo_filter=args.repo)
+    if not repos:
+        print("⚠️  No repositories configured for benchmark.")
+        return
+
     all_results = []
     total_errors = 0
     total_warnings = 0
     successful_repos = 0
     
-    for repo_info in REPOS_TO_TEST:
-        res = test_repo(repo_info)
+    for repo_info in repos:
+        res = benchmark_repo(repo_info)
         all_results.append(res)
         errs = len(res.get("errors", []))
         warns = len(res.get("warnings", []))
@@ -481,8 +471,6 @@ def main():
         total_warnings += warns
         if errs == 0 and res.get("status") != "skipped":
             successful_repos += 1
-            
-    print("\n" + "=" * 60)
     print("📊 OVERALL SUMMARY & DIAGNOSTICS")
     print("=" * 60)
     
@@ -513,7 +501,7 @@ def main():
                     print(f"     Traceback:\n{err['traceback']}")
 
     print("\n" + "=" * 60)
-    print(f"🎯 TOTAL REPOS TESTED: {len(REPOS_TO_TEST)}")
+    print(f"🎯 TOTAL REPOS TESTED: {len(repos)}")
     print(f"✅ SUCCESSFUL: {successful_repos}")
     print(f"❌ TOTAL ERRORS: {total_errors}")
     print(f"⚠️  TOTAL WARNINGS: {total_warnings}")

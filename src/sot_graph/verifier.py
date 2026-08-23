@@ -1,14 +1,26 @@
 """
-sot_graph.verifier — Trust Verdict Engine.
-Calculates lexical content coverage against physical disk files, validates file existence,
-and performs deterministic rehoming or auto-purging of dead paths.
+sot_graph.verifier — Trust Verdict Engine (Trust Model v2).
+
+Calculates multi-dimensional evidence (Freshness, Relevance, Resolution, Completeness, Confidence)
+against physical disk reality, validates file existence, and provides backward-compatible
+legacy verdicts ([STRONG], [WEAK], [STALE], [REBUILT], [REMOVED]).
 """
 
+from __future__ import annotations
+
+import hashlib
 import os
 import re
 from typing import Any, Dict, Optional, Set, Tuple
 
 from sot_graph.db import Database
+from sot_graph.evidence import (
+    CompletenessStatus,
+    FreshnessStatus,
+    RelevanceType,
+    ResolutionStatus,
+    TrustEvidence,
+)
 from sot_graph.ignore import DEFAULT_IGNORED_DIRS
 
 # Stop words ignored during lexical coverage calculation
@@ -31,11 +43,24 @@ def tokenize(text: str) -> Set[str]:
     return {t for t in tokens if t not in STOP_WORDS}
 
 
+class VerificationResult(Tuple[str, Optional[float], str]):
+    """
+    Backward-compatible 3-tuple (verdict, coverage, path) that attaches
+    a multi-dimensional TrustEvidence instance for Trust Model v2.
+    """
+    evidence: TrustEvidence
+
+    def __new__(cls, verdict: str, coverage: Optional[float], path: str, evidence: TrustEvidence):
+        inst = super().__new__(cls, (verdict, coverage, path))
+        inst.evidence = evidence
+        return inst
+
+
 class TrustVerifier:
     @staticmethod
-    def calculate_coverage(file_path: str, query_tokens: Set[str], max_bytes: int = 262144) -> Optional[float]:
+    def calculate_coverage(file_path: str, query_tokens: Set[str], max_bytes: int = 524288) -> Optional[float]:
         """
-        Reads up to max_bytes (default 256KB) from physical file and computes
+        Reads up to max_bytes (default 512KB) from physical file and computes
         the fraction of query tokens present in the actual disk content.
         Returns None if file cannot be read, is binary, or is oversized.
         """
@@ -73,31 +98,52 @@ class TrustVerifier:
             if scanned >= max_scanned_files:
                 break
         return cands[0] if len(cands) == 1 else None
+
+    @staticmethod
+    def _rehomable(new_path: str, candidate: Dict[str, Any]) -> bool:
+        """Guard against basename collisions re-homing nodes onto the wrong file."""
+        symbol = candidate.get("symbol")
+        if candidate.get("kind") == "file" or not symbol:
+            return True
+        needle = str(symbol).rsplit(".", 1)[-1]
+        if not needle.isidentifier() and not needle.replace("$", "").isalnum():
+            return True
+        try:
+            with open(new_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read(524288)
+        except OSError:
+            return False
+        return re.search(rf"\b{re.escape(needle)}\b", content) is not None
+
     @classmethod
-    def verify_hit(
+    def verify_evidence(
         cls,
-        db: Database,
         candidate: Dict[str, Any],
         query_tokens: Set[str],
         project_root: str,
         threshold: float = 0.5,
-        auto_heal: bool = True,
-    ) -> Tuple[str, Optional[float], str]:
+        db: Optional[Database] = None,
+        auto_heal: bool = False,
+    ) -> TrustEvidence:
         """
-        Verify a search hit against disk reality.
-
-        ``auto_heal`` retains the historical self-healing behaviour when true.
-        Read-only callers (including MCP) must pass false: no database mutation
-        or deletion is performed and missing/unmoved files return ``STALE``.
-        Every disk access is constrained to ``project_root``; a path outside the
-        root is treated as stale without even checking its existence.
+        Produce a multi-dimensional TrustEvidence object for a candidate hit.
         """
         path = candidate.get("path")
-        node_id = candidate["id"]
+        node_id = candidate.get("id", "")
         root = os.path.realpath(os.path.abspath(project_root))
 
         if not path or not str(path).strip():
-            return "NOPATH", 1.0, ""
+            return TrustEvidence(
+                freshness=FreshnessStatus.UNKNOWN,
+                relevance=RelevanceType.UNKNOWN,
+                resolution=ResolutionStatus.UNRESOLVED,
+                completeness=CompletenessStatus.UNKNOWN,
+                confidence=0.0,
+                provenance="trust_verifier:v2",
+                file_path="",
+                coverage=1.0,
+                details={"nopath": True},
+            )
 
         requested = os.path.abspath(os.path.expanduser(str(path)))
 
@@ -107,55 +153,199 @@ class TrustVerifier:
             except (OSError, ValueError):
                 return False
 
-        # Indexed paths are normally absolute.  Relative paths are interpreted
-        # relative to the configured root, never relative to process cwd.
         if not os.path.isabs(str(path)):
             requested = os.path.abspath(os.path.join(root, str(path)))
+
         if not _inside_root(requested):
-            return "STALE", None, str(path)
+            return TrustEvidence(
+                freshness=FreshnessStatus.STALE,
+                relevance=RelevanceType.UNKNOWN,
+                resolution=ResolutionStatus.UNRESOLVED,
+                completeness=CompletenessStatus.PARTIAL,
+                confidence=0.0,
+                provenance="trust_verifier:v2",
+                file_path=str(path),
+                details={"outside_root": True},
+            )
 
+        # 1. File exists on disk
         if os.path.exists(requested) and os.path.isfile(requested):
-            cov = cls.calculate_coverage(requested, query_tokens)
-            if cov is not None:
-                verdict = "STRONG" if cov >= threshold else "WEAK"
+            try:
+                st = os.stat(requested)
+                if st.st_size > 524288:  # 512 KB
+                    return TrustEvidence(
+                        freshness=FreshnessStatus.UNKNOWN,
+                        relevance=RelevanceType.UNKNOWN,
+                        resolution=ResolutionStatus.EXACT,
+                        completeness=CompletenessStatus.COMPLETE,
+                        confidence=0.0,
+                        provenance="trust_verifier:v2",
+                        file_path=requested,
+                        coverage=None,
+                        details={"oversized": True, "size": st.st_size},
+                    )
+                with open(requested, "rb") as f:
+                    raw = f.read(524288)
+                if b"\x00" in raw[:1024]:  # Binary guard
+                    return TrustEvidence(
+                        freshness=FreshnessStatus.UNKNOWN,
+                        relevance=RelevanceType.UNKNOWN,
+                        resolution=ResolutionStatus.EXACT,
+                        completeness=CompletenessStatus.COMPLETE,
+                        confidence=0.0,
+                        provenance="trust_verifier:v2",
+                        file_path=requested,
+                        coverage=None,
+                        details={"binary": True},
+                    )
+                file_hash = hashlib.sha256(raw).hexdigest()
+                text_content = raw.decode("utf-8", errors="replace")
+                text_lower = text_content.lower()
+            except Exception as exc:
+                return TrustEvidence(
+                    freshness=FreshnessStatus.UNKNOWN,
+                    relevance=RelevanceType.UNKNOWN,
+                    resolution=ResolutionStatus.EXACT,
+                    completeness=CompletenessStatus.COMPLETE,
+                    confidence=0.0,
+                    provenance="trust_verifier:v2",
+                    file_path=requested,
+                    coverage=None,
+                    details={"error": str(exc)},
+                )
+
+            # Calculate coverage
+            if query_tokens:
+                hit = sum(1 for t in query_tokens if t in text_lower)
+                cov = hit / len(query_tokens)
             else:
-                verdict = "STRONG"
-            return verdict, cov, requested
+                cov = None
 
-        # Read-only verification never searches, updates, or purges.
-        if not auto_heal:
-            return "STALE", None, requested
+            # Relevance detection
+            cand_symbol = candidate.get("symbol")
+            cand_line = candidate.get("line_start") or candidate.get("line")
+            relevance = RelevanceType.UNKNOWN
 
+            if cand_symbol and isinstance(cand_symbol, str):
+                symbol_needle = cand_symbol.rsplit(".", 1)[-1]
+                if cand_line and isinstance(cand_line, int) and cand_line > 0:
+                    lines = text_content.splitlines()
+                    # Check window of +/- 5 lines around recorded line
+                    start_idx = max(0, cand_line - 5)
+                    end_idx = min(len(lines), cand_line + 5)
+                    span_text = "\n".join(lines[start_idx:end_idx])
+                    if symbol_needle in span_text:
+                        relevance = RelevanceType.EXACT_SPAN
+                    elif symbol_needle in text_content:
+                        relevance = RelevanceType.EXACT_SYMBOL
+                    elif cov and cov >= threshold:
+                        relevance = RelevanceType.FILE_TOKEN
+                    else:
+                        relevance = RelevanceType.NAME_ONLY
+                else:
+                    if symbol_needle in text_content:
+                        relevance = RelevanceType.EXACT_SYMBOL
+                    elif cov and cov >= threshold:
+                        relevance = RelevanceType.FILE_TOKEN
+                    else:
+                        relevance = RelevanceType.NAME_ONLY
+            elif cov is not None and cov >= threshold:
+                relevance = RelevanceType.FILE_TOKEN
+            elif cov is not None and cov > 0:
+                relevance = RelevanceType.NAME_ONLY
+            else:
+                relevance = RelevanceType.EXACT_SYMBOL if candidate.get("kind") == "file" else RelevanceType.UNKNOWN
+
+            # Confidence calculation
+            if relevance == RelevanceType.EXACT_SPAN:
+                confidence = max(0.95, cov or 0.95)
+            elif relevance == RelevanceType.EXACT_SYMBOL:
+                confidence = max(0.85, cov or 0.85)
+            elif relevance == RelevanceType.FILE_TOKEN:
+                confidence = cov if cov is not None else 0.7
+            elif candidate.get("kind") == "file":
+                confidence = 0.9 if cov is None or cov >= threshold else max(0.6, cov)
+            else:
+                confidence = 0.3
+
+            return TrustEvidence(
+                freshness=FreshnessStatus.FRESH,
+                relevance=relevance,
+                resolution=ResolutionStatus.EXACT,
+                completeness=CompletenessStatus.COMPLETE,
+                confidence=min(1.0, max(0.0, confidence)),
+                provenance="trust_verifier:v2",
+                file_path=requested,
+                file_hash=file_hash,
+                coverage=cov,
+                details={"mtime_ms": int(st.st_mtime * 1000), "size": st.st_size},
+            )
+
+        # 2. File is MISSING on disk
+        if not auto_heal or db is None:
+            return TrustEvidence(
+                freshness=FreshnessStatus.MISSING,
+                relevance=RelevanceType.UNKNOWN,
+                resolution=ResolutionStatus.UNRESOLVED,
+                completeness=CompletenessStatus.PARTIAL,
+                confidence=0.0,
+                provenance="trust_verifier:v2",
+                file_path=requested,
+                details={"missing": True},
+            )
+
+        # 3. Auto-heal branch (only when explicitly requested by writer/reconciler)
         basename = os.path.basename(requested)
         new_path = cls.find_rehome(root, basename)
         if new_path and _inside_root(new_path) and os.path.exists(new_path):
             if cls._rehomable(new_path, candidate):
                 db.update_node_path(node_id, requested, new_path)
                 cov = cls.calculate_coverage(new_path, query_tokens)
-                return "REBUILT", cov, new_path
-        # Preserve historical auto-purge for the CLI and library callers.
+                return TrustEvidence(
+                    freshness=FreshnessStatus.FRESH,
+                    relevance=RelevanceType.FILE_TOKEN,
+                    resolution=ResolutionStatus.INFERRED,
+                    completeness=CompletenessStatus.PARTIAL,
+                    confidence=cov or 0.7,
+                    provenance="trust_verifier:auto_rehome",
+                    file_path=new_path,
+                    coverage=cov,
+                    details={"rehomed": True, "old_path": requested},
+                )
         db.delete_path(requested)
-        return "REMOVED", 0.0, requested
+        return TrustEvidence(
+            freshness=FreshnessStatus.MISSING,
+            relevance=RelevanceType.UNKNOWN,
+            resolution=ResolutionStatus.UNRESOLVED,
+            completeness=CompletenessStatus.PARTIAL,
+            confidence=0.0,
+            provenance="trust_verifier:auto_purge",
+            file_path=requested,
+            coverage=0.0,
+            details={"removed": True},
+        )
 
-    @staticmethod
-    def _rehomable(new_path: str, candidate: Dict[str, Any]) -> bool:
-        """Guard against basename collisions re-homing nodes onto the wrong
-        file (e.g. sibling Odoo addons that each ship hooks.py).
-
-        File nodes accept the basename match itself; code symbols must
-        actually appear in the candidate file's text, otherwise the verdict
-        degrades to REMOVED instead of attaching the node to a foreign file.
+    @classmethod
+    def verify_hit(
+        cls,
+        db: Optional[Database],
+        candidate: Dict[str, Any],
+        query_tokens: Set[str],
+        project_root: str,
+        threshold: float = 0.5,
+        auto_heal: bool = True,
+    ) -> VerificationResult:
         """
-        symbol = candidate.get("symbol")
-        if candidate.get("kind") == "file" or not symbol:
-            return True
-        needle = str(symbol).rsplit(".", 1)[-1]
-        if not needle.isidentifier() and not needle.replace("$", "").isalnum():
-            # Weird symbol text (file names, hashes): don't block the rehome.
-            return True
-        try:
-            with open(new_path, "r", encoding="utf-8", errors="replace") as f:
-                content = f.read(524288)
-        except OSError:
-            return False
-        return re.search(rf"\b{re.escape(needle)}\b", content) is not None
+        Verify a search hit against disk reality. Returns VerificationResult
+        which functions as a (verdict, coverage, path) tuple with attached .evidence.
+        """
+        evidence = cls.verify_evidence(
+            candidate=candidate,
+            query_tokens=query_tokens,
+            project_root=project_root,
+            threshold=threshold,
+            db=db,
+            auto_heal=auto_heal,
+        )
+        verdict = evidence.to_legacy_verdict()
+        return VerificationResult(verdict, evidence.coverage, evidence.file_path, evidence)

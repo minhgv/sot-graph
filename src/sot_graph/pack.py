@@ -16,9 +16,11 @@ import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from sot_graph.tokenizer import estimate_tokens, truncate_to_token_budget
+
 __all__ = ["PackError", "build_bundle", "render_yaml"]
 
-BUNDLE_SCHEMA_VERSION = "2.0.0"
+BUNDLE_SCHEMA_VERSION = "2.1.0"
 _DEFAULT_MAX_HOPS = 2
 _DEFAULT_MAX_NODES = 50
 _DEFAULT_MAX_BYTES = 65_536
@@ -129,6 +131,28 @@ def _slice_source(node: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
 def _dedent_block(text: str) -> str:
     import textwrap
     return textwrap.dedent(text).strip("\n")
+def _verify_neighbor_freshness(db, neighbor_path: str) -> Tuple[str, Optional[str]]:
+    """Check if neighbor file exists and matches indexed hash.
+
+    Returns (verdict, warning_or_none) where verdict is 'FRESH', 'STALE', or 'MISSING'.
+    """
+    if not os.path.isfile(neighbor_path):
+        return "MISSING", f"neighbor_missing: file {neighbor_path} no longer exists on disk"
+
+    journal = db.conn.execute(
+        "SELECT sha256 FROM file_journal WHERE path = ?", (neighbor_path,)
+    ).fetchone()
+    if journal is None:
+        return "UNKNOWN", f"neighbor_unindexed: file {neighbor_path} is not in file journal"
+
+    try:
+        with open(neighbor_path, "rb") as fh:
+            disk_sha = hashlib.sha256(fh.read()).hexdigest()
+        if disk_sha != journal[0]:
+            return "STALE", f"neighbor_stale: file {neighbor_path} modified on disk since indexing"
+        return "FRESH", None
+    except OSError as exc:
+        return "UNREADABLE", f"neighbor_error: cannot read {neighbor_path}: {exc}"
 
 
 def build_bundle(
@@ -138,6 +162,7 @@ def build_bundle(
     max_hops: int = _DEFAULT_MAX_HOPS,
     max_nodes: int = _DEFAULT_MAX_NODES,
     max_bytes: int = _DEFAULT_MAX_BYTES,
+    max_tokens: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Build the ContextBundle structure; raises :class:`PackError` closed."""
     node, matched = _find_target(db, target)
@@ -207,12 +232,19 @@ def build_bundle(
         if len(inbound) + len(outbound) >= max_nodes:
             warnings.append("node_cap_reached: 1-hop neighbors truncated")
             break
+
+        n_verdict, n_warn = _verify_neighbor_freshness(db, neighbor["path"])
+        if n_warn:
+            warnings.append(n_warn)
+
+        n_rel_path = os.path.relpath(neighbor["path"], root) if os.path.isabs(neighbor["path"]) else neighbor["path"]
+
         if direction == "in":
             inbound.append({
                 "node_id": neighbor["id"],
                 "fqn": neighbor["fqn"] or neighbor["symbol"],
-                "relative_path": os.path.relpath(neighbor["path"], root)
-                if os.path.isabs(neighbor["path"]) else neighbor["path"],
+                "relative_path": n_rel_path,
+                "trust_verdict": n_verdict,
                 "callsite_line": line,
                 "contract": neighbor["signature"] or neighbor["label"],
             })
@@ -220,8 +252,8 @@ def build_bundle(
             outbound.append({
                 "node_id": neighbor["id"],
                 "fqn": neighbor["fqn"] or neighbor["symbol"],
-                "relative_path": os.path.relpath(neighbor["path"], root)
-                if os.path.isabs(neighbor["path"]) else neighbor["path"],
+                "relative_path": n_rel_path,
+                "trust_verdict": n_verdict,
                 "signature": neighbor["signature"] or neighbor["label"],
             })
         level1_ids.append(neighbor_id)
@@ -261,6 +293,7 @@ def build_bundle(
         outbound.pop()
         truncated = True
 
+    # Build draft bundle
     bundle = {
         "schema_version": BUNDLE_SCHEMA_VERSION,
         "bundle_id": "bundle:" + hashlib.sha256(
@@ -278,6 +311,8 @@ def build_bundle(
             "max_hops": max_hops,
             "max_nodes": max_nodes,
             "max_bytes": max_bytes,
+            "max_tokens": max_tokens,
+            "tokens_estimate": 0,
             "discovered_nodes": len(visited),
             "returned_nodes": 1 + len(inbound) + len(outbound) + len(stubs),
             "truncated": truncated,
@@ -287,8 +322,64 @@ def build_bundle(
     trusted = _load_trusted_instructions(root, max_bytes)
     if trusted is not None:
         bundle["trusted_instructions"] = trusted
-    return bundle
 
+    # Hard token budget enforcement if max_tokens is provided
+    if max_tokens is not None and max_tokens > 0:
+        rendered = render_yaml(bundle)
+        tok_count = estimate_tokens(rendered)
+        while tok_count > max_tokens and stubs:
+            stubs.pop()
+            bundle["transitive_stubs"] = stubs
+            bundle["limits"]["returned_nodes"] = 1 + len(inbound) + len(outbound) + len(stubs)
+            truncated = True
+            bundle["limits"]["truncated"] = True
+            rendered = render_yaml(bundle)
+            tok_count = estimate_tokens(rendered)
+
+        while tok_count > max_tokens and outbound:
+            outbound.pop()
+            bundle["outbound_callees"] = outbound
+            bundle["limits"]["returned_nodes"] = 1 + len(inbound) + len(outbound) + len(stubs)
+            truncated = True
+            bundle["limits"]["truncated"] = True
+            rendered = render_yaml(bundle)
+            tok_count = estimate_tokens(rendered)
+
+        while tok_count > max_tokens and inbound:
+            inbound.pop()
+            bundle["inbound_callers"] = inbound
+            bundle["limits"]["returned_nodes"] = 1 + len(inbound) + len(outbound) + len(stubs)
+            truncated = True
+            bundle["limits"]["truncated"] = True
+            rendered = render_yaml(bundle)
+            tok_count = estimate_tokens(rendered)
+
+        if tok_count > max_tokens and target_block.get("full_source"):
+            # Target span truncation
+            overhead_tokens = estimate_tokens(render_yaml({**bundle, "target": {**target_block, "full_source": ""}}))
+            avail_source_tokens = max(16, max_tokens - overhead_tokens)
+            trunc_src, is_trunc, _ = truncate_to_token_budget(target_block["full_source"], avail_source_tokens)
+            if is_trunc:
+                target_block["full_source"] = trunc_src
+                truncated = True
+                bundle["limits"]["truncated"] = True
+                warnings.append("token_cap_reached: target full_source truncated")
+                rendered = render_yaml(bundle)
+                tok_count = estimate_tokens(rendered)
+
+        if tok_count > max_tokens and bundle.get("trusted_instructions"):
+            inst_block = bundle["trusted_instructions"]
+            inst_text = inst_block.get("content", "")
+            if inst_text:
+                avail_inst_tokens = max(16, max_tokens // 4)
+                trunc_inst, is_trunc_inst, _ = truncate_to_token_budget(inst_text, avail_inst_tokens)
+                if is_trunc_inst:
+                    inst_block["content"] = trunc_inst
+                    truncated = True
+                    bundle["limits"]["truncated"] = True
+                    warnings.append("token_cap_reached: trusted instructions truncated")
+    bundle["limits"]["tokens_estimate"] = estimate_tokens(render_yaml(bundle))
+    return bundle
 
 _TRUSTED_INSTRUCTION_FILES = ("AGENTS.md",)
 _TRUSTED_MAX_BYTES = 8192
@@ -382,6 +473,8 @@ def render_yaml(bundle: Dict[str, Any]) -> str:
             out.append(f"  - node_id: {_yaml_scalar(caller['node_id'])}")
             out.append(f"    fqn: {_yaml_scalar(caller['fqn'])}")
             out.append(f"    relative_path: {_yaml_scalar(caller['relative_path'])}")
+            if "trust_verdict" in caller:
+                out.append(f"    trust_verdict: {_yaml_scalar(caller['trust_verdict'])}")
             out.append(f"    callsite_line: {_yaml_scalar(caller['callsite_line'])}")
             out.append(f"    contract: {_yaml_scalar(caller['contract'])}")
     else:
@@ -394,6 +487,8 @@ def render_yaml(bundle: Dict[str, Any]) -> str:
             out.append(f"  - node_id: {_yaml_scalar(callee['node_id'])}")
             out.append(f"    fqn: {_yaml_scalar(callee['fqn'])}")
             out.append(f"    relative_path: {_yaml_scalar(callee['relative_path'])}")
+            if "trust_verdict" in callee:
+                out.append(f"    trust_verdict: {_yaml_scalar(callee['trust_verdict'])}")
             out.append(f"    signature: {_yaml_scalar(callee['signature'])}")
     else:
         out.append("  []")
@@ -410,9 +505,10 @@ def render_yaml(bundle: Dict[str, Any]) -> str:
     limits = bundle["limits"]
     out.append("")
     out.append("limits:")
-    for key in ("max_hops", "max_nodes", "max_bytes", "discovered_nodes",
-                "returned_nodes", "truncated"):
-        out.append(f"  {key}: {_yaml_scalar(limits.get(key))}")
+    for key in ("max_hops", "max_nodes", "max_bytes", "max_tokens", "tokens_estimate",
+                "discovered_nodes", "returned_nodes", "truncated"):
+        if key in limits:
+            out.append(f"  {key}: {_yaml_scalar(limits.get(key))}")
     if limits.get("warnings"):
         out.append("  warnings:")
         for warning in limits["warnings"]:

@@ -376,15 +376,92 @@ class Database:
             self.conn.execute("DELETE FROM graph_edges WHERE src = ? OR dst = ?", (node_id, node_id))
             self.conn.execute("DELETE FROM pending_edges WHERE src = ?", (node_id,))
 
-    def update_node_path(self, node_id: str, old_path: str, new_path: str) -> None:
+    def rehome_file_atomically(
+        self,
+        old_path: str,
+        new_path: str,
+        new_sha256: Optional[str] = None,
+        new_mtime_ms: Optional[int] = None,
+        new_size: Optional[int] = None,
+    ) -> bool:
+        """Atomically rehome a file and all its nodes, edges, and journal in 01 SQLite transaction."""
+        now = int(time.time())
         with self.conn:
-            self.conn.execute(
-                "UPDATE graph_nodes SET path = ?, label = REPLACE(label, ?, ?), "
-                "body = REPLACE(body, ?, ?) WHERE id = ?",
-                (new_path, old_path, new_path, old_path, new_path, node_id),
-            )
-            self.conn.execute("DELETE FROM file_journal WHERE path = ?", (old_path,))
+            # 1. Update file_journal
+            if new_sha256 is not None and new_size is not None and new_mtime_ms is not None:
+                self.conn.execute(
+                    "UPDATE file_journal SET path = ?, sha256 = ?, size = ?, mtime_ms = ?, "
+                    "generation = generation + 1, reconciled_at = ? WHERE path = ?",
+                    (new_path, new_sha256, new_size, new_mtime_ms, now, old_path),
+                )
+            else:
+                self.conn.execute(
+                    "UPDATE file_journal SET path = ?, generation = generation + 1, "
+                    "reconciled_at = ? WHERE path = ?",
+                    (new_path, now, old_path),
+                )
 
+            # 2. Update graph_nodes (triggers will maintain FTS5)
+            self.conn.execute(
+                "UPDATE graph_nodes SET path = ?, "
+                "id = REPLACE(id, ?, ?), "
+                "label = REPLACE(label, ?, ?), "
+                "body = REPLACE(body, ?, ?), "
+                "updated_at = ? WHERE path = ?",
+                (new_path, old_path, new_path, old_path, new_path, old_path, new_path, now, old_path),
+            )
+
+            # 3. Update graph_edges
+            self.conn.execute(
+                "UPDATE graph_edges SET path = ?, "
+                "src = REPLACE(src, ?, ?), "
+                "dst = REPLACE(dst, ?, ?) "
+                "WHERE path = ?",
+                (new_path, old_path, new_path, old_path, new_path, old_path),
+            )
+            self.conn.execute(
+                "UPDATE graph_edges SET src = REPLACE(src, ?, ?) "
+                "WHERE path != ? AND src LIKE ? || '%'",
+                (old_path, new_path, new_path, old_path),
+            )
+            self.conn.execute(
+                "UPDATE graph_edges SET dst = REPLACE(dst, ?, ?) "
+                "WHERE path != ? AND dst LIKE ? || '%'",
+                (old_path, new_path, new_path, old_path),
+            )
+
+            # 4. Update pending_edges
+            self.conn.execute(
+                "UPDATE pending_edges SET path = ?, "
+                "src = REPLACE(src, ?, ?) "
+                "WHERE path = ?",
+                (new_path, old_path, new_path, old_path),
+            )
+            self.conn.execute(
+                "UPDATE pending_edges SET src = REPLACE(src, ?, ?) "
+                "WHERE path != ? AND src LIKE ? || '%'",
+                (old_path, new_path, new_path, old_path),
+            )
+
+            # 5. Domain tables
+            for tbl, col in [
+                ("ui_navigation", "file_path"),
+                ("ui_decision_nodes", "file_path"),
+                ("be_execution_steps", "file_path"),
+                ("api_cross_bindings", "fe_file"),
+                ("api_cross_bindings", "be_file"),
+            ]:
+                try:
+                    self.conn.execute(
+                        f"UPDATE {tbl} SET {col} = ? WHERE {col} = ?",
+                        (new_path, old_path),
+                    )
+                except Exception:
+                    pass
+        return True
+
+    def update_node_path(self, node_id: str, old_path: str, new_path: str) -> None:
+        self.rehome_file_atomically(old_path, new_path)
     @staticmethod
     def _record_value(record: Any, name: str) -> Any:
         if isinstance(record, Mapping):
@@ -490,26 +567,62 @@ class Database:
         module are pruned as EXTERNAL; unshadowed bare builtins never reach
         this table at all (pruned at extraction time).
         """
-        from sot_graph.modutil import normalize_import, project_module_names
+        from sot_graph.modutil import normalize_import, project_module_names, resolve_relative, dotted_module
 
         project_names = project_module_names(self.all_journal_paths())
 
+        # 1. Symbol Index
         symbol_index: Dict[str, List[Tuple[str, str]]] = {}
-        for node_id, node_path, symbol in self.conn.execute(
-            "SELECT id, path, symbol FROM graph_nodes WHERE symbol IS NOT NULL"
+        class_methods: Dict[str, Dict[str, Tuple[str, str]]] = {}
+        for node_id, node_path, symbol, kind, fqn in self.conn.execute(
+            "SELECT id, path, symbol, kind, fqn FROM graph_nodes WHERE symbol IS NOT NULL"
         ):
             symbol_index.setdefault(symbol, []).append((node_id, node_path))
+            if fqn and fqn != symbol:
+                symbol_index.setdefault(fqn, []).append((node_id, node_path))
+            if kind == "method" and symbol:
+                if "." in symbol:
+                    cls_name, m_name = symbol.rsplit(".", 1)
+                    class_methods.setdefault(cls_name, {})[m_name] = (node_id, node_path)
+
+        # 2. Class Hierarchy (Inheritance & MRO)
+        class_bases: Dict[str, List[str]] = {}
+        for src_rel, dst_rel in self.conn.execute(
+            "SELECT src, dst FROM graph_edges WHERE relation IN ('extends', 'inherits', 'implements')"
+        ):
+            src_sym = src_rel.split(":")[-1] if ":" in src_rel else src_rel
+            dst_sym = dst_rel.split(":")[-1] if ":" in dst_rel else dst_rel
+            class_bases.setdefault(src_sym, []).append(dst_sym)
+        for p_src, p_dst in self.conn.execute(
+            "SELECT src, dst_symbol FROM pending_edges WHERE relation IN ('extends', 'inherits', 'implements')"
+        ):
+            src_sym = p_src.split(":")[-1] if ":" in p_src else p_src
+            dst_sym = p_dst.split(":")[-1] if ":" in p_dst else p_dst
+            if dst_sym not in class_bases.get(src_sym, []):
+                class_bases.setdefault(src_sym, []).append(dst_sym)
+
+        def lookup_class_method(cls_name: str, method_name: str) -> Optional[Tuple[str, str]]:
+            if not cls_name:
+                return None
+            if cls_name in class_methods and method_name in class_methods[cls_name]:
+                return class_methods[cls_name][method_name]
+            visited = {cls_name}
+            queue = list(class_bases.get(cls_name, []))
+            while queue:
+                base = queue.pop(0)
+                if base in class_methods and method_name in class_methods[base]:
+                    return class_methods[base][method_name]
+                for next_base in class_bases.get(base, []):
+                    if next_base not in visited:
+                        visited.add(next_base)
+                        queue.append(next_base)
+            return None
 
         file_nodes: List[Tuple[str, str]] = [
             (row[0], row[1]) for row in self.conn.execute(
                 "SELECT id, path FROM graph_nodes WHERE kind = 'file'"
             )
         ]
-
-        rows = self.conn.execute(
-            "SELECT rowid, path, src, dst_symbol, relation, line, import_source "
-            "FROM pending_edges"
-        ).fetchall()
 
         module_cache: Dict[str, Set[str]] = {}
 
@@ -520,26 +633,65 @@ class Database:
                 module_cache[path] = names
             return names
 
+        # 3. Re-export Map (e.g. __init__.py re-exports)
+        reexport_map: Dict[Tuple[str, str], Tuple[str, str]] = {}
+        for imp_path, imp_src, imp_dst, imp_line in self.conn.execute(
+            "SELECT path, src, dst, line FROM graph_edges WHERE relation = 'imports'"
+        ):
+            dst_row = self.conn.execute("SELECT path, symbol FROM graph_nodes WHERE id = ?", (imp_dst,)).fetchone()
+            if dst_row and dst_row[1]:
+                dst_path, dst_symbol = dst_row
+                for mod_name in path_module_names(imp_path):
+                    reexport_map[(mod_name, dst_symbol)] = (imp_dst, dst_path)
+
+        rows = self.conn.execute(
+            "SELECT rowid, path, src, dst_symbol, relation, line, import_source, receiver, call_kind "
+            "FROM pending_edges"
+        ).fetchall()
+
         promoted = external = ambiguous = unresolved = 0
         edge_rows: List[Tuple[str, str, str, str, Optional[int]]] = []
         promote_deletes: List[int] = []
         external_deletes: List[int] = []
         ambiguous_updates: List[int] = []
 
-        for rowid, path, src, dst_symbol, relation, line, import_source in rows:
+        for rowid, path, src, dst_symbol, relation, line, import_source, receiver, call_kind in rows:
             if row_filter is not None and not row_filter(path, dst_symbol):
                 continue
             imp = normalize_import(import_source)
+            if import_source and import_source.startswith("."):
+                abs_imp = resolve_relative(import_source, dotted_module(path), is_package=path.endswith("__init__.py"))
+                if abs_imp:
+                    imp = abs_imp
+
             if imp and imp not in project_names:
-                external_deletes.append(rowid)
-                external += 1
-                continue
+                is_proj = any(p == imp or p.startswith(imp + ".") or imp.startswith(p + ".") for p in project_names)
+                if not is_proj:
+                    external_deletes.append(rowid)
+                    external += 1
+                    continue
+
             candidates = symbol_index.get(dst_symbol, [])
             chosen: Optional[Tuple[str, str]] = None
-            if imp:
+
+            # Priority 1: Receiver Type & MRO Resolution
+            if receiver:
+                recv_cls = receiver.split(":")[-1]
+                chosen = lookup_class_method(recv_cls, dst_symbol)
+                if chosen is None and "." in src:
+                    caller_cls = src.split(":")[-1].rsplit(".", 1)[0]
+                    chosen = lookup_class_method(caller_cls, dst_symbol)
+
+            # Priority 2: Re-export Resolution
+            if chosen is None and imp:
+                if (imp, dst_symbol) in reexport_map:
+                    chosen = reexport_map[(imp, dst_symbol)]
+
+            # Priority 3: Import module matching against candidate file path
+            if chosen is None and imp:
                 matched = [
                     (node_id, node_path) for node_id, node_path in candidates
-                    if imp in path_module_names(node_path)
+                    if imp in path_module_names(node_path) or any(m.startswith(imp) for m in path_module_names(node_path))
                 ]
                 if len(matched) == 1:
                     chosen = matched[0]
@@ -547,16 +699,21 @@ class Database:
                     ambiguous_updates.append(rowid)
                     ambiguous += 1
                     continue
+
+            # Priority 4: Unique project symbol
             if chosen is None and len(candidates) == 1:
                 chosen = candidates[0]
+
+            # Priority 5: Project import to file node
             if chosen is None and relation == "imports" and imp:
-                # Project imports resolve to the file node of that module.
                 file_matches = [
                     (node_id, node_path) for node_id, node_path in file_nodes
                     if imp in path_module_names(node_path)
                 ]
                 if len(file_matches) == 1:
                     chosen = file_matches[0]
+
+            # Handle unresolved / ambiguous
             if chosen is None:
                 if len(candidates) > 1:
                     ambiguous_updates.append(rowid)
@@ -564,10 +721,10 @@ class Database:
                 else:
                     unresolved += 1
                 continue
+
             edge_rows.append((path, src, chosen[0], relation, line))
             promote_deletes.append(rowid)
             promoted += 1
-
         with self.conn:
             if edge_rows:
                 self.conn.executemany(
@@ -855,7 +1012,8 @@ class Database:
             return []
         visited: Set[str] = set()
         result: List[Dict[str, Any]] = []
-        queue: List[Tuple[str, int]] = [(node_id, 0)]
+        # queue stores (node_id, current_depth, via_id, via_label, via_path)
+        queue: List[Tuple[str, int, Optional[str], Optional[str], Optional[str]]] = [(node_id, 0, None, None, None)]
         sql = (
             "SELECT 'outward' AS dir, e.relation, n.id, n.label, n.path, n.line_start, n.kind "
             "FROM graph_edges e JOIN graph_nodes n ON e.dst=n.id "
@@ -867,16 +1025,16 @@ class Database:
             "ORDER BY dir DESC, n.id"
         )
         while queue and (limit is None or len(result) < limit):
-            current, current_depth = queue.pop(0)
+            current, current_depth, via_id, via_label, via_path = queue.pop(0)
             if current in visited or current_depth >= depth:
-                # Nodes already at the requested depth are terminal: expanding
-                # their edges would leak reversed, depth+1 relations into the
-                # flat result (displayed as phantom self-loops).
                 continue
             visited.add(current)
             rows = self.conn.execute(sql, (current, current)).fetchall()
             for direction, rel, target, label, path, line, kind in rows:
+                if target == node_id:  # avoid trivial direct loopback to root
+                    continue
                 rel_label = rel if direction == "outward" else f"used_by ({rel})"
+                hop_num = current_depth + 1
                 result.append({
                     "direction": direction,
                     "relation": rel_label,
@@ -885,10 +1043,14 @@ class Database:
                     "path": path,
                     "line": line,
                     "kind": kind,
-                    "depth": current_depth + 1,
+                    "depth": hop_num,
+                    "hop": hop_num,
+                    "via_id": via_id if hop_num > 1 else None,
+                    "via_label": via_label if hop_num > 1 else None,
+                    "via_path": via_path if hop_num > 1 else None,
                 })
-                if target not in visited and current_depth + 1 <= depth:
-                    queue.append((target, current_depth + 1))
+                if target not in visited and hop_num < depth:
+                    queue.append((target, hop_num, target, label, path))
                 if limit is not None and len(result) >= limit:
                     break
         return result
@@ -898,6 +1060,8 @@ class Database:
 
         Calls/uses/imports edges pointing at ``node_id`` plus the unresolved
         pending edges whose bare name matches ``symbol`` (renaming risk).
+        Returns structured completeness status, resolved vs unresolved counts,
+        and honest next steps.
         """
         rows = self.conn.execute(
             "SELECT e.src, n.label, n.path, n.kind, e.relation, e.line "
@@ -932,7 +1096,29 @@ class Database:
                 (*names, node_id),
             ).fetchall()
         ]
-        return {"callers": callers, "risk": risk}
+        resolved_count = sum(len(c["sites"]) for c in callers)
+        unresolved_count = len(risk)
+        status = "COMPLETE" if unresolved_count == 0 else "PARTIAL"
+        next_steps = []
+        if unresolved_count > 0:
+            next_steps = [
+                "Inspect the pending edge candidates listed in risk/unresolved",
+                "Run 'sot reconcile' if workspace files were recently updated",
+                "Inspect dynamic callers in source code via LSP or grep",
+            ]
+        return {
+            "symbol": symbol,
+            "node_id": node_id,
+            "status": status,
+            "completeness": status,
+            "resolved_count": resolved_count,
+            "unresolved_count": unresolved_count,
+            "callers": callers,
+            "risk": risk,
+            "confirmed": callers,
+            "unresolved": risk,
+            "next_steps": next_steps,
+        }
 
     def inheritance_edges(self, node_id: str, symbol: str) -> Dict[str, Any]:
         """extends/implements edges around a node, both directions, plus
@@ -999,6 +1185,99 @@ class Database:
             "pending": int(row[3]),
             "pending_ambiguous": int(row[4]),
             "pending_unresolved": int(row[5]),
+        }
+
+    def integrity_check(self) -> Dict[str, Any]:
+        """Perform comprehensive SQLite integrity, schema validation, and graph consistency checks."""
+        errors: List[str] = []
+        warnings: List[str] = []
+        
+        # 1. PRAGMA quick_check
+        try:
+            row = self.conn.execute("PRAGMA quick_check;").fetchone()
+            quick_check_ok = row is not None and row[0] == "ok"
+            if not quick_check_ok:
+                errors.append(f"PRAGMA quick_check failed: {row[0] if row else 'empty result'}")
+        except Exception as exc:
+            quick_check_ok = False
+            errors.append(f"PRAGMA quick_check exception: {exc}")
+
+        # 2. PRAGMA foreign_key_check
+        try:
+            fk_rows = self.conn.execute("PRAGMA foreign_key_check;").fetchall()
+            if fk_rows:
+                errors.append(f"Foreign key violations detected: {len(fk_rows)} rows")
+        except Exception as exc:
+            errors.append(f"PRAGMA foreign_key_check exception: {exc}")
+
+        # 3. Pragmas info
+        try:
+            user_ver = int(self.conn.execute("PRAGMA user_version;").fetchone()[0])
+            if user_ver != SCHEMA_VERSION:
+                warnings.append(f"Schema version mismatch: DB is v{user_ver}, expected v{SCHEMA_VERSION}")
+            journal_mode = str(self.conn.execute("PRAGMA journal_mode;").fetchone()[0]).upper()
+            page_size = int(self.conn.execute("PRAGMA page_size;").fetchone()[0])
+            page_count = int(self.conn.execute("PRAGMA page_count;").fetchone()[0])
+            db_size_bytes = page_size * page_count
+        except Exception as exc:
+            user_ver = -1
+            journal_mode = "UNKNOWN"
+            page_size = 0
+            page_count = 0
+            db_size_bytes = 0
+            errors.append(f"Pragma query error: {exc}")
+
+        # 4. Consistency checks
+        orphaned_nodes_count = 0
+        pending_by_state: Dict[str, int] = {}
+        pending_by_relation: Dict[str, int] = {}
+        fts_count = 0
+        node_count = 0
+        try:
+            # Check orphaned nodes (code nodes with file path not in file_journal)
+            orphaned_nodes_count = int(self.conn.execute(
+                "SELECT COUNT(*) FROM graph_nodes n WHERE NOT (n.kind='note' OR n.id LIKE 'note:%') "
+                "AND NOT EXISTS (SELECT 1 FROM file_journal j WHERE j.path = n.path)"
+            ).fetchone()[0])
+            if orphaned_nodes_count > 0:
+                warnings.append(f"Found {orphaned_nodes_count} orphaned code nodes (path missing from file_journal)")
+
+            # Check pending edges breakdown
+            pending_rows = self.conn.execute(
+                "SELECT resolution_state, relation, COUNT(*) FROM pending_edges GROUP BY resolution_state, relation"
+            ).fetchall()
+            for state, rel, count in pending_rows:
+                pending_by_state[str(state)] = pending_by_state.get(str(state), 0) + int(count)
+                pending_by_relation[str(rel)] = pending_by_relation.get(str(rel), 0) + int(count)
+
+            # Check FTS5 sync integrity
+            fts_count = int(self.conn.execute("SELECT COUNT(*) FROM graph_fts").fetchone()[0])
+            node_count = int(self.conn.execute("SELECT COUNT(*) FROM graph_nodes").fetchone()[0])
+            if fts_count != node_count:
+                warnings.append(f"FTS index count disparity: {fts_count} FTS records vs {node_count} graph nodes")
+        except Exception as exc:
+            errors.append(f"Consistency check error: {exc}")
+
+        base_stats = self.stats()
+        base_stats["orphaned_nodes"] = orphaned_nodes_count
+        base_stats["fts_count"] = fts_count
+
+        return {
+            "ok": len(errors) == 0 and quick_check_ok,
+            "quick_check": "ok" if quick_check_ok else "failed",
+            "schema_version": user_ver,
+            "expected_schema_version": SCHEMA_VERSION,
+            "journal_mode": journal_mode,
+            "page_size": page_size,
+            "page_count": page_count,
+            "db_size_bytes": db_size_bytes,
+            "stats": base_stats,
+            "pending_breakdown": {
+                "by_state": pending_by_state,
+                "by_relation": pending_by_relation,
+            },
+            "warnings": warnings,
+            "errors": errors,
         }
 
     def save_communities(self, communities_data: List[Dict[str, Any]]) -> None:

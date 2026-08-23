@@ -16,28 +16,45 @@ from typing import Any, Dict, List, Optional, Tuple
 BUILTIN_NAMES = frozenset(dir(_builtins))
 
 
-def _collect_import_map(tree: ast.AST) -> Dict[str, str]:
-    """Map local binding name -> dotted module it was imported from."""
+def _collect_import_map(tree: ast.AST) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """Map local binding name -> dotted module, and local alias -> imported symbol."""
     import_map: Dict[str, str] = {}
+    alias_symbol_map: Dict[str, str] = {}
     for stmt in ast.walk(tree):
         if isinstance(stmt, ast.Import):
             for alias in stmt.names:
                 top = alias.name.split(".")[0]
                 import_map.setdefault(alias.asname or top, alias.name)
+                if alias.asname:
+                    alias_symbol_map[alias.asname] = alias.name
         elif isinstance(stmt, ast.ImportFrom):
             module = ("." * stmt.level) + (stmt.module or "")
             for alias in stmt.names:
                 if alias.name == "*":
                     continue
                 if not stmt.module and stmt.level:
-                    # 'from . import name': each binding is itself a submodule
-                    # of the current package, not the package root.
                     binding_module = module + alias.name
                 else:
                     binding_module = module
-                import_map.setdefault(alias.asname or alias.name, binding_module)
-    return import_map
+                local_name = alias.asname or alias.name
+                import_map.setdefault(local_name, binding_module)
+                alias_symbol_map[local_name] = alias.name
+    return import_map, alias_symbol_map
 
+
+def _extract_type_name(node: Optional[ast.AST]) -> Optional[str]:
+    """Extract base type identifier from type annotation AST."""
+    if node is None:
+        return None
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Subscript):
+        return _extract_type_name(node.slice)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):  # T | None
+        return _extract_type_name(node.left) or _extract_type_name(node.right)
+    return None
 
 def _collect_bound_names(func: ast.AST) -> set:
     """Names bound anywhere inside the function scope (params, assignments,
@@ -76,13 +93,18 @@ def _dotted_expr(node: ast.AST) -> Optional[str]:
 
 
 def _classify_call(
-    call: ast.Call, bound: set, import_map: Dict[str, str]
+    call: ast.Call,
+    bound: set,
+    import_map: Dict[str, str],
+    alias_symbol_map: Optional[Dict[str, str]] = None,
+    local_types: Optional[Dict[str, str]] = None,
+    enclosing_class: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Classify one call site for the binding-aware resolver.
 
     Returns None for self-recursion (already filtered by the caller).
-    Edge fields: call_kind (BARE|ATTRIBUTE|QUALIFIED|DYNAMIC), receiver,
-    import_source, builtin (True only for unshadowed bare builtins).
+    Edge fields: call_kind (BARE|ATTRIBUTE|QUALIFIED|METHOD_CALL|DYNAMIC),
+    receiver, import_source, builtin (True only for unshadowed bare builtins).
     """
     func = call.func
     if isinstance(func, ast.Name):
@@ -102,14 +124,29 @@ def _classify_call(
     if isinstance(func, ast.Attribute):
         receiver = _dotted_expr(func.value)
         import_source = None
+        receiver_type = None
         kind = "DYNAMIC"
         if receiver:
             root = receiver.split(".")[0]
             import_source = import_map.get(root)
-            kind = "QUALIFIED" if import_source else "ATTRIBUTE"
+            if import_source:
+                kind = "QUALIFIED"
+            elif root in ("self", "cls") and enclosing_class:
+                receiver_type = enclosing_class
+                kind = "METHOD_CALL"
+            elif local_types and receiver in local_types:
+                receiver_type = local_types[receiver]
+                import_source = import_map.get(receiver_type)
+                kind = "METHOD_CALL"
+            elif local_types and root in local_types:
+                receiver_type = local_types[root]
+                import_source = import_map.get(receiver_type)
+                kind = "METHOD_CALL"
+            else:
+                kind = "ATTRIBUTE"
         return {
             "call_kind": kind,
-            "receiver": receiver,
+            "receiver": receiver_type or receiver,
             "import_source": import_source,
             "builtin": False,
         }
@@ -152,7 +189,7 @@ def extract_python(path: Path) -> Dict[str, Any]:
     except Exception as e:
         return {"nodes": [], "edges": [], "error": str(e)}
 
-    import_map = _collect_import_map(tree)
+    import_map, alias_symbol_map = _collect_import_map(tree)
 
     # Top-level file node
     nodes.append({
@@ -219,6 +256,7 @@ def extract_python(path: Path) -> Dict[str, Any]:
             func_id = f"{parent}.{node.name}" if kind == "method" else node.name
             doc = ast.get_docstring(node) or ""
             prefix = "async def" if is_async else "def"
+            enclosing_class = parent if kind == "method" else None
 
             nodes.append({
                 "id": func_id,
@@ -236,6 +274,38 @@ def extract_python(path: Path) -> Dict[str, Any]:
                 "source_location": f"L{node.lineno}",
             })
 
+            # Collect local parameter and variable type annotations
+            local_types: Dict[str, str] = {}
+            if hasattr(node, "args") and node.args:
+                all_args = getattr(node.args, "posonlyargs", []) + node.args.args + getattr(node.args, "kwonlyargs", [])
+                for arg in all_args:
+                    t_name = _extract_type_name(arg.annotation)
+                    if t_name:
+                        local_types[arg.arg] = t_name
+
+            for child in ast.walk(node):
+                if isinstance(child, ast.AnnAssign):
+                    t_name = _extract_type_name(child.annotation)
+                    if t_name and isinstance(child.target, ast.Name):
+                        local_types[child.target.id] = t_name
+                    elif t_name and isinstance(child.target, ast.Attribute) and isinstance(child.target.value, ast.Name) and child.target.value.id in ("self", "cls"):
+                        local_types[f"self.{child.target.attr}"] = t_name
+                        local_types[child.target.attr] = t_name
+                elif isinstance(child, ast.Assign):
+                    val_type = None
+                    if isinstance(child.value, ast.Call):
+                        if isinstance(child.value.func, ast.Name):
+                            val_type = child.value.func.id
+                        elif isinstance(child.value.func, ast.Attribute):
+                            val_type = child.value.func.attr
+                    if val_type:
+                        for tgt in child.targets:
+                            if isinstance(tgt, ast.Name):
+                                local_types[tgt.id] = val_type
+                            elif isinstance(tgt, ast.Attribute) and isinstance(tgt.value, ast.Name) and tgt.value.id in ("self", "cls"):
+                                local_types[f"self.{tgt.attr}"] = val_type
+                                local_types[tgt.attr] = val_type
+
             # Detect call expressions inside function with binding context
             bound = _collect_bound_names(node)
             for child in ast.walk(node):
@@ -245,19 +315,14 @@ def extract_python(path: Path) -> Dict[str, Any]:
                 if isinstance(child.func, ast.Name):
                     if child.func.id == node.name:
                         continue
-                    callee = child.func.id
+                    callee = alias_symbol_map.get(child.func.id, child.func.id)
                 elif isinstance(child.func, ast.Attribute):
                     attr_recv = child.func.value
-                    # super().x() dispatches to the *parent* class's method;
-                    # without inheritance resolution any target we pick would
-                    # be a guess (and x == own name degenerates to a self-loop).
+                    # super().x() dispatches to parent class method
                     if (isinstance(attr_recv, ast.Call)
                             and isinstance(attr_recv.func, ast.Name)
                             and attr_recv.func.id == "super"):
                         continue
-                    # A chained receiver ('user.sudo().write()' inside
-                    # 'write') targets another object; qualifying it to the
-                    # enclosing method fabricates a self-loop edge.
                     if (child.func.attr == node.name
                             and not (isinstance(attr_recv, ast.Name)
                                      and attr_recv.id in ("self", "cls"))):
@@ -265,7 +330,9 @@ def extract_python(path: Path) -> Dict[str, Any]:
                     callee = child.func.attr
                 if callee is None:
                     continue
-                context = _classify_call(child, bound, import_map) or {}
+                context = _classify_call(
+                    child, bound, import_map, alias_symbol_map, local_types, enclosing_class
+                ) or {}
                 edges.append({
                     "source": func_id,
                     "target": callee,
@@ -273,7 +340,6 @@ def extract_python(path: Path) -> Dict[str, Any]:
                     "source_location": f"L{getattr(child, 'lineno', node.lineno)}",
                     **context,
                 })
-
             self.scope_stack.append(func_id)
             self.generic_visit(node)
             self.scope_stack.pop()

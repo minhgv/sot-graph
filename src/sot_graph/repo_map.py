@@ -7,15 +7,13 @@ graph centrality, personalize on the caller's focus set when given, then
 binary-search the symbol count until the rendered tree fits the budget.
 """
 from __future__ import annotations
-
 import os
 from typing import Any, Dict, List, Optional
 
+from sot_graph.tokenizer import estimate_tokens
+
 DAMPING = 0.85
 ITERATIONS = 24
-# Aider renders signatures/identifiers; ~4 characters per token is the
-# standard heuristic for code-shaped text.
-_CHARS_PER_TOKEN = 4
 _RANKED_RELATIONS = ("calls", "extends", "implements", "uses")
 
 
@@ -30,15 +28,25 @@ def _display_path(path: str, root: Optional[str]) -> str:
 
 
 def _load_symbols(conn, root: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT id, symbol, kind, path, line_start, signature FROM graph_nodes "
+        "WHERE kind != 'file' AND kind != 'note' AND path != '' "
+        "AND kind != 'markdown'"
+    ).fetchall()
+    if not rows:
+        return {}
+    if root is None:
+        abs_paths = [r[3] for r in rows if os.path.isabs(r[3])]
+        if abs_paths:
+            try:
+                root = os.path.commonpath(abs_paths)
+            except ValueError:
+                root = None
     return {
         row[0]: {"id": row[0], "symbol": row[1], "kind": row[2],
                  "path": _display_path(row[3], root),
                  "line": row[4], "signature": row[5]}
-        for row in conn.execute(
-            "SELECT id, symbol, kind, path, line_start, signature FROM graph_nodes "
-            "WHERE kind != 'file' AND kind != 'note' AND path != '' "
-            "AND kind != 'markdown'"
-        )
+        for row in rows
     }
 
 
@@ -158,7 +166,7 @@ def build_repo_map(
     while lo <= hi:
         mid = (lo + hi) // 2
         text = _render([symbols[u] for u in ordered[:mid]])
-        if _estimate_tokens(text) <= max_tokens:
+        if estimate_tokens(text) <= max_tokens:
             best = mid
             lo = mid + 1
         else:
@@ -168,19 +176,34 @@ def build_repo_map(
     rendered = _render([symbols[u] for u in chosen])
     files: List[Dict[str, Any]] = []
     by_path: Dict[str, List[Dict[str, Any]]] = {}
+    lang_counts: Dict[str, int] = {}
+
     for u in chosen:
-        by_path.setdefault(symbols[u]["path"], []).append(
+        sym_path = symbols[u]["path"]
+        ext = os.path.splitext(sym_path)[1].lstrip(".") or "other"
+        lang_counts[ext] = lang_counts.get(ext, 0) + 1
+
+        by_path.setdefault(sym_path, []).append(
             {"symbol": symbols[u]["symbol"], "kind": symbols[u]["kind"],
              "line": symbols[u]["line"], "signature": symbols[u]["signature"],
              "rank": round(ranks[u], 8)})
     for path in sorted(by_path):
         files.append({"path": path,
                       "symbols": sorted(by_path[path], key=lambda s: (s["line"] or 0, s["symbol"]))})
+
+    total_syms = len(chosen)
+    lang_breakdown = {
+        lang: round((count / total_syms) * 100.0, 1)
+        for lang, count in sorted(lang_counts.items(), key=lambda x: -x[1])
+    } if total_syms > 0 else {}
+
     return {
         "files": files,
         "rendered": rendered,
-        "tokens_estimate": _estimate_tokens(rendered),
+        "tokens_estimate": estimate_tokens(rendered),
         "symbols": len(chosen),
         "focus": focus_ids,
+        "ranking_method": "personalized_pagerank" if focus_ids else "pagerank",
+        "language_breakdown": lang_breakdown,
         "truncated": len(chosen) < len(ordered) or best < len(ordered),
     }

@@ -92,7 +92,7 @@ def _run_watchfiles(
 ) -> None:
     assert _WATCHFILES is not None
     for changes in _WATCHFILES.watch(
-        root, debounce=int(debounce_ms) / 1000.0, recursive=True, step=50
+        root, debounce=int(debounce_ms), recursive=True, step=50
     ):
         if stop_event and stop_event.is_set():
             break

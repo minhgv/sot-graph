@@ -9,7 +9,7 @@ import json
 import os
 import sys
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 import sqlite3
 
@@ -149,12 +149,15 @@ def cmd_search(args: argparse.Namespace, db: Database, root: str) -> int:
         mode = "bm25"
 
     verified = []
+    has_stale = False
     for cand in candidates:
-        verdict, cov, real_path = TrustVerifier.verify_hit(
-            db, cand, q_toks, root, threshold=args.threshold
+        res = TrustVerifier.verify_hit(
+            db, cand, q_toks, root, threshold=args.threshold, auto_heal=False
         )
-        if verdict == "REMOVED":
-            continue  # Auto-purged dead path
+        verdict, cov, real_path = res
+        evidence = res.evidence
+        if evidence.freshness.value in ("STALE", "MISSING"):
+            has_stale = True
 
         verified.append({
             "verdict": verdict,
@@ -166,10 +169,11 @@ def cmd_search(args: argparse.Namespace, db: Database, root: str) -> int:
             "body": cand["body"],
             "score": round(cand.get("fused_score", cand["score"]), 6),
             "sources": cand.get("sources"),
+            "evidence": evidence.to_dict(),
         })
 
-    # Sort priority: STRONG / REBUILT -> WEAK -> NOPATH, then highest coverage
-    rank_order = {"STRONG": 0, "REBUILT": 0, "WEAK": 1, "NOPATH": 2}
+    # Sort priority: STRONG / REBUILT -> WEAK -> NOPATH -> STALE / REMOVED, then highest coverage
+    rank_order = {"STRONG": 0, "REBUILT": 0, "WEAK": 1, "NOPATH": 2, "STALE": 3, "REMOVED": 4}
     verified.sort(
         key=lambda x: (
             rank_order.get(x["verdict"], 9),
@@ -198,6 +202,9 @@ def cmd_search(args: argparse.Namespace, db: Database, root: str) -> int:
         first_line = r['body'].splitlines()[0][:110]
         print(f"      💡 Content: {first_line}...")
         print()
+
+    if has_stale:
+        print("  💡 Tip: Some files have changed on disk. Run 'sot reconcile' to synchronize the graph.")
 
     return 0
 
@@ -234,26 +241,63 @@ def cmd_explore(args: argparse.Namespace, db: Database) -> int:
         return 1
 
     node_id, label, kind, path, line, _symbol = row
+    relations = db.explore_node(node_id, depth=args.depth)
+
+    if getattr(args, "json", False):
+        import json
+        hop_summary = {
+            "1_hop_direct": sum(1 for r in relations if r.get("hop") == 1),
+            "2_hop_transitive": sum(1 for r in relations if r.get("hop") == 2),
+        }
+        payload = {
+            "target": {
+                "id": node_id,
+                "label": label,
+                "kind": kind,
+                "path": path,
+                "line": line or 1,
+            },
+            "depth": args.depth,
+            "relations_count": len(relations),
+            "hop_summary": hop_summary,
+            "relations": relations,
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+
     print(f"\n🌐 Graph Walk: [{label}] ({kind}) @ {path}:{line or 1}")
     print("=" * 80)
 
-    relations = db.explore_node(node_id, depth=args.depth)
     if not relations:
         print("  (No inbound or outbound connections found)")
         return 0
 
-    outward = [r for r in relations if r["direction"] == "outward"]
-    inward = [r for r in relations if r["direction"] == "inward"]
+    show_all = getattr(args, "show_all", False)
+    hub_threshold = 15
+    def _render_section(title: str, items: list, is_transitive: bool = False):
+        if not items:
+            return
+        print(f"\n{title} ({len(items)}):")
+        displayed = items if show_all or len(items) <= hub_threshold else items[:hub_threshold]
+        for r in displayed:
+            via_info = ""
+            if is_transitive and r.get("via_label"):
+                via_info = f" [via {r['via_label']} @ {r.get('via_path', '')}]"
+            arrow = "➔" if r["direction"] == "outward" else "◀"
+            print(f"    └── [{r['relation']}] {arrow} {r['label']} ({r['path']}:{r['line'] or 1}){via_info}")
+        if len(items) > len(displayed):
+            collapsed = len(items) - len(displayed)
+            print(f"    └── ... +{collapsed} more references collapsed (use --all to show full list)")
 
-    if outward:
-        print("  ▶ Outward Calls / Uses:")
-        for r in outward:
-            print(f"    └── [{r['relation']}] ➔ {r['label']} ({r['path']}:{r['line'] or 1})")
+    outward_direct = [r for r in relations if r["direction"] == "outward" and r.get("hop", 1) == 1]
+    outward_trans = [r for r in relations if r["direction"] == "outward" and r.get("hop", 1) > 1]
+    inward_direct = [r for r in relations if r["direction"] == "inward" and r.get("hop", 1) == 1]
+    inward_trans = [r for r in relations if r["direction"] == "inward" and r.get("hop", 1) > 1]
 
-    if inward:
-        print("\n  ◀ Inward References (Used by):")
-        for r in inward:
-            print(f"    └── [{r['relation']}] ➔ {r['label']} ({r['path']}:{r['line'] or 1})")
+    _render_section("▶ 1-Hop Direct Outward Calls", outward_direct, is_transitive=False)
+    _render_section("▶ 2-Hop Transitive Outward Calls", outward_trans, is_transitive=True)
+    _render_section("◀ 1-Hop Direct Inward References (Used by)", inward_direct, is_transitive=False)
+    _render_section("◀ 2-Hop Transitive Inward References", inward_trans, is_transitive=True)
 
     print()
     return 0
@@ -279,16 +323,29 @@ def cmd_usages(args: argparse.Namespace, db: Database) -> int:
 
     data = db.usages(node_id, symbol)
     total = sum(len(c["sites"]) for c in data["callers"])
+    unresolved_count = data.get("unresolved_count", len(data.get("risk", [])))
+
+    if getattr(args, "json", False):
+        print(json.dumps(data, indent=2))
+        return 0
+
     print(f"\n🔎 Usages of [{label}] ({kind}) — {total} site(s) across "
           f"{len(data['callers'])} caller(s)")
     print("=" * 80)
     if not data["callers"]:
-        print("  (No resolved inbound references)")
+        if unresolved_count > 0:
+            print(f"  ⚠ 0 confirmed usages, but {unresolved_count} UNRESOLVED/AMBIGUOUS candidate(s) exist in graph.")
+        else:
+            print("  (No confirmed inbound references or pending candidates)")
     for caller in data["callers"]:
         print(f"\n  ◀ {caller['label']} ({caller['kind']})")
         for site in caller["sites"]:
             print(f"      └── [{site['relation']}] @ line {site['line'] or 1}")
     _print_usages_risk(data["risk"], symbol)
+    if data.get("next_steps"):
+        print("\n  👉 Next Steps:")
+        for step in data["next_steps"]:
+            print(f"     • {step}")
     print()
     return 0
 
@@ -593,6 +650,7 @@ def cmd_pack(args: argparse.Namespace, db: Database, root: str) -> int:
             max_hops=args.max_hops,
             max_nodes=args.max_nodes,
             max_bytes=args.max_bytes,
+            max_tokens=getattr(args, "max_tokens", None),
         )
     except PackError as exc:
         detail = f" candidates: {', '.join(exc.candidates)}" if exc.candidates else ""
@@ -715,16 +773,47 @@ def cmd_verify(args: argparse.Namespace, reconciler: Reconciler) -> int:
     return 0
 
 
-def cmd_doctor(db: Database) -> int:
-    st = db.stats()
+def cmd_doctor(args: argparse.Namespace, db: Database) -> int:
+    diag = db.integrity_check()
+    if getattr(args, "json", False):
+        print(json.dumps(diag, indent=2))
+        return 0 if diag["ok"] else 1
+
+    st = diag["stats"]
     print("\n🩺 SOT-Graph Doctor Report:")
-    print("=" * 40)
-    print(f"  • SQLite Database : {db.db_path} (WAL Mode: OK)")
-    print(f"  • Tracked Files   : {st['paths']}")
-    print(f"  • Graph Nodes     : {st['nodes']}")
-    print(f"  • Confirmed Edges : {st['edges']}")
-    print(f"  • Pending Edges   : {st['pending']}")
-    print("=" * 40)
+    print("=" * 55)
+    status_icon = "✅ OK" if diag["quick_check"] == "ok" else "❌ CORRUPTED"
+    print(f"  • SQLite Database   : {db.db_path}")
+    print(f"  • Integrity Check   : {status_icon} (quick_check: {diag['quick_check']})")
+    print(f"  • Journal Mode      : {diag['journal_mode']} (schema v{diag['schema_version']})")
+    print(f"  • DB Storage Size   : {diag['db_size_bytes']:,} bytes ({diag['page_count']} pages @ {diag['page_size']}B)")
+    print("-" * 55)
+    print(f"  • Tracked Files     : {st['paths']}")
+    print(f"  • Graph Nodes       : {st['nodes']}")
+    print(f"  • FTS5 Sync Records : {st.get('fts_count', 0)}")
+    print(f"  • Confirmed Edges   : {st['edges']}")
+    print(f"  • Pending Edges     : {st['pending']} (Unresolved: {st['pending_unresolved']}, Ambiguous: {st['pending_ambiguous']})")
+    if st.get("orphaned_nodes", 0) > 0:
+        print(f"  ⚠️  Orphaned Nodes  : {st['orphaned_nodes']}")
+    
+    pb = diag.get("pending_breakdown", {})
+    if pb.get("by_relation"):
+        rel_str = ", ".join(f"{k}: {v}" for k, v in sorted(pb["by_relation"].items()))
+        print(f"  • Pending Relations : {rel_str}")
+
+    if diag.get("warnings"):
+        print("\n⚠️  Diagnostic Warnings:")
+        for warn in diag["warnings"]:
+            print(f"   - {warn}")
+
+    if diag["errors"]:
+        print("\n❌  Critical Corruption Issues:")
+        for err in diag["errors"]:
+            print(f"   - {err}")
+        print("=" * 55)
+        return 1
+
+    print("=" * 55)
     return 0
 def cmd_bundle(args: argparse.Namespace, db: Database, root: str) -> int:
     from sot_graph.analytics.bundle import ArchitectureBundler
@@ -1123,7 +1212,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_exp = subparsers.add_parser("explore", help="Explore AST relations and cross-file edges")
     p_exp.add_argument("target", help="Symbol, function name, or class to explore")
     p_exp.add_argument("--depth", type=int, default=2, help="Graph walk depth (default: 2)")
-
+    p_exp.add_argument("--all", dest="show_all", action="store_true", help="Show all references without collapsing large hubs (default: collapse if > 15 items)")
+    p_exp.add_argument("--json", action="store_true", help="Output explore graph in JSON format")
     # usages
     p_usg = subparsers.add_parser("usages", help="List every reference site of a symbol, grouped by caller")
     p_usg.add_argument("target", help="Symbol, function name, or class to inspect")
@@ -1192,8 +1282,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_ver.add_argument("--deep", action="store_true", help="Perform full SHA-256 content re-hashing")
 
     # doctor
-    subparsers.add_parser("doctor", help="Check database and graph health statistics")
-
+    p_doc = subparsers.add_parser("doctor", help="Check database and graph health statistics")
+    p_doc.add_argument("--json", action="store_true", help="Output health diagnostic in JSON format")
     # clean
     p_clean = subparsers.add_parser("clean", help="Remove stale or reset graph data safely")
     p_clean.add_argument("--dry-run", action="store_true", help="Classify without changing the database")
@@ -1259,7 +1349,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_pack.add_argument("--max-hops", type=int, default=2, help="Hop depth (default: 2)")
     p_pack.add_argument("--max-nodes", type=int, default=50, help="Node cap (default: 50)")
     p_pack.add_argument("--max-bytes", type=int, default=65536, help="Byte cap (default: 64KB)")
-
+    p_pack.add_argument("--max-tokens", type=int, default=None, help="Hard token budget cap (default: None)")
     p_watch = subparsers.add_parser(
         "watch", help="Watch filesystem and reconcile in real time (daemon & multi-project support)")
     p_watch.add_argument("--debounce-ms", type=int, default=200,
@@ -1318,9 +1408,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     root = os.path.abspath(args.root)
     db_path = args.db or default_db_path(root)
@@ -1379,7 +1469,7 @@ def main() -> int:
         elif args.command == "verify":
             return cmd_verify(args, reconciler)
         elif args.command == "doctor":
-            return cmd_doctor(db)
+            return cmd_doctor(args, db)
         elif args.command == "report":
             return cmd_report(args, db, root)
         elif args.command == "cluster":

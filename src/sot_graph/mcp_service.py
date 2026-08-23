@@ -227,10 +227,12 @@ class McpService:
             out: List[Dict[str, Any]] = []
             for row, bucket in zip(rows, buckets):
                 candidate = dict(row)
-                verdict, coverage, real = TrustVerifier.verify_hit(
+                res = TrustVerifier.verify_hit(
                     cast(Database, None), candidate, tokenize(query), self.project_root,
                     threshold=threshold, auto_heal=False,
                 )
+                verdict, coverage, real = res
+                evidence = res.evidence
                 rel = self._relative_path(real or candidate.get("path"))
                 if candidate.get("path") and rel is None:
                     verdict = "STALE"
@@ -242,6 +244,7 @@ class McpService:
                     "label": candidate["label"], "line": candidate.get("line_start"),
                     "body": self._body(candidate.get("body")),
                     "rank_score": round(float(candidate.get("rank_score") or 0), 6),
+                    "evidence": evidence.to_dict(),
                 })
             rank = {"STRONG": 0, "REBUILT": 0, "WEAK": 1, "NOPATH": 2, "STALE": 3}
             out.sort(key=lambda item: (
@@ -268,22 +271,26 @@ class McpService:
             node = self._node_dict(row)
             relations: List[Dict[str, Any]] = []
             visited = {row["id"]}
-            queue = [(row["id"], 0)]
+            # queue: (node_id, current_depth, via_id, via_label, via_path)
+            queue: List[Tuple[str, int, Optional[str], Optional[str], Optional[str]]] = [(row["id"], 0, None, None, None)]
             sql = (
                 "SELECT 'outward' AS dir, e.relation, n.id, n.label, n.path, n.line_start, n.kind "
-                "FROM graph_edges e JOIN graph_nodes n ON e.dst=n.id WHERE e.src=? "
+                "FROM graph_edges e JOIN graph_nodes n ON e.dst=n.id WHERE e.src=? AND e.relation != 'defines' "
                 "UNION ALL "
                 "SELECT 'inward' AS dir, e.relation, n.id, n.label, n.path, n.line_start, n.kind "
-                "FROM graph_edges e JOIN graph_nodes n ON e.src=n.id WHERE e.dst=? "
+                "FROM graph_edges e JOIN graph_nodes n ON e.src=n.id WHERE e.dst=? AND e.relation != 'defines' "
                 "ORDER BY dir DESC, n.id"
             )
             while queue and len(relations) < limit:
-                current, current_depth = queue.pop(0)
+                current, current_depth, via_id, via_label, via_path = queue.pop(0)
                 if current_depth >= depth:
                     continue
                 for direction, rel, target, label, path, line, kind in conn.execute(sql, (current, current)).fetchall():
+                    if target == row["id"]:
+                        continue
                     if len(relations) >= limit:
                         break
+                    hop_num = current_depth + 1
                     item = {
                         "direction": direction,
                         "relation": rel if direction == "outward" else f"used_by ({rel})",
@@ -292,14 +299,24 @@ class McpService:
                         "path": self._relative_path(path),
                         "line": line,
                         "kind": kind,
-                        "depth": current_depth + 1,
+                        "depth": hop_num,
+                        "hop": hop_num,
+                        "via_id": via_id if hop_num > 1 else None,
+                        "via_label": via_label if hop_num > 1 else None,
+                        "via_path": self._relative_path(via_path) if (hop_num > 1 and via_path) else None,
                     }
                     relations.append(item)
-                    if target not in visited:
+                    if target not in visited and hop_num < depth:
                         visited.add(target)
-                        queue.append((target, current_depth + 1))
-            return self._fits_response({"node": node, "relations": relations, "truncated": len(relations) >= limit})
-
+                        queue.append((target, hop_num, target, label, path))
+            hop1_count = sum(1 for r in relations if r.get("hop") == 1)
+            hop2_count = sum(1 for r in relations if r.get("hop", 0) > 1)
+            return self._fits_response({
+                "node": node,
+                "relations": relations,
+                "hop_summary": {"1_hop_direct": hop1_count, "transitive_hops": hop2_count},
+                "truncated": len(relations) >= limit,
+            })
         return self._run(op)
 
     def _resolve_target_row(self, conn: sqlite3.Connection, target: str) -> sqlite3.Row:
@@ -345,8 +362,13 @@ class McpService:
             } for item in data["risk"][:limit]]
             return self._fits_response({
                 "target": self._node_dict(row),
+                "status": data.get("status", "COMPLETE"),
+                "completeness": data.get("completeness", "COMPLETE"),
+                "resolved_count": data.get("resolved_count", sum(len(c["sites"]) for c in callers)),
+                "unresolved_count": data.get("unresolved_count", len(risk)),
                 "callers": callers,
                 "risk": risk,
+                "next_steps": data.get("next_steps", []),
                 "truncated": len(data["callers"]) > limit or len(data["risk"]) > limit,
             })
         return self._run(op)
