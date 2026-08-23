@@ -1060,6 +1060,7 @@ def cmd_setup(args: argparse.Namespace, root: str) -> int:
         print("Supported AI Coding Harnesses:")
         for key, desc in list_supported_harnesses().items():
             print(f"  - {key:<12} : {desc}")
+        print(f"  - {'pi':<12} : Alias for 'omp' (Oh My Pi / Pi harness)")
         return 0
 
     if getattr(args, "hooks", False):
@@ -1243,8 +1244,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_bun.add_argument("--include-tests", action="store_true", help="Include test files and mock nodes in fact bundles")
 
     # setup
-    p_setup = subparsers.add_parser("setup", help="Configure AI coding harnesses (OMP, OpenCode, Antigravity, Claude, ZCode)")
-    p_setup.add_argument("--harness", default="all", choices=["all", "omp", "opencode", "antigravity", "claude", "zcode"], help="Target harness (default: all)")
+    p_setup = subparsers.add_parser("setup", help="Configure AI coding harnesses (OMP / Pi, OpenCode, Antigravity, Claude, ZCode)")
+    p_setup.add_argument("--harness", default="all", choices=["all", "omp", "pi", "opencode", "antigravity", "claude", "zcode"], help="Target harness ('pi' is an alias for 'omp'; default: all)")
     p_setup.add_argument("--global-only", action="store_true", help="Install to user home directory only")
     p_setup.add_argument("--workspace-only", action="store_true", help="Install to current workspace only")
     p_setup.add_argument("--list", action="store_true", help="List supported harnesses")

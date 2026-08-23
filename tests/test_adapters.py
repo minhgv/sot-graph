@@ -168,6 +168,22 @@ class TestHarnessAdapters(unittest.TestCase):
             self.assertIn("claude", results)
             self.assertIn("zcode", results)
 
+    def test_unified_installer_pi_alias(self):
+        with patch.object(Path, "home", return_value=self.mock_home):
+            results = install_harnesses(["pi"], root=self.root, global_install=True, workspace_install=True)
+            self.assertIn("omp", results)
+            ws_ext = self.root / ".omp" / "extensions" / "sot-graph.ts"
+            self.assertTrue(ws_ext.exists())
+
+    def test_cli_setup_pi_alias(self):
+        with patch.object(Path, "home", return_value=self.mock_home):
+            parser = build_parser()
+            args = parser.parse_args(["setup", "--harness", "pi", "--workspace-only"])
+            ret = cmd_setup(args, root=str(self.root))
+            self.assertEqual(ret, 0)
+            self.assertTrue((self.root / ".omp" / "extensions" / "sot-graph.ts").exists())
+            self.assertTrue((self.root / ".omp" / "RULES.md").exists())
+
     def test_cli_setup_command(self):
         with patch.object(Path, "home", return_value=self.mock_home):
             parser = build_parser()

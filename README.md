@@ -39,20 +39,35 @@ Traditional agent memory and RAG tools suffer from **Phantom Anchors and Halluci
 
 ### 📦 Installation Guide
 
-#### 1. Full Installation with Tree-Sitter & All Agent Extras (Recommended)
-Installs Tree-Sitter parsers for all 12+ languages, MCP protocol server, graph analytics, real-time file watcher, and hybrid vector search:
+#### 🚀 Fresh Machine Setup & Quickstart Guide (Cài đặt trên máy mới)
+
+Khi bắt đầu trên một máy mới (fresh machine) hoặc môi trường làm việc mới, thực hiện 4 bước sau:
 
 ```bash
-# Clone the repository
+# 1. Clone repository & tạo môi trường ảo Python 3.10+
 git clone https://github.com/minhgv/sot-graph.git
 cd sot-graph
+python3 -m venv .venv
+source .venv/bin/activate
 chmod +x bin/sot
 
-# Install all dependencies with pip
+# 2. Cài đặt toàn bộ dependencies & Tree-Sitter parsers
 pip install -e '.[all]'
+# Hoặc dùng uv để cài đặt siêu tốc:
+# uv pip install -e '.[all]'
 
-# Or using uv (ultra-fast installer)
-uv pip install -e '.[all]'
+# 3. Kích hoạt Adapter cho AI Harness của bạn
+./bin/sot setup --harness pi          # Cho Pi Harness / Oh My Pi
+./bin/sot setup --harness zcode       # Cho ZCode IDE & Assistant
+./bin/sot setup --harness claude      # Cho Claude Code & Cursor
+./bin/sot setup --harness opencode    # Cho OpenCode
+./bin/sot setup --harness antigravity # Cho Google Antigravity / Gemini CLI
+# Hoặc cấu hình tất cả các harness cùng lúc:
+./bin/sot setup --harness all
+
+# 4. Kiểm tra trạng thái & đồng bộ Single Source of Truth
+./bin/sot doctor
+./bin/sot reconcile
 ```
 
 ---
@@ -108,24 +123,60 @@ When you install `sot-graph[tree-sitter]`, the following official grammar packag
 ./bin/sot setup --harness all
 
 # Or provision specific harnesses
-./bin/sot setup --harness omp          # Oh My Pi (OMP)
+./bin/sot setup --harness pi          # Pi Harness / Oh My Pi (OMP)
+./bin/sot setup --harness zcode       # ZCode IDE (MCP + Skill + Slash Commands)
 ./bin/sot setup --harness opencode     # OpenCode
 ./bin/sot setup --harness claude       # Claude Code & Cursor
 ./bin/sot setup --harness antigravity  # Google Antigravity / Gemini CLI
 
 # Scope configuration to current workspace only
 ./bin/sot setup --harness all --workspace-only
-```
 
 ### Supported Harnesses & Deployed Integrations
 
 | Harness | Configuration Files & Artifacts | Integration Highlights |
 | :--- | :--- | :--- |
-| **Oh My Pi (OMP)** | `~/.omp/agent/extensions/sot-graph.ts`<br>`.omp/extensions/sot-graph.ts`<br>`.omp/skills/sot-graph/SKILL.md`<br>`.omp/RULES.md` | **10 Native TypeScript Agent Tools** (`sot_search`, `sot_explore`, `sot_reconcile`, `sot_verify`, `sot_insert`, `sot_cluster`, `sot_report`, `sot_viz`, `sot_export`, `sot_bundle`). Enforces SSOT Knowledge Reuse Rules. |
+| **Pi Harness / Oh My Pi (OMP)** | `~/.omp/agent/extensions/sot-graph.ts`<br>`.omp/extensions/sot-graph.ts`<br>`.omp/skills/sot-graph/SKILL.md`<br>`.omp/RULES.md`<br>`.omp/rules/sot-graph.md` | **24 Native TypeScript Agent Tools** (`sot_search`, `sot_map`, `sot_explore`, `sot_usages`, `sot_implementations`, `sot_rename`, `sot_pack`, `sot_reconcile`, `sot_verify`, `sot_doctor`, `sot_clean`, `sot_vacuum`, `sot_insert`, `sot_cluster`, `sot_report`, `sot_viz`, `sot_export`, `sot_bundle`, `sot_trace`, `sot_ui_tree`, `sot_backend_flow`, `sot_solution_inventory`, `sot_solution_steps`, `sot_solution_bundle`). Enforces SSOT Knowledge Reuse Rules. |
+| **ZCode** | `~/.zcode/config.json`<br>`.zcode/config.json`<br>`.zcode/skills/sot-graph/SKILL.md`<br>`.zcode/commands/*.md` | **Nested MCP Server (`mcp.servers.sot-graph`) + Skill + 7 Slash Commands** (`/sot-search`, `/sot-map`, `/sot-explore`, `/sot-usages`, `/sot-rename`, `/sot-pack`, `/sot-bundle`). Works seamlessly inside ZCode chat. |
 | **OpenCode** | `~/.config/opencode/skill/sot-graph/SKILL.md`<br>`.opencode/skills/sot-graph/SKILL.md`<br>`opencode.json` (auto-merged)<br>`opencode_plugin.ts` | **JSON Auto-Merge & Background Sync Plugin**. Auto-reconciles project index on `session.created` and `file.edited` lifecycle hooks. |
 | **Claude Code & Cursor** | `.mcp.json`<br>`.cursor/mcp.json`<br>`.claude/CLAUDE.md`<br>`AGENTS.md` | **Standard MCP Stdio Server (2025-06-18 spec)** and Knowledge Reuse Protocol embedded directly into agent context instructions. |
 | **Google Antigravity & Gemini CLI** | `~/.gemini/settings.json`<br>`.gemini/settings.json`<br>`~/.gemini/skills/sot-graph/SKILL.md`<br>`GEMINI.md` | **Settings Auto-Merge & Custom Skills**. Configures MCP server and appends SSOT prompt rules. |
 
+---
+
+### 🥧 Pi Harness / Oh My Pi Integration Guide
+
+Khi chạy `sot setup --harness pi` (hoặc `omp`), adapter sẽ tự động triển khai:
+1. **Native TypeScript Extension** (`.omp/extensions/sot-graph.ts` & `~/.omp/agent/extensions/sot-graph.ts`): Đăng ký 24 công cụ native tool devices qua `xd://` (`xd://sot_search`, `xd://sot_explore`, `xd://sot_bundle`,...) tương tác trực tiếp với binary `sot`.
+2. **Declarative Skill & Rules** (`.omp/skills/sot-graph/SKILL.md`, `.omp/RULES.md`): Định nghĩa quy tắc bắt buộc kiểm tra mã nguồn bằng SOT trước khi tạo code mới.
+
+### ⚡ ZCode Integration & Usage Guide
+
+Khi chạy `sot setup --harness zcode`, adapter sẽ tự động cấu hình môi trường ZCode:
+1. **MCP Configuration (`.zcode/config.json`)**: Tự động merge server `sot-graph` vào `mcp.servers` với Python binary và `PYTHONPATH` hiện tại, bảo toàn các cấu hình khác của ZCode:
+   ```json
+   {
+     "mcp": {
+       "transport": "stdio",
+       "servers": {
+         "sot-graph": {
+           "command": "/path/to/.venv/bin/python3",
+           "args": ["-m", "sot_graph.cli", "mcp"],
+           "env": { "PYTHONPATH": "src" }
+         }
+       }
+     }
+   }
+   ```
+2. **ZCode Skills (`.zcode/skills/sot-graph/SKILL.md`)**: Cung cấp ngữ cảnh đầy đủ về Trust Verdicts và cách sử dụng các tools.
+3. **7 ZCode Slash Commands (`.zcode/commands/`)**: Cho phép lập trình viên gõ trực tiếp trong ZCode chat:
+   - `/sot-search <query>`: Tìm kiếm symbol / file với Trust Verdicts `[STRONG]`, `[WEAK]`, `[REBUILT]`.
+   - `/sot-map`: Xem tổng quan cấu trúc repository.
+   - `/sot-explore <symbol>`: Tracing quan hệ gọi hàm đa file (inward & outward calls).
+   - `/sot-usages <symbol>`: Tra cứu tất cả vị trí gọi hàm.
+   - `/sot-rename <old> <new>`: Phân tích và thực hiện đổi tên an toàn.
+   - `/sot-pack <symbol>`: Đóng gói ContextBundle YAML cho LLM prompt context.
+   - `/sot-bundle`: Xuất 5 fact bundle markdown/json files phục vụ sinh tài liệu kiến trúc.
 ---
 
 ## 🛡️ Agent Protocol & Trust Verdict System

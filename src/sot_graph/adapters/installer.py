@@ -1,6 +1,6 @@
 """
 sot_graph.adapters.installer - Unified Multi-Harness Installer.
-Configures OMP, OpenCode, Antigravity, Claude, and ZCode harnesses seamlessly.
+Configures Pi (Oh My Pi / OMP), OpenCode, Antigravity, Claude, and ZCode harnesses seamlessly.
 """
 from __future__ import annotations
 
@@ -13,8 +13,12 @@ from sot_graph.adapters.antigravity import setup_antigravity
 from sot_graph.adapters.claude import setup_claude
 from sot_graph.adapters.zcode import setup_zcode
 
+HARNESS_ALIASES: Dict[str, str] = {
+    "pi": "omp",
+}
+
 SUPPORTED_HARNESSES = {
-    "omp": ("Oh My Pi (OMP) Native Extension, Skill & Rules", setup_omp),
+    "omp": ("Oh My Pi (OMP) / Pi Native Extension, Skill & Rules", setup_omp),
     "opencode": ("OpenCode Skill, Plugin & MCP Server", setup_opencode),
     "antigravity": ("Google Antigravity / Gemini CLI MCP & Skill", setup_antigravity),
     "claude": ("Claude Code & Cursor Universal MCP", setup_claude),
@@ -37,18 +41,24 @@ def install_harnesses(
     Install and configure adapters for selected harnesses.
     
     Args:
-        harnesses: List of harness identifiers ('omp', 'opencode', 'antigravity', 'claude', 'zcode', 'all').
+        harnesses: List of harness identifiers ('omp', 'pi', 'opencode', 'antigravity', 'claude', 'zcode', 'all').
         root: Target workspace root directory (defaults to current working directory).
         global_install: Whether to write user-level global configurations.
         workspace_install: Whether to write workspace-level configurations.
         
     Returns:
-        Dictionary mapping harness name to list of installed/updated file paths.
+        Dictionary mapping canonical harness name to list of installed/updated file paths.
     """
     target_root = (root or Path.cwd()).resolve()
     results: Dict[str, List[str]] = {}
 
-    selected = set(harnesses)
+    raw_selected = set(harnesses)
+    selected = set()
+    for h in raw_selected:
+        key = str(h).lower()
+        resolved = HARNESS_ALIASES.get(key, key)
+        selected.add(resolved)
+
     if "all" in selected:
         selected = set(SUPPORTED_HARNESSES.keys())
 
