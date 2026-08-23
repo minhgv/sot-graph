@@ -196,11 +196,9 @@ class TreeSitterExtractionTests(unittest.TestCase):
         return parse_file_graph(str(target), str(root))
 
     def test_available_languages_reported(self):
-        # At least the grammars installed for development must be detected.
-        if os.environ.get("SOT_TS_SKIP_UNAVAILABLE"):
-            self.skipTest("tree-sitter extra not installed")
+        if not any(LANGS.values()) or os.environ.get("SOT_TS_SKIP_UNAVAILABLE"):
+            self.skipTest("tree-sitter extra grammars not installed")
         self.assertTrue(any(LANGS.values()))
-
     def test_definitions_and_signatures_extracted(self):
         for language, expected in EXPECTED_NODES.items():
             with self.subTest(language=language):

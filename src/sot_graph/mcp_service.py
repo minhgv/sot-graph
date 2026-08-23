@@ -655,6 +655,127 @@ class McpService:
             })
         return self._run(op)
 
+    def trace(
+        self,
+        target: str,
+        *,
+        depth: int = 2,
+    ) -> Dict[str, Any]:
+        """Extract Full-Stack execution path, UI decisions, API bindings, and Mermaid diagrams."""
+        from sot_graph.trace import trace_fullstack
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            view = _ConnView(conn)
+            res = trace_fullstack(cast(Database, view), target, depth=depth)
+            return self._fits_response({
+                "ok": True,
+                "status": "success",
+                "target": target,
+                "depth": depth,
+                **res,
+            })
+        return self._run(op)
+
+    def ui_tree(
+        self,
+        component: str,
+    ) -> Dict[str, Any]:
+        """Extract local Frontend UI decision tree, validation rules, and modals."""
+        from sot_graph.trace import extract_ui_tree
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            view = _ConnView(conn)
+            res = extract_ui_tree(cast(Database, view), component)
+            return self._fits_response({
+                "ok": True,
+                "status": "success",
+                "component": component,
+                **res,
+            })
+        return self._run(op)
+
+    def backend_flow(
+        self,
+        service: str,
+    ) -> Dict[str, Any]:
+        """Extract Backend processing steps, multi-datasources, and exception branches."""
+        from sot_graph.trace import extract_backend_flow
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            view = _ConnView(conn)
+            res = extract_backend_flow(cast(Database, view), service)
+            return self._fits_response({
+                "ok": True,
+                "status": "success",
+                "service": service,
+                **res,
+            })
+        return self._run(op)
+
+    def solution_inventory(
+        self,
+        module: str = "",
+        *,
+        output_file: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Generate Stage 1 Feature Inventory by Role & Related Features for TLGP."""
+        from sot_graph.solution import generate_feature_inventory
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            view = _ConnView(conn)
+            out_file = output_file
+            if out_file and not os.path.isabs(out_file):
+                out_file = os.path.abspath(os.path.join(self.project_root, out_file))
+            res = generate_feature_inventory(cast(Database, view), module, out_file=out_file)
+            return self._fits_response({
+                "ok": True,
+                "status": "success",
+                "module": module or "all",
+                **res,
+            })
+        return self._run(op)
+
+    def solution_steps(
+        self,
+        method: str,
+    ) -> Dict[str, Any]:
+        """Extract Stage 2 Micro-step decomposition (4-column table) for manpower estimation."""
+        from sot_graph.solution import extract_execution_steps
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            view = _ConnView(conn)
+            res = extract_execution_steps(cast(Database, view), method)
+            return self._fits_response({
+                "ok": True,
+                "status": "success",
+                "method": method,
+                **res,
+            })
+        return self._run(op)
+
+    def solution_bundle(
+        self,
+        module: str = "",
+        *,
+        output_file: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Generate Stage 2 Full Solution Context Bundle for Solution.md and downstream agents."""
+        from sot_graph.solution import generate_solution_bundle
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            view = _ConnView(conn)
+            out_file = output_file or os.path.join(self.project_root, ".sot", "bundle", "ContextBundle.md")
+            if not os.path.isabs(out_file):
+                out_file = os.path.abspath(os.path.join(self.project_root, out_file))
+            res = generate_solution_bundle(cast(Database, view), module, out_file=out_file)
+            return self._fits_response({
+                "ok": True,
+                "status": "success",
+                "module": module or "all",
+                **res,
+            })
+        return self._run(op)
+
     async def _async(self, method: Any, *args: Any, **kwargs: Any) -> Any:
         try:
             return await asyncio.wait_for(asyncio.to_thread(method, *args, **kwargs), self.timeout_ms / 1000.0)
@@ -701,6 +822,24 @@ class McpService:
         return await self._async(self.get_communities, *args, **kwargs)
     async def aget_architecture_bundle(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return await self._async(self.get_architecture_bundle, *args, **kwargs)
+
+    async def atrace(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.trace, *args, **kwargs)
+
+    async def aui_tree(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.ui_tree, *args, **kwargs)
+
+    async def abackend_flow(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.backend_flow, *args, **kwargs)
+
+    async def asolution_inventory(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.solution_inventory, *args, **kwargs)
+
+    async def asolution_steps(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.solution_steps, *args, **kwargs)
+
+    async def asolution_bundle(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.solution_bundle, *args, **kwargs)
 
 
 __all__ = ["McpService", "McpServiceError", "ServiceLimits"]

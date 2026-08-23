@@ -525,6 +525,160 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
     },
   });
 
+  // 19. sot_trace: Full-Stack Execution & Visual Interaction Trace
+  pi.registerTool({
+    name: "sot_trace",
+    label: "SOT Full-Stack Trace",
+    description:
+      "Extract Full-Stack execution path, UI decision branches, API contracts, and deterministic Mermaid diagrams (flowchart and sequence) for a ticket, keyword, or endpoint.",
+    promptSnippet: "Extract full-stack trace and render Mermaid interaction diagrams",
+    parameters: {
+      type: "object",
+      properties: {
+        target: { type: "string", description: "Ticket ID, symbol name, endpoint, or feature keyword" },
+        depth: { type: "number", description: "Exploration depth (default: 2)" },
+        output: { type: "string", description: "Write trace report to file" },
+        json: { type: "boolean", description: "Output raw structured JSON" },
+      },
+      required: ["target"],
+    },
+    async execute(_id, params) {
+      const args = ["trace", String(params.target || "")];
+      if (params.depth) args.push("--depth", String(params.depth));
+      if (params.output) args.push("-o", String(params.output));
+      if (params.json) args.push("--json");
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
+  // 20. sot_ui_tree: Frontend UI Decision Tree & Modals
+  pi.registerTool({
+    name: "sot_ui_tree",
+    label: "SOT UI Decision Tree",
+    description:
+      "Extract Frontend UI decision tree, validation rules, button triggers, and modal transitions.",
+    promptSnippet: "Extract local UI decision tree and modal branches",
+    parameters: {
+      type: "object",
+      properties: {
+        component: { type: "string", description: "Component name or file path" },
+        json: { type: "boolean", description: "Output raw JSON" },
+      },
+      required: ["component"],
+    },
+    async execute(_id, params) {
+      const args = ["ui-tree", String(params.component || "")];
+      if (params.json) args.push("--json");
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
+  // 21. sot_backend_flow: Backend Micro-steps & Datasources
+  pi.registerTool({
+    name: "sot_backend_flow",
+    label: "SOT Backend Flow",
+    description:
+      "Extract Backend service micro-steps, multi-datasources, and exception handling branches.",
+    promptSnippet: "Extract backend processing steps and multi-datasource connections",
+    parameters: {
+      type: "object",
+      properties: {
+        service: { type: "string", description: "Service or controller symbol name" },
+        json: { type: "boolean", description: "Output raw JSON" },
+      },
+      required: ["service"],
+    },
+    async execute(_id, params) {
+      const args = ["be-flow", String(params.service || "")];
+      if (params.json) args.push("--json");
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
+  // 22. sot_solution_inventory: Stage 1 Feature Inventory by Role
+  pi.registerTool({
+    name: "sot_solution_inventory",
+    label: "SOT Solution Feature Inventory",
+    description:
+      "Discover all features by user role and 10 related feature categories for Stage 1 Solution documentation.",
+    promptSnippet: "Scan module and generate Stage 1 Feature Inventory",
+    parameters: {
+      type: "object",
+      properties: {
+        module: { type: "string", description: "Module or subsystem name (default: all)" },
+        output: { type: "string", description: "Output markdown file path" },
+        json: { type: "boolean", description: "Output JSON format" },
+      },
+    },
+    async execute(_id, params) {
+      const args = ["solution", "inventory"];
+      if (params.module) args.push(String(params.module));
+      if (params.output) args.push("-o", String(params.output));
+      if (params.json) args.push("--json");
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
+  // 23. sot_solution_steps: Stage 2 Micro-step Decomposition (4-Column Table)
+  pi.registerTool({
+    name: "sot_solution_steps",
+    label: "SOT Solution Micro-Steps",
+    description:
+      "Extract Stage 2 micro-step decomposition (4-column table: TT, Name, Code Statement, Logic) with verified AST execution code for Manpower NVJ1/NVJ2/NVJ3 estimation.",
+    promptSnippet: "Decompose method into 4-column execution table for manpower estimation",
+    parameters: {
+      type: "object",
+      properties: {
+        method: { type: "string", description: "Service or method symbol to decompose" },
+        format: { type: "string", description: "Output format: 'table' or 'json' (default: table)" },
+        output: { type: "string", description: "Output file path" },
+      },
+      required: ["method"],
+    },
+    async execute(_id, params) {
+      const args = ["solution", "steps", String(params.method || "")];
+      if (params.format) args.push("--format", String(params.format));
+      if (params.output) args.push("-o", String(params.output));
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
+  // 24. sot_solution_bundle: Stage 2 Full Solution Context Bundle
+  pi.registerTool({
+    name: "sot_solution_bundle",
+    label: "SOT Solution Context Bundle",
+    description:
+      "Synthesize complete Context Bundle (UI forms, DataTable schemas, API specs, diagrams) for Solution.md and downstream agents without raw source re-reading.",
+    promptSnippet: "Generate complete Solution Context Bundle for downstream docs",
+    parameters: {
+      type: "object",
+      properties: {
+        module: { type: "string", description: "Module name (default: all)" },
+        output: { type: "string", description: "Output file path (default: .sot/bundle/ContextBundle.md)" },
+        json: { type: "boolean", description: "Output JSON format" },
+      },
+    },
+    async execute(_id, params) {
+      const args = ["solution", "bundle"];
+      if (params.module) args.push(String(params.module));
+      if (params.output) args.push("-o", String(params.output));
+      if (params.json) args.push("--json");
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
   // Optional Hook: check graph status on session start
   if (typeof pi.on === "function") {
     pi.on("session_start", async () => {

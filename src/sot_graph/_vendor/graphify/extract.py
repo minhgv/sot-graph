@@ -337,10 +337,11 @@ def _extract_regex_patterns(path: Path, patterns: List[Dict[str, Any]]) -> Dict[
         "id": path.name,
         "label": path.name,
         "kind": "file",
-        "source_location": "L1",
+        "source_location": f"L1-L{max(1, len(content.splitlines()))}",
+        "line_start": 1,
+        "line_end": max(1, len(content.splitlines())),
         "doc": "",
     })
-
     lines = content.splitlines()
     for i, line in enumerate(lines, 1):
         for pat in patterns:
@@ -350,11 +351,28 @@ def _extract_regex_patterns(path: Path, patterns: List[Dict[str, Any]]) -> Dict[
                 if symbol_name:
                     sym_id = symbol_name
                     kind = pat.get("kind", "symbol")
+                    # Estimate block span using brace counting if available
+                    brace_count = 0
+                    has_brace = False
+                    end_line = i
+                    for j in range(i - 1, len(lines)):
+                        l_str = lines[j]
+                        if "{" in l_str or "}" in l_str:
+                            has_brace = True
+                            brace_count += l_str.count("{") - l_str.count("}")
+                            if brace_count <= 0 and has_brace:
+                                end_line = j + 1
+                                break
+                    if not has_brace or end_line < i:
+                        end_line = i
+
                     nodes.append({
                         "id": sym_id,
                         "label": f"{pat.get('prefix', '')} {symbol_name}".strip(),
                         "kind": kind,
-                        "source_location": f"L{i}",
+                        "source_location": f"L{i}-L{end_line}" if end_line > i else f"L{i}",
+                        "line_start": i,
+                        "line_end": end_line,
                         "doc": line.strip(),
                     })
                     edges.append({

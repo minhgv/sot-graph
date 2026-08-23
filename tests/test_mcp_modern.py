@@ -26,9 +26,14 @@ class McpModernTests(unittest.TestCase):
     """End-to-end over an in-memory client/server pair."""
 
     def setUp(self):
+        try:
+            import anyio  # noqa: F401
+            import mcp  # noqa: F401
+        except ImportError:
+            self.skipTest("anyio or mcp extra not installed")
+
         from sot_graph.db import Database
         from sot_graph.reconciler import Reconciler
-
         self.test_dir = tempfile.mkdtemp()
         for rel, content in PROJECT.items():
             target = Path(self.test_dir) / rel

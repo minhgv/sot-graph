@@ -3,13 +3,25 @@
 > **Mục đích:** Bản mẫu chuẩn hóa 6 phần cho AI Agent / LLM khi nhận yêu cầu: *"Xuất báo cáo kiến trúc"*, *"Tổng quan hệ thống"*, *"Architecture Report"*.
 > **Nguyên tắc Ingestion:** LLM CHỈ đọc các file Fact Bundle trong `.sot/bundle/` (`01_module_inventory.md`, `02_routing_endpoints.md`, `03_workflows_states.md`, `04_dependencies_violations.md`, `05_system_metrics.json`) và điền dữ liệu theo cấu trúc chuẩn dưới đây.
 
+### Markdown, LaTeX & Mermaid Rendering Rules (BẮT BUỘC TUÂN THỦ)
+1. **Mermaid Diagrams:**
+   - Mọi nhãn của Node và Subgraph BẮT BUỘC phải đặt trong dấu nháy kép: `NODE["Tên node"]`, `subgraph ID ["Tiêu đề subgraph"]`.
+   - TUYỆT ĐỐI KHÔNG dùng ký tự pipe đơn `|` bên trong nhãn node (dùng `/` hoặc `\|` để thay thế).
+   - Luôn chừa 1 dòng trống trước và sau khối ````mermaid`.
+2. **Ký hiệu Toán học & Unicode (Khuyến nghị dùng Unicode chuẩn):**
+   - Ưu tiên sử dụng ký tự Unicode trực tiếp: `Q ≥ 0.650`, `Q = 0.371`, `≈ 400`, `State ∈ { Initial, Loading, Success(data), Failure(error) }`.
+   - TUYỆT ĐỐI KHÔNG dùng dấu `$` toán học bên trong ô bảng biểu Markdown (Table cells), tiêu đề hoặc danh sách bullet để tránh lỗi hiển thị raw `$` trên GitHub, VS Code, Obsidian và công cụ xuất DOCX.
+3. **Markdown Tables & Text:**
+   - Trong bảng markdown, không dùng ký tự `<` hoặc `>` đứng trước số một cách trần trụi; BẮT BUỘC dùng `&lt;`, `&gt;` hoặc Unicode `≤`, `≥`.
+   - Không để ký tự pipe `|` không escape làm vỡ cấu trúc cột bảng.
+
 ---
 
 # [TÊN DỰ ÁN] — BÁO CÁO KIẾN TRÚC & PHÂN TÍCH HỆ THỐNG TOÀN DIỆN
 
 **Nguồn phân tích:** Single Source of Truth (`sot-graph`)  
 **Mục tiêu:** Bóc tách kiến trúc tổng thể, phân rã chi tiết 100% modules & chức năng con theo User Role, State Machine, Cron SLA và Khuyến nghị tối ưu.  
-**Pattern & Modularity:** [Tên Pattern kiến trúc] — Modularity Score ($Q = [Score]$)
+**Pattern & Modularity:** [Tên Pattern kiến trúc] — Modularity Score (Q = [Score])
 
 ---
 
@@ -21,32 +33,32 @@
 ### 1.2 Sơ đồ C4 Container Tổng thể (Mermaid HLD)
 ```mermaid
 graph TD
-    subgraph Client_Layer [Kênh Người Dùng & Giao Tiếp Đa Điểm]
-        WEB[Web Admin / Backoffice]
-        PORTAL[Customer Self-Service Portal]
-        MOBILE[Mobile App / Mini-App]
-        EXT[B2B / Third-Party REST Clients]
+    subgraph Client_Layer ["Kênh Người Dùng & Giao Tiếp Đa Điểm"]
+        WEB["Web Admin / Backoffice"]
+        PORTAL["Customer Self-Service Portal"]
+        MOBILE["Mobile App / Mini-App"]
+        EXT["B2B / Third-Party REST Clients"]
     end
 
-    subgraph Gateway_Auth [Tầng Cổng Giao Tiếp & Định Danh]
-        API_GW[API Gateway / Headless Router]
-        AUTH_SSO[Authentication / SSO Provider]
+    subgraph Gateway_Auth ["Tầng Cổng Giao Tiếp & Định Danh"]
+        API_GW["API Gateway / Headless Router"]
+        AUTH_SSO["Authentication / SSO Provider"]
     end
 
-    subgraph Core_Business_Domains [Cụm Modules Nghiệp Vụ Chính]
+    subgraph Core_Business_Domains ["Cụm Modules Nghiệp Vụ Chính"]
         %% Liệt kê các Cụm Bounded Contexts
-        GRP_1[Cụm 1: Nền tảng & Cấu hình Cơ sở]
-        GRP_2[Cụm 2: Dịch vụ & Khách hàng]
-        GRP_3[Cụm 3: Bán hàng, Đơn hàng & Vận hành]
-        GRP_4[Cụm 4: Thuê bao, Hóa đơn & Tài chính]
-        GRP_5[Cụm 5: Kênh Tương tác Số & Báo cáo]
+        GRP_1["Cụm 1: Nền tảng & Cấu hình Cơ sở"]
+        GRP_2["Cụm 2: Dịch vụ & Khách hàng"]
+        GRP_3["Cụm 3: Bán hàng, Đơn hàng & Vận hành"]
+        GRP_4["Cụm 4: Thuê bao, Hóa đơn & Tài chính"]
+        GRP_5["Cụm 5: Kênh Tương tác Số & Báo cáo"]
     end
 
-    subgraph External_Integrations [Hệ Thống Tích Hợp Ngoại Vi]
-        EXT_1[Hệ thống Ký số / V-Office]
-        EXT_2[Hệ thống Cước / Viễn thông]
-        EXT_3[Cổng Thanh toán / Ngân hàng]
-        EXT_4[Core ERP / Kế toán Tổng]
+    subgraph External_Integrations ["Hệ Thống Tích Hợp Ngoại Vi"]
+        EXT_1["Hệ thống Ký số / V-Office"]
+        EXT_2["Hệ thống Cước / Viễn thông"]
+        EXT_3["Cổng Thanh toán / Ngân hàng"]
+        EXT_4["Core ERP / Kế toán Tổng"]
     end
 
     %% Wiring connections

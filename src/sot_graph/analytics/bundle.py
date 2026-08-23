@@ -10,9 +10,9 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
-from sot_graph.analytics.architecture import ArchitectureProfile
+from sot_graph.analytics.architecture import ArchitectureProfile, FunctionalModule, is_test_or_mock_path
 from sot_graph.analytics.diagnostics import AnalysisResult, analyze_graph
 from sot_graph.analytics.graph import AnalyticsGraph
 from sot_graph.db import Database
@@ -25,9 +25,11 @@ class ArchitectureBundler:
         db: Optional[Database] = None,
         root_dir: str = ".",
         graph: Optional[AnalyticsGraph] = None,
+        include_tests: bool = False,
     ):
         self.db = db
         self.root_dir = os.path.abspath(root_dir)
+        self.include_tests = include_tests
         if graph is not None:
             self.graph = graph
         elif db is not None:
@@ -76,16 +78,45 @@ class ArchitectureBundler:
             lines.append("*(No structured functional modules discovered)*\n")
             return "\n".join(lines)
 
+        mods: List[FunctionalModule] = self.profile.functional_modules
+        if not self.include_tests:
+            filtered_mods = []
+            for mod in mods:
+                files = [f for f in mod.internal_files if not is_test_or_mock_path(f)]
+                if not files and (is_test_or_mock_path(mod.name) or "test" in mod.name.lower()):
+                    continue
+                filtered_symbols = [s for s in mod.sample_symbols if not is_test_or_mock_path(s)]
+                filtered_entities = [e for e in mod.core_entities if not is_test_or_mock_path(e)]
+                filtered_entrypoints = [ep for ep in mod.entrypoints if not is_test_or_mock_path(ep)]
+                filtered_mods.append(
+                    FunctionalModule(
+                        name=mod.name,
+                        category=mod.category,
+                        responsibility=mod.responsibility,
+                        node_count=mod.node_count if not files else max(len(filtered_symbols), len(files)),
+                        file_count=len(files) if files else mod.file_count,
+                        core_entities=filtered_entities,
+                        entrypoints=filtered_entrypoints,
+                        dependencies=mod.dependencies,
+                        sample_symbols=filtered_symbols,
+                        internal_files=files,
+                    )
+                )
+            mods = filtered_mods
+
+        if not mods:
+            lines.append("*(No structured functional modules discovered)*\n")
+            return "\n".join(lines)
+
         lines.extend([
             "| Module Name | Category | Primary Responsibility | Core Entities / Models | Entrypoints / Handlers | Dependencies | Nodes / Files |",
             "| :--- | :--- | :--- | :--- | :--- | :--- | :-: |",
         ])
 
-        for mod in self.profile.functional_modules:
+        for mod in mods:
             entities = ", ".join(f"`{e}`" for e in mod.core_entities[:4]) or "*None*"
             if len(mod.core_entities) > 4:
                 entities += f" *(+{len(mod.core_entities)-4} more)*"
-
             entrypoints = ", ".join(f"`{ep}`" for ep in mod.entrypoints[:3]) or "*None*"
             if len(mod.entrypoints) > 3:
                 entrypoints += f" *(+{len(mod.entrypoints)-3} more)*"
@@ -106,7 +137,7 @@ class ArchitectureBundler:
             "",
         ])
 
-        for mod in self.profile.functional_modules:
+        for mod in mods:
             lines.append(f"### Module: `{mod.name}` ({mod.category})")
             lines.append(f"- **Primary Responsibility:** {mod.responsibility}")
             lines.append(f"- **Total Nodes:** {mod.node_count} | **Total Files:** {mod.file_count}")
@@ -145,10 +176,20 @@ class ArchitectureBundler:
             return "\n".join(lines)
 
         ra = self.profile.routing_architecture
-        lines.append(f"**Total Discovered Routes:** `{ra.total_routes}` ("
-                     f"HTTP APIs: `{len(ra.http_routes)}`, "
-                     f"UI Pages / Views: `{len(ra.ui_routes)}`, "
-                     f"Event / Messaging: `{len(ra.event_routes)}`)\n")
+        http_routes = ra.http_routes
+        ui_routes = ra.ui_routes
+        event_routes = ra.event_routes
+
+        if not self.include_tests:
+            http_routes = [r for r in http_routes if not is_test_or_mock_path(r.file_anchor.split(":")[0])]
+            ui_routes = [r for r in ui_routes if not is_test_or_mock_path(r.file_anchor.split(":")[0])]
+            event_routes = [r for r in event_routes if not is_test_or_mock_path(r.file_anchor.split(":")[0])]
+
+        total_routes = len(http_routes) + len(ui_routes) + len(event_routes)
+        lines.append(f"**Total Discovered Routes:** `{total_routes}` ("
+                     f"HTTP APIs: `{len(http_routes)}`, "
+                     f"UI Pages / Views: `{len(ui_routes)}`, "
+                     f"Event / Messaging: `{len(event_routes)}`)\n")
 
         # 1. HTTP APIs
         lines.extend([
@@ -157,8 +198,8 @@ class ArchitectureBundler:
             "| Method | Endpoint / URI Pattern | Controller / Handler Function | Source Anchor (File:Line) | Auth / Guard | Target Layer |",
             "| :---: | :--- | :--- | :--- | :--- | :--- |",
         ])
-        if ra.http_routes:
-            for r in ra.http_routes:
+        if http_routes:
+            for r in http_routes:
                 method = r.method or "ANY"
                 auth = f"`{r.auth_guard}`" if r.auth_guard else "*Public / Default*"
                 layer = r.target_layer or "API Layer"
@@ -176,15 +217,14 @@ class ArchitectureBundler:
             "| Page / Route Pattern | UI Component / View Class | Source Anchor (File:Line) | Target Layer |",
             "| :--- | :--- | :--- | :--- |",
         ])
-        if ra.ui_routes:
-            for r in ra.ui_routes:
+        if ui_routes:
+            for r in ui_routes:
                 layer = r.target_layer or "Presentation"
                 lines.append(
                     f"| `{r.path_or_pattern}` | `{r.handler}` | `{r.file_anchor}:{r.line}` | `{layer}` |"
                 )
         else:
             lines.append("| *No UI page routes found* | - | - | - |")
-        lines.append("")
 
         # 3. Event Busses & State Dispatches
         lines.extend([
@@ -193,14 +233,13 @@ class ArchitectureBundler:
             "| Event / State Pattern | Handler / Emitter Class | Source Anchor (File:Line) |",
             "| :--- | :--- | :--- |",
         ])
-        if ra.event_routes:
-            for r in ra.event_routes:
+        if event_routes:
+            for r in event_routes:
                 lines.append(
                     f"| `{r.path_or_pattern}` | `{r.handler}` | `{r.file_anchor}:{r.line}` |"
                 )
         else:
             lines.append("| *No event dispatches found* | - | - |")
-        lines.append("")
 
         return "\n".join(lines)
 
@@ -223,6 +262,8 @@ class ArchitectureBundler:
             path = str(data.get("path", ""))
             kind = str(data.get("kind", ""))
 
+            if not self.include_tests and is_test_or_mock_path(path):
+                continue
             # Detect state machines / status fields
             if re.search(r"(state|status|stage|lifecycle|step|phase|tsc_state)", label, re.I) or \
                re.search(r"(state|status|workflow)", path, re.I):

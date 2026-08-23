@@ -2,6 +2,7 @@
 sot_graph.adapters.installer - Unified Multi-Harness Installer.
 Configures OMP, OpenCode, Antigravity, Claude, and ZCode harnesses seamlessly.
 """
+from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict, List, Sequence

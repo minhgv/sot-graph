@@ -8,10 +8,11 @@ from pathlib import Path
 from sot_graph.db import Database
 from sot_graph.reconciler import Reconciler
 
+from sot_graph.vector import HashEmbedder, reciprocal_rank_fusion
+
 try:
     import sqlite_vec  # noqa: F401
-    from sot_graph.vector import (HashEmbedder, hybrid_search, index_nodes,
-                                  reciprocal_rank_fusion, vector_search)
+    from sot_graph.vector import hybrid_search, index_nodes, vector_search
     HAVE_VEC = True
 except ImportError:  # pragma: no cover
     HAVE_VEC = False

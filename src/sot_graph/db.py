@@ -16,7 +16,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, 
 from urllib.parse import quote
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS file_journal (
@@ -77,12 +77,79 @@ CREATE TABLE IF NOT EXISTS graph_communities (
     nodes_json TEXT NOT NULL,
     created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ui_navigation (
+    id TEXT PRIMARY KEY,
+    menu_label TEXT,
+    route_path TEXT NOT NULL,
+    component_name TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    parent_id TEXT,
+    FOREIGN KEY(parent_id) REFERENCES ui_navigation(id)
+);
+CREATE INDEX IF NOT EXISTS idx_ui_nav_route ON ui_navigation(route_path);
+CREATE INDEX IF NOT EXISTS idx_ui_nav_comp ON ui_navigation(component_name);
+CREATE TABLE IF NOT EXISTS ui_decision_nodes (
+    id TEXT PRIMARY KEY,
+    component_name TEXT NOT NULL,
+    handler_symbol TEXT NOT NULL,
+    trigger_element TEXT,
+    condition_expr TEXT NOT NULL,
+    branch_type TEXT NOT NULL,
+    ui_effect TEXT NOT NULL,
+    ui_target TEXT,
+    file_path TEXT NOT NULL,
+    line_number INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_ui_dec_comp ON ui_decision_nodes(component_name);
+CREATE INDEX IF NOT EXISTS idx_ui_dec_handler ON ui_decision_nodes(handler_symbol);
+CREATE TABLE IF NOT EXISTS api_cross_bindings (
+    id TEXT PRIMARY KEY,
+    fe_caller_symbol TEXT NOT NULL,
+    http_method TEXT NOT NULL,
+    normalized_uri TEXT NOT NULL,
+    be_controller_symbol TEXT,
+    request_dto TEXT,
+    response_dto TEXT,
+    fe_file TEXT,
+    be_file TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_api_binding_uri ON api_cross_bindings(normalized_uri);
+CREATE INDEX IF NOT EXISTS idx_api_binding_fe ON api_cross_bindings(fe_caller_symbol);
+CREATE INDEX IF NOT EXISTS idx_api_binding_be ON api_cross_bindings(be_controller_symbol);
+CREATE TABLE IF NOT EXISTS be_execution_steps (
+    id TEXT PRIMARY KEY,
+    service_symbol TEXT NOT NULL,
+    step_order INTEGER NOT NULL,
+    step_name TEXT NOT NULL,
+    code_statement TEXT NOT NULL,
+    step_description TEXT NOT NULL,
+    step_category TEXT NOT NULL,
+    datasource_target TEXT,
+    file_path TEXT NOT NULL,
+    line_number INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_be_steps_service ON be_execution_steps(service_symbol);
+CREATE TABLE IF NOT EXISTS related_features_index (
+    id TEXT PRIMARY KEY,
+    module_name TEXT NOT NULL,
+    feature_name TEXT NOT NULL,
+    feature_category TEXT NOT NULL,
+    risk_level TEXT NOT NULL,
+    short_description TEXT NOT NULL,
+    key_files TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rel_feat_module ON related_features_index(module_name);
 """
 
 # Ordered drop list for the disposable-index migration: the filesystem is the
 # source of truth, so a legacy schema is dropped and rebuilt by the next
 # reconcile instead of being migrated in place.
 _DROP_ON_RESET = (
+    "DROP TABLE IF EXISTS related_features_index",
+    "DROP TABLE IF EXISTS be_execution_steps",
+    "DROP TABLE IF EXISTS api_cross_bindings",
+    "DROP TABLE IF EXISTS ui_decision_nodes",
+    "DROP TABLE IF EXISTS ui_navigation",
     "DROP TABLE IF EXISTS graph_fts",
     "DROP TABLE IF EXISTS graph_communities",
     "DROP TABLE IF EXISTS pending_edges",
@@ -90,7 +157,6 @@ _DROP_ON_RESET = (
     "DROP TABLE IF EXISTS graph_nodes",
     "DROP TABLE IF EXISTS file_journal",
 )
-
 
 @dataclass(frozen=True)
 class CleanPlan:

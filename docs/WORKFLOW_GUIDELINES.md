@@ -292,3 +292,23 @@ Configure MCP in `~/.claude/mcp.json` or `.cursor/mcp.json`:
 1. **Always Check Trust Verdicts:** Prioritize `[STRONG]` results; inspect `[WEAK]` results; update paths for `[REBUILT]`.
 2. **Pack Before Slicing:** Extract subgraphs via `sot pack` when delegating tasks to worker subagents.
 3. **Reconcile on Exit:** Always run `sot reconcile` after completing code generation to ensure the next session inherits a clean, synchronized state.
+
+---
+
+## 7. Dual-Target Markdown, LaTeX & Unicode Rendering Rules
+
+All AI Agents and reports generated using SOT-Graph MUST adhere to these rendering guardrails:
+
+### 1. Mermaid Diagrams
+- **Double Quote Labels:** Wrap every Node label and Subgraph title in double quotes: `NODE["Label"]`, `subgraph ID ["Title"]`.
+- **No Raw Pipes:** Never use unescaped pipe `|` inside node labels (use `/` or `\\|`).
+- **Block Separation:** Maintain at least one blank line before and after ````mermaid` code blocks.
+
+### 2. Mathematical & Unicode Symbols
+- **Clean Unicode:** Use clean Unicode directly: `Q ≥ 0.650`, `Q = 0.371`, `≈ 400`, `State ∈ { Initial, Loading, Success(data), Failure(error) }`.
+- **No Raw Math in Tables/Headers:** NEVER use raw `$ ... $` or `$$ ... $$` math syntax inside Markdown table cells, headers, or bullet items. This ensures flawless display across GitHub GFM, VS Code Preview, Obsidian, md2docx, and Typora.
+
+### 3. Markdown Tables & Formatting
+- **Escape Comparison Operators:** In table cells, escape `<` and `>` as `&lt;` and `&gt;` or use Unicode `≤`, `≥`.
+- **Escape Table Pipes:** Always escape column pipe characters `\\|` inside table cell text to avoid collapsing table rows.
+

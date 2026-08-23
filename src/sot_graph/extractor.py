@@ -147,6 +147,8 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
     # preview so full-text search can find strings and comments, not just
     # symbol bodies — e.g. Vietnamese labels inside PHP view controllers.)
     preview = content_bytes[:_preview_budget()].decode("utf-8", errors="replace")
+    total_lines = content_bytes.count(b"\n") + (1 if content_bytes and not content_bytes.endswith(b"\n") else (0 if not content_bytes else 1))
+    total_lines = max(1, total_lines)
     file_node = {
         "id": file_node_id,
         "kind": "file",
@@ -156,6 +158,7 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
         "body": f"File {rel_path} ({lang}, {file_size} bytes)\nPreview:\n{preview}",
         "keywords": _decompose_keywords(p.name, p.stem, lang, "file", rel_path),
         "line_start": 1,
+        "line_end": total_lines,
     }
 
     if not fn_name:
@@ -207,10 +210,17 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
         symbol_to_node_id[raw_id] = node_id
 
         line_no = None
+        loc_end = None
         loc = str(rn.get("source_location", ""))
-        m = re.search(r"L(\d+)", loc)
+        m = re.search(r"L(\d+)(?:[-:]L?(\d+))?", loc)
         if m:
             line_no = int(m.group(1))
+            if m.group(2):
+                loc_end = int(m.group(2))
+
+        line_end = rn.get("line_end") or loc_end
+        if line_end is None and line_no is not None:
+            line_end = line_no
 
         label = rn.get("label", raw_id)
         kind = rn.get("kind", "symbol")
@@ -227,11 +237,10 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
             "body": body,
             "keywords": _decompose_keywords(raw_id, rn.get("label"), kind, lang, p.name, p.stem),
             "line_start": line_no,
-            "line_end": rn.get("line_end"),
+            "line_end": line_end,
             "col_start": rn.get("col_start"),
             "col_end": rn.get("col_end"),
         })
-
     # Intra-file vs Cross-file edges
     is_package = p.name == "__init__.py"
 

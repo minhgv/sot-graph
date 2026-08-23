@@ -112,6 +112,53 @@ class ArchitectureProfile:
     recommendations_p1: List[str]
     recommendations_p2: List[str]
 
+
+def is_test_or_mock_path(path: str) -> bool:
+    """
+    Identify whether a file path belongs to tests, mocks, or spec suites.
+    Matches /test/, /tests/, /integration_test/, /mock/, /spec/, _test., .spec., .test., test_*.
+    """
+    if not path:
+        return False
+    normalized = path.replace("\\", "/").lower()
+    parts = normalized.split("/")
+    test_dir_names = {
+        "test", "tests", "integration_test", "integration_tests",
+        "mock", "mocks", "spec", "specs", "__tests__", "__test__"
+    }
+    if any(p in test_dir_names for p in parts[:-1]):
+        return True
+
+    filename = parts[-1]
+    if filename.startswith("test_") or filename.startswith("mock_"):
+        return True
+    if "_test." in filename or ".spec." in filename or ".test." in filename or "_mock." in filename or "-test." in filename or "-spec." in filename:
+        return True
+    if filename.endswith("_test") or filename.endswith("_spec"):
+        return True
+    return False
+
+
+UI_CONTROLLER_DENYLIST: Set[str] = {
+    "texteditingcontroller",
+    "scrollcontroller",
+    "animationcontroller",
+    "tabcontroller",
+    "pagecontroller",
+    "focusnode",
+    "changenotifier",
+    "valuenotifier",
+    "streamcontroller",
+    "searchcontroller",
+    "segmentedbuttoncontroller",
+    "expansiontilecontroller",
+    "undomanager",
+    "statecontroller",
+    "viewcontroller",
+    "uicontroller",
+    "gesturecontroller",
+    "refreshcontroller",
+}
 # ---------------------------------------------------------------------------
 # Layer Classification Rules
 # ---------------------------------------------------------------------------
@@ -543,6 +590,7 @@ def extract_routing_architecture(
     node_layers: Dict[str, ArchitecturalLayer],
     primary_lang: str,
     pattern_name: str,
+    include_tests: bool = False,
 ) -> RoutingArchitecture:
     """
     Extract routing topology across HTTP APIs, UI Pages, and Event Dispatches.
@@ -556,11 +604,14 @@ def extract_routing_architecture(
     for node_id, data in graph.nodes.items():
         label = data.get("label", node_id)
         path = data.get("path", "")
-        line = data.get("line") or 1
+        line = data.get("line_start") or data.get("line") or 1
         kind = data.get("kind", "symbol")
         layer = node_layers.get(node_id, ArchitecturalLayer.UNKNOWN)
 
         if not path or kind == "file":
+            continue
+
+        if not include_tests and is_test_or_mock_path(path):
             continue
 
         label_lower = label.lower()
@@ -571,12 +622,19 @@ def extract_routing_architecture(
         method = "POST" if any(k in label_lower for k in ["post", "create", "insert", "upload", "callback", "upsert", "write"]) else ("GET" if any(k in label_lower for k in ["get", "list", "fetch", "query", "find", "search", "read"]) else "ANY")
         endpoint_pattern = ""
 
-        if any(k in path_lower for k in ["controller", "router", "openapi", "endpoints", "api/", "routes/"]) or "controller" in label_lower or "router" in label_lower:
-            if any(k in label_lower for k in ["def ", "async def ", "function ", "method ", "class "]):
-                clean_name = re.sub(r"^(class|def|async def|function|method)\s+", "", label).split("(")[0].strip()
-                if not clean_name.startswith("_") or clean_name in ["_authenticate", "_authenticate_bearer", "_config", "_ok", "_err"]:
-                    is_http = True
-                    endpoint_pattern = f"/{clean_name.replace('_', '/')}"
+        # Denylist check & layer check to prevent UI controllers / pages from being classified as HTTP_API
+        is_ui_controller = any(denied in label_lower for denied in UI_CONTROLLER_DENYLIST)
+        is_presentation_layer = (layer == ArchitecturalLayer.PRESENTATION)
+        is_ui_path = any(k in path_lower for k in ["/widgets/", "/components/", "/views/", "/pages/", "/screens/", "/ui/", "lib/src/widgets", "/templates/"])
+
+        if not is_presentation_layer and not is_ui_controller and not is_ui_path:
+            if any(k in path_lower for k in ["controller", "router", "openapi", "endpoints", "api/", "routes/", "views.py", "endpoints.py", "controllers/"]) or "controller" in label_lower or "router" in label_lower:
+                if any(k in label_lower for k in ["def ", "async def ", "function ", "method ", "class "]):
+                    clean_name = re.sub(r"^(class|def|async def|function|method)\s+", "", label).split("(")[0].strip()
+                    if not clean_name.startswith("_") or clean_name in ["_authenticate", "_authenticate_bearer", "_config", "_ok", "_err"]:
+                        if clean_name.lower() not in UI_CONTROLLER_DENYLIST:
+                            is_http = True
+                            endpoint_pattern = f"/{clean_name.replace('_', '/')}"
 
         if is_http:
             key = f"HTTP:{path}:{label}"
@@ -597,8 +655,8 @@ def extract_routing_architecture(
 
         # 2. Detect UI Navigation / Page Routes
         is_ui = False
-        if layer == ArchitecturalLayer.PRESENTATION or any(k in path_lower for k in ["/page/", "/pages/", "/screen/", "/screens/", "/views/", "/ui/"]):
-            if any(k in label_lower for k in ["page", "screen", "view", "dialog"]) and "class " in label_lower:
+        if layer == ArchitecturalLayer.PRESENTATION or any(k in path_lower for k in ["/page/", "/pages/", "/screen/", "/screens/", "/views/", "/ui/", "/widgets/", "/components/"]):
+            if any(k in label_lower for k in ["page", "screen", "view", "dialog", "widget"]) and ("class " in label_lower or "widget" in label_lower):
                 clean_page = re.sub(r"^class\s+", "", label).split()[0].strip()
                 if not clean_page.startswith("_") or clean_page.endswith("Page"):
                     is_ui = True
@@ -662,7 +720,6 @@ def extract_routing_architecture(
         mermaid_routing_diagram=mermaid_routing,
         mermaid_hld_diagram=mermaid_hld,
     )
-
 
 def generate_mermaid_hld_c4_diagram(
     primary_lang: str,

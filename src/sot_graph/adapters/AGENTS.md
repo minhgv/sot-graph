@@ -59,6 +59,12 @@ When requested to review or synthesize architecture documentation:
 | **Interactive Viz** | `sot viz [-o graph.html]` | `sot_viz` |
 | **Export Graph** | `sot export -f <graphrag\|obsidian\|scip>` | `sot_export` |
 | **Fact Bundler** | `sot bundle [-o .sot/bundle/]` | `sot_bundle` |
+| **Full-Stack Trace** | `sot trace "<target>" [--depth 2] [-o <file>]` | `sot_trace` |
+| **UI Decision Tree** | `sot ui-tree "<component>"` | `sot_ui_tree` |
+| **Backend Flow** | `sot be-flow "<service>"` | `sot_backend_flow` |
+| **Feature Inventory** | `sot solution inventory [module] [-o <file>]` | `sot_solution_inventory` |
+| **Micro-steps Decompose** | `sot solution steps "<method>" [--format table]` | `sot_solution_steps` |
+| **Solution Bundle** | `sot solution bundle [module] [-o <file>]` | `sot_solution_bundle` |
 | **Embed Index** | `sot embed [--limit 5000]` | CLI |
 | **File Watcher** | `sot watch [--debounce-ms 200]` | CLI (Daemon) |
 | **Harness Setup** | `sot setup [--harness <name>]` | CLI |

@@ -24,7 +24,7 @@ When to use:
 - `[REMOVED]`: Node deleted on disk; do NOT reference or hallucinate.
 - `[NOPATH]`: Virtual/inline node without a direct physical file backing.
 
-## Quick CLI Reference
+## Quick CLI & Native Tool Device Reference
 | Category | CLI Command | Native Tool Device |
 | :--- | :--- | :--- |
 | **Search Codebase** | `sot search "<query>" [-n 5] [--hybrid]` | `xd://sot_search` |
@@ -35,6 +35,7 @@ When to use:
 | **Rename Impact** | `sot rename "<symbol>" [--to <new_name>]` | `xd://sot_rename` |
 | **Pack Subgraph** | `sot pack "<symbol>" [--depth 2] [-o <file>]`| `xd://sot_pack` |
 | **Synchronize DB** | `sot reconcile [--workers 4]` | `xd://sot_reconcile` |
+| **Batch Reconcile** | `sot batch-reconcile <dir> [--workers 4]` | CLI |
 | **Audit Drift** | `sot verify [--deep]` | `xd://sot_verify` |
 | **Database Doctor** | `sot doctor` | `xd://sot_doctor` |
 | **Clean Stale Data**| `sot clean [--all] [--include-notes]` | `xd://sot_clean` |
@@ -44,7 +45,13 @@ When to use:
 | **Architecture Report** | `sot report [-o GRAPH_REPORT.md]` | `xd://sot_report` |
 | **Interactive Viz** | `sot viz [-o graph.html]` | `xd://sot_viz` |
 | **Export Graph** | `sot export -f <graphrag/obsidian/scip>` | `xd://sot_export` |
-| **Fact Bundler** | `sot bundle [-o .sot/bundle/]` | `xd://sot_bundle` |
+| **Fact Bundler** | `sot bundle [-o .sot/bundle/] [--include-tests]` | `xd://sot_bundle` |
+| **Full-Stack Trace** | `sot trace "<target>" [--depth 2] [-o <file>]` | `xd://sot_trace` |
+| **UI Decision Tree** | `sot ui-tree "<component>"` | `xd://sot_ui_tree` |
+| **Backend Flow** | `sot be-flow "<service>"` | `xd://sot_backend_flow` |
+| **Feature Inventory** | `sot solution inventory [module] [-o <file>]` | `xd://sot_solution_inventory` |
+| **Micro-steps Decompose** | `sot solution steps "<method>" [--format table/json]` | `xd://sot_solution_steps` |
+| **Solution Bundle** | `sot solution bundle [module] [-o <file>]` | `xd://sot_solution_bundle` |
 | **Embed Index** | `sot embed [--limit 5000]` | CLI |
 | **File Watcher** | `sot watch [--debounce-ms 200]` | CLI (Daemon) |
 | **Harness Setup** | `sot setup [--harness <name>]` | CLI |

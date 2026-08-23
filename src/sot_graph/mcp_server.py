@@ -218,6 +218,24 @@ def create_server(service: McpService) -> Any:
             types.Tool(name="sot_notes", description="Read-only list of persisted knowledge notes (optionally filtered by keyword); each note is fetchable via its sot://node/ URI.", inputSchema={
                 "type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1}}, "additionalProperties": False,
             }),
+            types.Tool(name="sot_trace", description="Full-stack execution path trace, UI decision branches, API contracts, and Mermaid diagram generation.", inputSchema={
+                "type": "object", "properties": {"target": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 5}}, "required": ["target"], "additionalProperties": False,
+            }),
+            types.Tool(name="sot_ui_tree", description="Frontend UI decision tree, validation rules, button triggers, and modal transitions.", inputSchema={
+                "type": "object", "properties": {"component": {"type": "string"}}, "required": ["component"], "additionalProperties": False,
+            }),
+            types.Tool(name="sot_backend_flow", description="Backend service micro-steps, multi-datasources, and exception handling branches.", inputSchema={
+                "type": "object", "properties": {"service": {"type": "string"}}, "required": ["service"], "additionalProperties": False,
+            }),
+            types.Tool(name="sot_solution_inventory", description="Stage 1 Feature Discovery by User Role and 10 related feature categories for Solution docs.", inputSchema={
+                "type": "object", "properties": {"module": {"type": "string"}, "output_file": {"type": "string"}}, "additionalProperties": False,
+            }),
+            types.Tool(name="sot_solution_steps", description="Stage 2 Micro-step decomposition (4-column table) with verified AST execution code for Manpower NVJ1/NVJ2/NVJ3 estimation.", inputSchema={
+                "type": "object", "properties": {"method": {"type": "string"}}, "required": ["method"], "additionalProperties": False,
+            }),
+            types.Tool(name="sot_solution_bundle", description="Full solution context bundle containing UI forms, DataTable schemas, API specs, and diagrams for downstream agents.", inputSchema={
+                "type": "object", "properties": {"module": {"type": "string"}, "output_file": {"type": "string"}}, "additionalProperties": False,
+            }),
         ]
 
     @server.call_tool()
@@ -263,6 +281,18 @@ def create_server(service: McpService) -> Any:
                 )
             elif name == "sot_notes":
                 result = await service.anotes(args.get("query"), limit=args.get("limit", 50))
+            elif name == "sot_trace":
+                result = await service.atrace(args.get("target", ""), depth=args.get("depth", 2))
+            elif name == "sot_ui_tree":
+                result = await service.aui_tree(args.get("component", ""))
+            elif name == "sot_backend_flow":
+                result = await service.abackend_flow(args.get("service", ""))
+            elif name == "sot_solution_inventory":
+                result = await service.asolution_inventory(args.get("module", ""), output_file=args.get("output_file"))
+            elif name == "sot_solution_steps":
+                result = await service.asolution_steps(args.get("method", ""))
+            elif name == "sot_solution_bundle":
+                result = await service.asolution_bundle(args.get("module", ""), output_file=args.get("output_file"))
             else:
                 result = {"error": {"code": "unknown_tool", "message": "unknown MCP tool"}}
             content: list[Any] = [types.TextContent(type="text", text=_json(result))]

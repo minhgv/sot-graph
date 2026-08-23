@@ -48,21 +48,28 @@ Ground OpenCode agent actions in physical filesystem reality using the SOT knowl
 | **Rename Impact** | `sot rename "<symbol>" --to <new_name>` | `sot_rename` |
 | **Pack Subgraph** | `sot pack "<symbol>" [--depth 2] [-o <file>]`| `sot_pack` |
 | **Synchronize DB** | `sot reconcile [--workers 4]` | `sot_reconcile` |
+| **Batch Reconcile** | `sot batch-reconcile <dir> [--workers 4]` | CLI |
 | **Audit Drift** | `sot verify [--deep]` | `sot_verify` |
 | **Database Doctor** | `sot doctor` | `sot_doctor` |
-| **Clean Stale Data**| `sot clean [--purge-missing]` | `sot_clean` |
-| **Vacuum Database** | `sot vacuum` | `sot_vacuum` |
+| **Clean Stale Data**| `sot clean [--purge-missing] [--include-notes]` | `sot_clean` |
+| **Vacuum Database** | `sot vacuum [--analyze]` | `sot_vacuum` |
 | **Store Note** | `sot insert --title "..." --body "..."` | `sot_insert` |
 | **Cluster Graph** | `sot cluster [--scope <path>]` | `sot_cluster` |
 | **Architecture Report** | `sot report [-o report.md]` | `sot_report` |
 | **Interactive Viz** | `sot viz [-o graph.html]` | `sot_viz` |
 | **Export Graph** | `sot export -f <graphrag/obsidian/scip>` | `sot_export` |
-| **Fact Bundler** | `sot bundle [-o .sot/bundle/]` | `sot_bundle` |
+| **Fact Bundler** | `sot bundle [-o .sot/bundle/] [--include-tests]` | `sot_bundle` |
+| **Full-Stack Trace** | `sot trace "<target>" [--depth 2] [-o <file>]` | `sot_trace` |
+| **UI Decision Tree** | `sot ui-tree "<component>"` | `sot_ui_tree` |
+| **Backend Flow** | `sot be-flow "<service>"` | `sot_backend_flow` |
+| **Feature Inventory** | `sot solution inventory [module] [-o <file>]` | `sot_solution_inventory` |
+| **Micro-steps Decompose** | `sot solution steps "<method>" [--format table/json]` | `sot_solution_steps` |
+| **Solution Bundle** | `sot solution bundle [module] [-o <file>]` | `sot_solution_bundle` |
 | **Embed Index** | `sot embed [--limit 5000]` | CLI |
 | **File Watcher** | `sot watch [--debounce-ms 200]` | CLI (Daemon) |
 | **Harness Setup** | `sot setup [--harness <name>]` | CLI |
 
-## 6 Operational Protocols for Agents
+## 7 Operational Protocols for Agents
 
 ### 1. Filesystem as Single Source of Truth (SSOT)
 - The physical filesystem is the absolute ground truth. The SOT knowledge graph (`.sot/sot.db`) is an authoritative projection of reality.
@@ -75,6 +82,8 @@ Before writing any new utility, helper function, or class:
    - `[STRONG]`: Code physically exists and is verified on disk.
    - `[WEAK]`: Semantic match only; inspect the file.
    - `[REBUILT]`: File was moved; use the updated path.
+   - `[REMOVED]`: Node deleted on disk; do NOT reference.
+   - `[NOPATH]`: Virtual/inline node; verify origin.
 
 ### 3. Dependency Impact & Safe Refactoring Protocol
 Before modifying, refactoring, or renaming core functions/classes:
@@ -89,7 +98,7 @@ When delegating code context to subagents or prompt registers:
 2. Feed the compact YAML ContextBundle instead of full raw files to save 60-70% tokens.
 
 ### 5. Self-Healing & Drift Reconciliation
-- If you create, move, or delete files, run `sot reconcile` or `sot_reconcile`.
+- If you create, move, or delete files, run `sot reconcile` or `sot_reconcile` (or `sot batch-reconcile` for monorepos).
 - Run `sot verify --deep` or `sot_verify` to audit phantom anchors and dead paths.
 - After completing tricky bugs or complex architectural designs, record knowledge:
   `sot insert --title "..." --body "..." --keywords "..."`.
@@ -99,6 +108,18 @@ When requested to review or synthesize architecture documentation:
 1. Run `sot bundle` (or tool `sot_bundle`) to generate 5 high-density fact files in `.sot/bundle/`.
 2. Ingest the 5 fact files (`01_module_inventory.md`, `02_routing_endpoints.md`, `03_workflows_states.md`, `04_dependencies_violations.md`, `05_system_metrics.json`) along with `src/sot_graph/templates/ARCHITECTURE_TEMPLATE.md`.
 3. Output the report with 100% grounded facts, valid diagrams, and prioritized recommendations.
+
+### 7. Markdown, LaTeX & Unicode Rendering Rules (Dual-Target: Human & AI)
+1. **Mermaid Diagrams:**
+   - Wrap every Node label and Subgraph title in double quotes: `NODE["Label"]`, `subgraph ID ["Title"]`.
+   - Never use bare pipe `|` inside node labels (use `/` or `\\|`).
+   - Maintain blank lines before and after ````mermaid` blocks.
+2. **Mathematical & Unicode Symbols:**
+   - Use clean Unicode symbols directly: `Q ≥ 0.650`, `Q = 0.371`, `≈ 400`, `State ∈ { Initial, Loading, Success(data), Failure(error) }`.
+   - NEVER use raw `$ ... $` math blocks inside Markdown table cells, headers, or bullet items to prevent raw syntax display on GitHub, VS Code, Obsidian, and Word/DOCX converters.
+3. **Markdown Tables & Formatting:**
+   - In table cells, escape comparison operators: use `&lt;`, `&gt;` or Unicode `≤`, `≥`.
+   - Escape table cell pipes `\\|` to preserve table column alignments.
 """
 
 

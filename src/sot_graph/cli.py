@@ -9,7 +9,7 @@ import json
 import os
 import sys
 import time
-from typing import List
+from typing import Dict, List, Optional
 
 import sqlite3
 
@@ -447,6 +447,141 @@ def cmd_reconcile(args: argparse.Namespace, reconciler: Reconciler) -> int:
             f"{summary.failed} failed{conflict_note}."
         )
     return 1 if summary.failed else 0
+def _reconcile_single_repo(repo_dir: str, force: bool = False, workers: int = 1) -> dict:
+    """Worker function executed for a single repository in batch reconcile."""
+    start_t = time.monotonic()
+    abs_repo = os.path.abspath(repo_dir)
+    db_path = default_db_path(abs_repo)
+    try:
+        db = Database(db_path)
+        try:
+            reconciler = Reconciler(db, abs_repo)
+            summary = reconciler.reconcile(force=force, workers=workers)
+            st = db.stats()
+            duration_ms = int((time.monotonic() - start_t) * 1000)
+            return {
+                "repo": abs_repo,
+                "name": os.path.basename(abs_repo),
+                "status": "ok",
+                "scanned": summary.scanned,
+                "updated": summary.updated,
+                "unchanged": summary.unchanged,
+                "deleted": summary.deleted,
+                "failed": summary.failed,
+                "nodes": st.get("nodes", 0),
+                "edges": st.get("edges", 0),
+                "duration_ms": duration_ms,
+            }
+        finally:
+            db.close()
+    except Exception as exc:
+        duration_ms = int((time.monotonic() - start_t) * 1000)
+        return {
+            "repo": abs_repo,
+            "name": os.path.basename(abs_repo),
+            "status": "error",
+            "error": str(exc),
+            "scanned": 0,
+            "updated": 0,
+            "unchanged": 0,
+            "deleted": 0,
+            "failed": 1,
+            "nodes": 0,
+            "edges": 0,
+            "duration_ms": duration_ms,
+        }
+
+
+def _discover_repos(target_dir: str) -> List[str]:
+    """Find all repository roots inside target_dir."""
+    abs_target = os.path.abspath(target_dir)
+    if not os.path.isdir(abs_target):
+        return []
+
+    repo_markers = {".git", ".sot", "package.json", "pyproject.toml", "Cargo.toml", "go.mod", "pom.xml", "pubspec.yaml"}
+    try:
+        entries = sorted(os.listdir(abs_target))
+    except OSError:
+        return [abs_target]
+
+    candidates = []
+    for entry in entries:
+        if entry.startswith("."):
+            continue
+        child_path = os.path.join(abs_target, entry)
+        if os.path.isdir(child_path):
+            try:
+                child_entries = set(os.listdir(child_path))
+                if child_entries & repo_markers or any(os.path.isdir(os.path.join(child_path, m)) for m in [".git", ".sot"]):
+                    candidates.append(child_path)
+            except OSError:
+                pass
+
+    if candidates:
+        return candidates
+    return [abs_target]
+
+
+def cmd_batch_reconcile(args: argparse.Namespace, target_dir: str) -> int:
+    """Reconcile multiple repositories concurrently with per-repo SQLite DB isolation."""
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    repos = _discover_repos(target_dir)
+    if not repos:
+        print(f"No repositories discovered in: {target_dir}", file=sys.stderr)
+        return 1
+
+    max_workers = getattr(args, "workers", None) or min(len(repos), min(8, max(1, os.cpu_count() or 1)))
+    force = getattr(args, "force", False)
+
+    start_total = time.monotonic()
+    results = []
+
+    if not getattr(args, "json", False):
+        print(f"📦 Batch Reconciling {len(repos)} repositories (workers: {max_workers})...\n")
+
+    if max_workers == 1 or len(repos) == 1:
+        for r in repos:
+            res = _reconcile_single_repo(r, force=force, workers=1)
+            results.append(res)
+    else:
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            future_to_repo = {
+                executor.submit(_reconcile_single_repo, r, force, 1): r
+                for r in repos
+            }
+            for future in as_completed(future_to_repo):
+                results.append(future.result())
+
+    total_duration_ms = int((time.monotonic() - start_total) * 1000)
+    results.sort(key=lambda x: x["name"])
+
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "total_repos": len(repos),
+            "duration_ms": total_duration_ms,
+            "results": results,
+        }, indent=2))
+    else:
+        print(f"{'Repository':<28} | {'Status':<7} | {'Scanned':<8} | {'Updated':<8} | {'Nodes':<7} | {'Edges':<7} | {'Time'}")
+        print("-" * 88)
+        tot_scanned = tot_updated = tot_nodes = tot_edges = tot_failed = 0
+        for r in results:
+            stat_icon = "✅ OK" if r["status"] == "ok" and r["failed"] == 0 else "❌ ERR"
+            tot_scanned += r["scanned"]
+            tot_updated += r["updated"]
+            tot_nodes += r["nodes"]
+            tot_edges += r["edges"]
+            tot_failed += r["failed"]
+            sec = r["duration_ms"] / 1000.0
+            print(f"{r['name']:<28} | {stat_icon:<7} | {r['scanned']:<8} | {r['updated']:<8} | {r['nodes']:<7} | {r['edges']:<7} | {sec:.2f}s")
+            if r["status"] == "error":
+                print(f"  └─ Error: {r.get('error')}")
+
+        print("-" * 88)
+        print(f"{'TOTAL (' + str(len(repos)) + ' repos)':<28} | {'':<7} | {tot_scanned:<8} | {tot_updated:<8} | {tot_nodes:<7} | {tot_edges:<7} | {total_duration_ms/1000.0:.2f}s\n")
+
+    return 1 if any(r["status"] == "error" or r["failed"] > 0 for r in results) else 0
 
 
 def cmd_pack(args: argparse.Namespace, db: Database, root: str) -> int:
@@ -526,10 +661,10 @@ def cmd_doctor(db: Database) -> int:
 def cmd_bundle(args: argparse.Namespace, db: Database, root: str) -> int:
     from sot_graph.analytics.bundle import ArchitectureBundler
 
-    bundler = ArchitectureBundler(db, root)
+    include_tests = getattr(args, "include_tests", False)
+    bundler = ArchitectureBundler(db, root, include_tests=include_tests)
     out_dir = args.output or os.path.join(root, ".sot", "bundle")
     bundle = bundler.extract_bundle(out_dir)
-
     if args.json:
         payload = {
             "output_dir": os.path.abspath(out_dir),
@@ -545,6 +680,122 @@ def cmd_bundle(args: argparse.Namespace, db: Database, root: str) -> int:
             print(f"  • {fname:<32} ({size:,} bytes)")
         print("\nTip: LLM Agents can now ingest these 5 fact files with ARCHITECTURE_TEMPLATE.md to generate the full architecture report.")
     return 0
+
+def cmd_trace(args: argparse.Namespace, db: Database, root: str) -> int:
+    from sot_graph.trace import trace_fullstack, render_trace_markdown
+
+    res = trace_fullstack(db, args.target, depth=getattr(args, "depth", 2))
+    if args.json:
+        print(json.dumps(res, indent=2))
+        return 0
+
+    md = render_trace_markdown(res)
+    if args.output:
+        out_path = os.path.abspath(os.path.join(root, args.output)) if not os.path.isabs(args.output) else args.output
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as fp:
+            fp.write(md)
+        print(f"📊 Trace report written to: {out_path}")
+    else:
+        print(md)
+    return 0
+
+
+def cmd_ui_tree(args: argparse.Namespace, db: Database) -> int:
+    from sot_graph.trace import extract_ui_tree
+
+    res = extract_ui_tree(db, args.component)
+    if args.json:
+        print(json.dumps(res, indent=2))
+        return 0
+
+    print(f"🌿 UI Decision Tree: {args.component}")
+    print(f"Summary: {res.get('summary', '')}\n")
+    branches = res.get("decision_branches", [])
+    if not branches:
+        print("  (No UI decision branches detected)")
+        return 0
+    for idx, b in enumerate(branches, 1):
+        print(f"  [{idx}] {b.get('type')}: {b.get('target')} (Trigger: {b.get('trigger')}, Condition: {b.get('condition')})")
+    return 0
+
+
+def cmd_be_flow(args: argparse.Namespace, db: Database) -> int:
+    from sot_graph.trace import extract_backend_flow
+
+    res = extract_backend_flow(db, args.service)
+    if args.json:
+        print(json.dumps(res, indent=2))
+        return 0
+
+    print(f"⚙️  Backend Processing Flow: {args.service}")
+    print(f"Summary: {res.get('summary', '')}\n")
+    steps = res.get("execution_steps", [])
+    if not steps:
+        print("  (No backend execution steps detected)")
+        return 0
+    for s in steps:
+        print(f"  Step {s.get('step_order', 1)} [{s.get('step_category')}]: {s.get('step_name')}")
+        print(f"    Code: {s.get('code_statement')}")
+        print(f"    Desc: {s.get('step_description')}\n")
+    return 0
+
+
+def cmd_solution(args: argparse.Namespace, db: Database, root: str) -> int:
+    from sot_graph.solution import generate_feature_inventory, extract_execution_steps, generate_solution_bundle
+
+    sub = getattr(args, "solution_subcommand", "")
+    if sub == "inventory":
+        out_file = args.output
+        if out_file and not os.path.isabs(out_file):
+            out_file = os.path.abspath(os.path.join(root, out_file))
+        res = generate_feature_inventory(db, args.module or "", out_file=out_file)
+        if args.json:
+            print(json.dumps(res, indent=2))
+        elif out_file:
+            print(f"📋 Feature Inventory written to: {out_file} ({res.get('total_features', 0)} features detected)")
+        else:
+            print(res.get("markdown", ""))
+        return 0
+
+    elif sub == "steps":
+        res = extract_execution_steps(db, args.method)
+        if args.format == "json" or getattr(args, "json", False):
+            payload_str = json.dumps(res, indent=2)
+            if args.output:
+                out_file = os.path.abspath(os.path.join(root, args.output)) if not os.path.isabs(args.output) else args.output
+                os.makedirs(os.path.dirname(out_file), exist_ok=True)
+                with open(out_file, "w", encoding="utf-8") as fp:
+                    fp.write(payload_str)
+                print(f"📝 Micro-steps JSON written to: {out_file} (Rank: {res.get('manpower_rank')})")
+            else:
+                print(payload_str)
+        elif args.output:
+            out_file = os.path.abspath(os.path.join(root, args.output)) if not os.path.isabs(args.output) else args.output
+            os.makedirs(os.path.dirname(out_file), exist_ok=True)
+            with open(out_file, "w", encoding="utf-8") as fp:
+                fp.write(res.get("markdown_table", ""))
+            print(f"📝 Micro-steps table written to: {out_file} (Rank: {res.get('manpower_rank')})")
+        else:
+            print(res.get("markdown_table", ""))
+        return 0
+
+    elif sub == "bundle":
+        out_file = args.output or os.path.join(root, ".sot", "bundle", "ContextBundle.md")
+        if not os.path.isabs(out_file):
+            out_file = os.path.abspath(os.path.join(root, out_file))
+        res = generate_solution_bundle(db, args.module or "", out_file=out_file)
+        if args.json:
+            print(json.dumps(res, indent=2))
+        else:
+            print(f"📦 Solution Context Bundle generated at: {out_file}")
+            print(f"   • Module: {res.get('module') or 'All'}")
+            print(f"   • Features in Scope: {res.get('inventory', {}).get('total_features', 0)}")
+            print(f"   • Manpower Effort Rank: {res.get('steps', {}).get('manpower_rank', '-')}")
+        return 0
+
+    print(f"Unknown solution subcommand: {sub}")
+    return 1
 
 
 def cmd_report(args: argparse.Namespace, db: Database, root: str) -> int:
@@ -851,7 +1102,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Re-extract every file regardless of journal state (upgrade path "
              "for extractor changes; notes are preserved)",
     )
-    # verify
+    p_rec.add_argument(
+        "--all",
+        dest="all_repos",
+        action="store_true",
+        help="Batch reconcile all repositories in root directory",
+    )
+    # batch-reconcile
+    p_batch_rec = subparsers.add_parser("batch-reconcile", help="Batch reconcile multiple repositories concurrently")
+    p_batch_rec.add_argument("directory", nargs="?", default=".", help="Parent directory containing repositories (default: current directory)")
+    p_batch_rec.add_argument(
+        "--workers",
+        type=_positive_int,
+        default=min(8, max(1, os.cpu_count() or 1)),
+        help="Worker processes (default: auto, max 8)",
+    )
+    p_batch_rec.add_argument("--force", action="store_true", help="Re-extract every file regardless of journal state")
+    p_batch_rec.add_argument("--json", action="store_true", help="Output summary in JSON format")
     p_ver = subparsers.add_parser("verify", help="Check for drift between graph and filesystem (CI-safe)")
     p_ver.add_argument("--deep", action="store_true", help="Perform full SHA-256 content re-hashing")
 
@@ -905,7 +1172,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_bun = subparsers.add_parser("bundle", help="Extract 5 high-density fact bundle markdown files for LLM architecture reports")
     p_bun.add_argument("-o", "--output", default=None, help="Output directory path (default: .sot/bundle/)")
     p_bun.add_argument("--json", action="store_true", help="Output summary in JSON format")
-
+    p_bun.add_argument("--include-tests", action="store_true", help="Include test files and mock nodes in fact bundles")
 
     # setup
     p_setup = subparsers.add_parser("setup", help="Configure AI coding harnesses (OMP, OpenCode, Antigravity, Claude, ZCode)")
@@ -933,6 +1200,41 @@ def build_parser() -> argparse.ArgumentParser:
     p_watch.add_argument("--interval-ms", type=int, default=500,
                          help="Polling interval for the poll backend (default: 500ms)")
 
+    # trace
+    p_trace = subparsers.add_parser("trace", help="Extract Full-Stack execution path, UI decisions, API binding, and Mermaid diagrams")
+    p_trace.add_argument("target", help="Ticket ID, keyword, symbol, or endpoint to trace")
+    p_trace.add_argument("--depth", type=int, default=2, help="Trace exploration depth (default: 2)")
+    p_trace.add_argument("-o", "--output", default=None, help="Write markdown output to file")
+    p_trace.add_argument("--json", action="store_true", help="Output raw structured JSON")
+
+    # ui-tree
+    p_ui = subparsers.add_parser("ui-tree", help="Extract local Frontend UI decision tree, validation rules, and modals")
+    p_ui.add_argument("component", help="Component name or file path")
+    p_ui.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    # be-flow
+    p_be = subparsers.add_parser("be-flow", help="Extract Backend processing steps, multi-datasources, and exception branches")
+    p_be.add_argument("service", help="Service name or controller endpoint")
+    p_be.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    # solution
+    p_sol = subparsers.add_parser("solution", help="Automated Solution Architecture and Manpower Estimation Engine")
+    sol_subs = p_sol.add_subparsers(dest="solution_subcommand", required=True)
+
+    p_sol_inv = sol_subs.add_parser("inventory", help="Stage 1 Feature Discovery by Role & Related Features")
+    p_sol_inv.add_argument("module", nargs="?", default="", help="Module or subsystem name (default: all)")
+    p_sol_inv.add_argument("-o", "--output", default=None, help="Output markdown file path")
+    p_sol_inv.add_argument("--json", action="store_true", help="Output JSON format")
+
+    p_sol_steps = sol_subs.add_parser("steps", help="Stage 2 Micro-step decomposition (4-column table) for manpower estimation")
+    p_sol_steps.add_argument("method", help="Service or method symbol to decompose")
+    p_sol_steps.add_argument("--format", default="table", choices=["table", "json"], help="Output format (default: table)")
+    p_sol_steps.add_argument("-o", "--output", default=None, help="Output file path")
+
+    p_sol_bun = sol_subs.add_parser("bundle", help="Synthesize complete Context Bundle for Solution.md & downstream agents")
+    p_sol_bun.add_argument("module", nargs="?", default="", help="Module name (default: all)")
+    p_sol_bun.add_argument("-o", "--output", default=None, help="Output file path (default: .sot/bundle/ContextBundle.md)")
+    p_sol_bun.add_argument("--json", action="store_true", help="Output JSON format")
     return parser
 
 
@@ -945,13 +1247,16 @@ def main() -> int:
     if args.command == "setup":
         return cmd_setup(args, root)
 
+    if args.command == "batch-reconcile" or (args.command == "reconcile" and getattr(args, "all_repos", False)):
+        target_dir = getattr(args, "directory", None) or root
+        return cmd_batch_reconcile(args, target_dir)
+
     if args.command == "mcp":
         # Keep the optional SDK out of normal CLI startup/import paths.
         from sot_graph.mcp_server import main as mcp_main
         return mcp_main(["--root", root, "--db", db_path])
     db = Database(db_path)
     reconciler = Reconciler(db, root)
-
     if db.schema_was_reset:
         print("⚠️  LEGACY SCHEMA RESET: this project's index used an outdated schema "
               "and was rebuilt empty.")
@@ -1009,6 +1314,14 @@ def main() -> int:
             return cmd_pack(args, db, root)
         elif args.command == "watch":
             return cmd_watch(args, reconciler, root)
+        elif args.command == "trace":
+            return cmd_trace(args, db, root)
+        elif args.command == "ui-tree":
+            return cmd_ui_tree(args, db)
+        elif args.command == "be-flow":
+            return cmd_be_flow(args, db)
+        elif args.command == "solution":
+            return cmd_solution(args, db, root)
         return 0
     finally:
         db.close()
