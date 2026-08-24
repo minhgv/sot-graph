@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Sequence
 import sqlite3
 
 from sot_graph.db import CleanPlan, Database
+from sot_graph.locking import LockBusy
 from sot_graph.reconciler import Reconciler
 from sot_graph.verifier import TrustVerifier, tokenize
 
@@ -65,7 +66,11 @@ def cmd_clean(args: argparse.Namespace, db: Database, root: str) -> int:
             return 1
 
     try:
-        deleted = dict(plan.counts) if args.dry_run else db.apply_clean(plan)
+        if args.dry_run:
+            deleted = dict(plan.counts)
+        else:
+            with db.write_lock():
+                deleted = db.apply_clean(plan)
     except (OSError, sqlite3.Error, RuntimeError) as exc:
         if args.json:
             _maintenance_json({"mode": plan.mode, "dry_run": bool(args.dry_run),
@@ -94,7 +99,8 @@ def cmd_clean(args: argparse.Namespace, db: Database, root: str) -> int:
 
 def cmd_vacuum(args: argparse.Namespace, db: Database) -> int:
     try:
-        result = db.vacuum(optimize=args.analyze, dry_run=args.dry_run)
+        with db.write_lock():
+            result = db.vacuum(optimize=args.analyze, dry_run=args.dry_run)
     except (OSError, sqlite3.Error, RuntimeError) as exc:
         if args.json:
             _maintenance_json({"error": str(exc), "dry_run": bool(args.dry_run)})
@@ -444,38 +450,49 @@ def cmd_map(args: argparse.Namespace, db: Database, root: str) -> int:
 
 def cmd_embed(args: argparse.Namespace, db: Database) -> int:
     from sot_graph.vector import available as vec_available, index_nodes
+    from sot_graph.locking import LockBusy
 
     if not vec_available():
         print("❌ sqlite-vec is not installed. Install with: pip install 'sot-graph[vector]'")
         return 2
-    count = index_nodes(db.conn)
+    try:
+        with db.write_lock():
+            count = index_nodes(db.conn)
+    except (LockBusy, RuntimeError) as exc:
+        print(f"❌ embed failed: {exc}", file=sys.stderr)
+        return 1
     print(f"✅ Embedded {count} graph nodes into the vector index (dim=256, HashEmbedder).")
     print("   Plug a neural embedder via sot_graph.vector for semantic recall.")
     return 0
 
 
 def cmd_insert(args: argparse.Namespace, db: Database) -> int:
+    from sot_graph.locking import LockBusy
+
     keywords = [k.strip() for k in args.keywords.split(",") if k.strip()]
     content = f"{args.title}\n{args.body}"
     node_id = f"note:{hashlib.sha256(content.encode()).hexdigest()[:12]}"
     now = int(time.time())
     kw_str = " ".join(keywords)
 
-    with db.conn:
-        db.conn.execute("""
-            INSERT INTO graph_nodes (id, path, kind, symbol, label, body, keywords, line_start, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                path=excluded.path, label=excluded.label, body=excluded.body,
-                keywords=excluded.keywords, updated_at=excluded.updated_at
-        """, (
-            node_id, args.path or "", "note", None, args.title,
-            args.body, kw_str, 1, now
-        ))
-
+    try:
+        with db.write_lock():
+            with db.conn:
+                db.conn.execute("""
+                    INSERT INTO graph_nodes (id, path, kind, symbol, label, body, keywords, line_start, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        path=excluded.path, label=excluded.label, body=excluded.body,
+                        keywords=excluded.keywords, updated_at=excluded.updated_at
+                """, (
+                    node_id, args.path or "", "note", None, args.title,
+                    args.body, kw_str, 1, now
+                ))
+    except (LockBusy, RuntimeError) as exc:
+        print(f"❌ insert failed: {exc}", file=sys.stderr)
+        return 1
     print(f"✅ Stored knowledge node [{node_id}] '{args.title}'")
     return 0
-
 
 def cmd_reconcile(args: argparse.Namespace, reconciler: Reconciler) -> int:
     start_t = time.time()
@@ -959,25 +976,31 @@ def cmd_report(args: argparse.Namespace, db: Database, root: str) -> int:
     from sot_graph.analytics.graph import AnalyticsGraph
     from sot_graph.analytics.diagnostics import analyze_graph
     from sot_graph.analytics.report import generate_markdown_report, save_markdown_report
+    from sot_graph.locking import LockBusy
 
-    graph = AnalyticsGraph.from_database(db, scope=args.scope)
-    analysis = analyze_graph(
-        graph,
-        min_community_size=args.min_size,
-        threshold_sigma=args.sigma,
-    )
+    try:
+        graph = AnalyticsGraph.from_database(db, scope=args.scope)
+        analysis = analyze_graph(
+            graph,
+            min_community_size=args.min_size,
+            threshold_sigma=args.sigma,
+        )
 
-    if args.save_communities:
-        comm_list = []
-        for cid, cinfo in analysis.community_result.community_info.items():
-            comm_list.append({
-                "community_id": cid,
-                "label": cinfo.label,
-                "cohesion_score": cinfo.cohesion_score,
-                "node_count": len(cinfo.nodes),
-                "nodes": cinfo.nodes,
-            })
-        db.save_communities(comm_list)
+        if args.save_communities:
+            comm_list = []
+            for cid, cinfo in analysis.community_result.community_info.items():
+                comm_list.append({
+                    "community_id": cid,
+                    "label": cinfo.label,
+                    "cohesion_score": cinfo.cohesion_score,
+                    "node_count": len(cinfo.nodes),
+                    "nodes": cinfo.nodes,
+                })
+            with db.write_lock():
+                db.save_communities(comm_list)
+    except (LockBusy, RuntimeError) as exc:
+        print(f"❌ report failed: {exc}", file=sys.stderr)
+        return 1
 
     if args.json:
         payload = {
@@ -1047,22 +1070,28 @@ def cmd_report(args: argparse.Namespace, db: Database, root: str) -> int:
 
 def cmd_cluster(args: argparse.Namespace, db: Database) -> int:
     from sot_graph.analytics.graph import AnalyticsGraph
+    from sot_graph.locking import LockBusy
 
-    graph = AnalyticsGraph.from_database(db, scope=args.scope)
-    res = graph.detect_communities(min_community_size=args.min_size)
+    try:
+        graph = AnalyticsGraph.from_database(db, scope=args.scope)
+        res = graph.detect_communities(min_community_size=args.min_size)
 
-    comm_list = []
-    for cid, cinfo in res.community_info.items():
-        comm_list.append({
-            "community_id": cid,
-            "label": cinfo.label,
-            "cohesion_score": cinfo.cohesion_score,
-            "node_count": len(cinfo.nodes),
-            "nodes": cinfo.nodes,
-        })
+        comm_list = []
+        for cid, cinfo in res.community_info.items():
+            comm_list.append({
+                "community_id": cid,
+                "label": cinfo.label,
+                "cohesion_score": cinfo.cohesion_score,
+                "node_count": len(cinfo.nodes),
+                "nodes": cinfo.nodes,
+            })
 
-    if not args.no_save:
-        db.save_communities(comm_list)
+        if not args.no_save:
+            with db.write_lock():
+                db.save_communities(comm_list)
+    except (LockBusy, RuntimeError) as exc:
+        print(f"❌ cluster failed: {exc}", file=sys.stderr)
+        return 1
 
     if args.json:
         print(json.dumps({
@@ -1085,7 +1114,6 @@ def cmd_cluster(args: argparse.Namespace, db: Database) -> int:
     if not args.no_save:
         print("💾 Communities saved to SQLite database.")
     return 0
-
 def cmd_viz(args: argparse.Namespace, db: Database, root: str) -> int:
     from sot_graph.analytics.graph import AnalyticsGraph
     from sot_graph.export.html import generate_html_visualizer, save_html_visualizer
@@ -1190,9 +1218,14 @@ def build_parser() -> argparse.ArgumentParser:
         prog="sot",
         description="sot-graph: Verified, self-healing knowledge graph for AI coding agents."
     )
+    try:
+        import importlib.metadata
+        __version__ = importlib.metadata.version("sot-graph")
+    except Exception:
+        __version__ = "0.2.0"
+    parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--root", default=".", help="Project root directory (default: current dir)")
     parser.add_argument("--db", default=None, help="Custom SQLite DB path (default: .sot/sot.db)")
-
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # search
@@ -1426,25 +1459,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # Keep the optional SDK out of normal CLI startup/import paths.
         from sot_graph.mcp_server import main as mcp_main
         return mcp_main(["--root", root, "--db", db_path])
-    db = Database(db_path)
-    reconciler = Reconciler(db, root)
-    if db.schema_was_reset:
-        print("⚠️  LEGACY SCHEMA RESET: this project's index used an outdated schema "
-              "and was rebuilt empty.")
-        if args.command in ("reconcile", "clean"):
-            # `reconcile` is about to refill the graph itself, and `clean` was
-            # explicitly asked to prune/reset — auto-refilling would undo it.
-            print("   Run `sot reconcile` to repopulate the graph.")
-        else:
-            print("   Rebuilding the index automatically (one-time)…")
-            try:
-                summary = reconciler.reconcile()
-                print(f"   ✅ Auto-reconciled: {summary.updated} indexed/updated, "
-                      f"{summary.failed} failed.")
-            except (OSError, sqlite3.Error) as exc:
-                print(f"   ⚠ Auto-reconcile failed: {exc}; run `sot reconcile` manually.")
+    try:
+        db = Database(db_path)
+    except (LockBusy, RuntimeError) as exc:
+        print(f"❌ Database initialization failed: {exc}", file=sys.stderr)
+        return 1
 
     try:
+        reconciler = Reconciler(db, root)
+        if db.schema_was_reset:
+            print("⚠️  LEGACY SCHEMA RESET: this project's index used an outdated schema "
+                  "and was rebuilt empty.")
+            if args.command in ("reconcile", "clean"):
+                # `reconcile` is about to refill the graph itself, and `clean` was
+                # explicitly asked to prune/reset — auto-refilling would undo it.
+                print("   Run `sot reconcile` to repopulate the graph.")
+            else:
+                print("   Rebuilding the index automatically (one-time)…")
+                try:
+                    summary = reconciler.reconcile()
+                    print(f"   ✅ Auto-reconciled: {summary.updated} indexed/updated, "
+                          f"{summary.failed} failed.")
+                except (OSError, sqlite3.Error) as exc:
+                    print(f"   ⚠ Auto-reconcile failed: {exc}; run `sot reconcile` manually.")
+
         if args.command == "search":
             return cmd_search(args, db, root)
         elif args.command == "explore":
@@ -1494,6 +1532,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         elif args.command == "solution":
             return cmd_solution(args, db, root)
         return 0
+    except (LockBusy, RuntimeError) as exc:
+        print(f"❌ {args.command} failed: {exc}", file=sys.stderr)
+        return 1
     finally:
         db.close()
 

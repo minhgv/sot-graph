@@ -382,8 +382,13 @@ def create_server(service: McpService) -> Any:
 
     server._sot_stdio_server = stdio_server
     server._sot_state = state
+    try:
+        import importlib.metadata
+        _server_ver = importlib.metadata.version("sot-graph")
+    except Exception:
+        _server_ver = "0.2.0"
     server._sot_initialization_options = InitializationOptions(
-        server_name="sot-graph", server_version="0.1.0",
+        server_name="sot-graph", server_version=_server_ver,
         capabilities=server.get_capabilities(notification_options=NotificationOptions(), experimental_capabilities={}),
     )
     return server

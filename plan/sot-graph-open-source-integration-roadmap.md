@@ -337,7 +337,7 @@ pip install ".[all,dev]"
 
 # 3. Smoke test CLI, MCP server initialization options và template adapter assets
 sot --version
-python3 -c "from sot_graph.mcp_server import create_mcp_server; import importlib.metadata; s = create_mcp_server(); assert s._sot_initialization_options.server_version == importlib.metadata.version('sot-graph')"
+python3 -c "from sot_graph.mcp_service import McpService; from sot_graph.mcp_server import create_server; import importlib.metadata; s = create_server(McpService(':memory:', '.')); assert s._sot_initialization_options.server_version == importlib.metadata.version('sot-graph')"
 sot setup --harness omp --workspace-only
 sot bundle
 ```

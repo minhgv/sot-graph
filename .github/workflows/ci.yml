@@ -6,11 +6,39 @@ on:
   pull_request:
     branches: [ main, master ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  lint:
+    name: Lint & Code Quality
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Check syntax & imports
+        run: |
+          uv run python -m compileall src/ tests/
+
+  test:
+    name: Test (${{ matrix.os }} - Py ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
@@ -25,13 +53,46 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: |
-          uv sync --all-extras --dev
+        run: uv sync --all-extras --dev
 
       - name: Run Test Suite
-        run: |
-          uv run pytest -v
+        run: uv run pytest -v
 
-      - name: Run Accuracy Benchmark
+      - name: Run Accuracy Benchmark (Linux only)
+        if: runner.os == 'Linux'
+        run: uv run python scripts/benchmark_accuracy.py
+
+  package-smoke:
+    name: Package & Smoke (${{ matrix.os }})
+    needs: [test]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Build wheel package
+        run: uv build
+
+      - name: Install built wheel and test CLI version
         run: |
-          uv run python scripts/benchmark_accuracy.py
+          uv run --isolated --with dist/*.whl sot --version
+
+      - name: Smoke test MCP initialization options
+        run: |
+          uv run python -c "from sot_graph.mcp_service import McpService; from sot_graph.mcp_server import create_server; import importlib.metadata; s = create_server(McpService(':memory:', '.')); assert s._sot_initialization_options.server_version == importlib.metadata.version('sot-graph'); print('MCP server verified:', s._sot_initialization_options.server_version)"
+
+      - name: Smoke test template and adapter generation
+        run: |
+          uv run sot setup --harness omp --workspace-only

@@ -106,17 +106,13 @@ def _neighbors(db, node_id: str) -> List[Tuple[str, str, Optional[int]]]:
     return [(r[0], r[1], r[2]) for r in rows]
 
 
-def _slice_source(node: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
-    """Read the exact source span from disk; None when spans are unknown."""
+def _slice_source_from_bytes(node: Dict[str, Any], raw_bytes: bytes) -> Tuple[Optional[str], List[str]]:
+    """Extract the exact source span from pre-read file bytes; None when spans are unknown."""
     warnings: List[str] = []
-    path = node["path"]
     if not node.get("line_start"):
         return None, ["span_unavailable: extractor recorded no line span"]
-    try:
-        with open(path, "r", encoding="utf-8", errors="replace") as handle:
-            lines = handle.readlines()
-    except OSError as exc:
-        raise PackError("TARGET_MISSING", f"target file unreadable: {exc}") from exc
+    text_content = raw_bytes.decode("utf-8", errors="replace")
+    lines = text_content.splitlines(keepends=True)
     start = max(1, int(node["line_start"]))
     end = int(node["line_end"] or node["line_start"])
     if end < start or end > len(lines) + 1:
@@ -126,6 +122,17 @@ def _slice_source(node: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
     if not text.strip():
         return None, ["span_empty: recorded span has no content"]
     return text, warnings
+
+
+def _slice_source(node: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
+    """Read the exact source span from disk; None when spans are unknown."""
+    path = node["path"]
+    try:
+        with open(path, "rb") as handle:
+            raw_bytes = handle.read()
+    except OSError as exc:
+        raise PackError("TARGET_MISSING", f"target file unreadable: {exc}") from exc
+    return _slice_source_from_bytes(node, raw_bytes)
 
 
 def _dedent_block(text: str) -> str:
@@ -178,10 +185,13 @@ def build_bundle(
         )
     indexed_sha, base_generation = journal[0], int(journal[1] or 1)
 
-    if not os.path.isfile(node["path"]):
-        raise PackError("TARGET_MISSING", f"target file no longer exists: {node['path']}")
-    with open(node["path"], "rb") as handle:
-        disk_sha = hashlib.sha256(handle.read()).hexdigest()
+    try:
+        with open(node["path"], "rb") as handle:
+            raw_bytes = handle.read()
+    except OSError as exc:
+        raise PackError("TARGET_MISSING", f"target file no longer exists or unreadable: {node['path']}") from exc
+
+    disk_sha = hashlib.sha256(raw_bytes).hexdigest()
     if disk_sha != indexed_sha:
         raise PackError(
             "STALE_SNAPSHOT",
@@ -189,7 +199,7 @@ def build_bundle(
             "run `sot reconcile` and re-pack",
         )
 
-    full_source, warnings = _slice_source(node)
+    full_source, warnings = _slice_source_from_bytes(node, raw_bytes)
     if full_source is not None and len(full_source.encode("utf-8")) > max_bytes:
         raise PackError(
             "TARGET_TOO_LARGE",
@@ -280,11 +290,29 @@ def build_bundle(
 
     # Hard byte cap: keep target + inbound contracts; drop from the tail.
     def _approx_bytes() -> int:
-        return len(json.dumps(
-            {"t": target_block, "in": inbound, "out": outbound, "s": stubs},
-            default=str,
-        ).encode("utf-8"))
-
+        draft = {
+            "schema_version": BUNDLE_SCHEMA_VERSION,
+            "bundle_id": "bundle:preview",
+            "base_generation": base_generation,
+            "generated_at": int(time.time()),
+            "content_is_untrusted": True,
+            "target": target_block,
+            "inbound_callers": inbound,
+            "outbound_callees": outbound,
+            "transitive_stubs": stubs,
+            "limits": {
+                "max_hops": max_hops,
+                "max_nodes": max_nodes,
+                "max_bytes": max_bytes,
+                "max_tokens": max_tokens,
+                "tokens_estimate": 0,
+                "discovered_nodes": len(visited),
+                "returned_nodes": 1 + len(inbound) + len(outbound) + len(stubs),
+                "truncated": False,
+                "warnings": warnings,
+            },
+        }
+        return len(render_yaml(draft).encode("utf-8"))
     truncated = False
     while _approx_bytes() > max_bytes and stubs:
         stubs.pop()
@@ -292,7 +320,6 @@ def build_bundle(
     while _approx_bytes() > max_bytes and outbound:
         outbound.pop()
         truncated = True
-
     # Build draft bundle
     bundle = {
         "schema_version": BUNDLE_SCHEMA_VERSION,
@@ -380,7 +407,53 @@ def build_bundle(
                     truncated = True
                     bundle["limits"]["truncated"] = True
                     warnings.append("token_cap_reached: trusted instructions truncated")
-    bundle["limits"]["tokens_estimate"] = estimate_tokens(render_yaml(bundle))
+                    rendered = render_yaml(bundle)
+                    tok_count = estimate_tokens(rendered)
+
+        # Strict budget enforcement: if still exceeding max_tokens, drop remaining components or truncate cleanly
+        if tok_count > max_tokens and bundle.get("trusted_instructions"):
+            del bundle["trusted_instructions"]
+            truncated = True
+            bundle["limits"]["truncated"] = True
+            warnings.append("token_cap_reached: trusted instructions omitted")
+            rendered = render_yaml(bundle)
+            tok_count = estimate_tokens(rendered)
+
+        if tok_count > max_tokens and target_block.get("full_source"):
+            # Truncate source further down if needed
+            while tok_count > max_tokens and target_block.get("full_source"):
+                curr_src = target_block["full_source"]
+                if len(curr_src) <= 50:
+                    target_block["full_source"] = ""
+                else:
+                    new_len = len(curr_src) // 2
+                    trunc_candidate = curr_src[:new_len] + "\n# ... truncated ..."
+                    if len(trunc_candidate) >= len(curr_src):
+                        trunc_candidate = curr_src[:new_len]
+                    target_block["full_source"] = trunc_candidate
+                truncated = True
+                bundle["limits"]["truncated"] = True
+                rendered = render_yaml(bundle)
+                tok_count = estimate_tokens(rendered)
+        # Stable token estimation & final validation
+        tok_est = estimate_tokens(render_yaml(bundle))
+        bundle["limits"]["tokens_estimate"] = tok_est
+        rendered = render_yaml(bundle)
+        tok_count = estimate_tokens(rendered)
+        if tok_count != tok_est:
+            bundle["limits"]["tokens_estimate"] = tok_count
+            rendered = render_yaml(bundle)
+            tok_count = estimate_tokens(rendered)
+
+        if tok_count > max_tokens:
+            raise PackError("BUDGET_TOO_SMALL", f"rendered bundle ({tok_count} tokens) exceeds budget ({max_tokens} tokens)")
+    else:
+        tok_est = estimate_tokens(render_yaml(bundle))
+        bundle["limits"]["tokens_estimate"] = tok_est
+        rendered = render_yaml(bundle)
+        tok_count = estimate_tokens(rendered)
+        if tok_count != tok_est:
+            bundle["limits"]["tokens_estimate"] = tok_count
     return bundle
 
 _TRUSTED_INSTRUCTION_FILES = ("AGENTS.md",)

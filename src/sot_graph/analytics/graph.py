@@ -428,25 +428,33 @@ class AnalyticsGraph:
         return round(cohesion, 3), internal, external
 
     def calculate_modularity(self, node_to_comm: Dict[str, int]) -> float:
-        """Calculate standard Newman-Girvan modularity Q."""
+        """Calculate standard Newman-Girvan modularity Q = sum_c [ e_c/m - (Sigma_tot(c)/(2m))^2 ]."""
         m = len(self.edges)
         if m == 0:
             return 0.0
 
-        # Degree of each node in undirected sense
-        degrees = {n: len(self._undirected_adj.get(n, set())) for n in self.nodes}
-        total_deg = 2.0 * m
+        # Build community membership groupings and count internal edges
+        # Total degree (sum of degrees of nodes in community c in undirected multigraph)
+        degrees: Dict[str, float] = collections.defaultdict(float)
+        for e in self.edges:
+            degrees[e["src"]] += 1.0
+            degrees[e["dst"]] += 1.0
+        comm_internal_edges: Dict[int, float] = {}
+        comm_total_degrees: Dict[int, float] = {}
 
-        q = 0.0
+        for node, c in node_to_comm.items():
+            comm_total_degrees[c] = comm_total_degrees.get(c, 0.0) + degrees.get(node, 0.0)
         for e in self.edges:
             src, dst = e["src"], e["dst"]
             c_src = node_to_comm.get(src, -1)
             c_dst = node_to_comm.get(dst, -2)
-            if c_src == c_dst:
-                # Connected within same community
-                k_src = degrees.get(src, 0)
-                k_dst = degrees.get(dst, 0)
-                expected = (k_src * k_dst) / total_deg
-                q += 1.0 - (expected / m)
+            if c_src >= 0 and c_src == c_dst:
+                comm_internal_edges[c_src] = comm_internal_edges.get(c_src, 0.0) + 1.0
 
-        return round(q / (2.0 * m) if m > 0 else 0.0, 4)
+        two_m = 2.0 * m
+        q = 0.0
+        for c, deg_sum in comm_total_degrees.items():
+            e_c = comm_internal_edges.get(c, 0.0)
+            q += (e_c / m) - ((deg_sum / two_m) ** 2)
+
+        return round(q, 4)

@@ -302,16 +302,32 @@ class Reconciler:
         """
         fresh: List[ParseResult] = []
         conflicts: List[str] = []
-        for record in records:
-            disk_sha = self._hash(record.path) if record.error is None else None
-            if disk_sha is not None and disk_sha == (record.sha256 or ""):
-                fresh.append(record)
-            else:
-                conflicts.append(record.path)
-        if fresh:
-            expected = {record.path: record.base_generation for record in fresh}
-            batch = getattr(self.db, "commit_file_batch", None)
-            with self._publication_gate():
+        with self._publication_gate():
+            for record in records:
+                if record.error is not None:
+                    conflicts.append(record.path)
+                    continue
+                try:
+                    st = os.stat(record.path)
+                    cur_size = int(st.st_size)
+                    cur_mtime_ms = int(st.st_mtime * 1000)
+                    disk_sha = self._hash(record.path)
+                except OSError:
+                    conflicts.append(record.path)
+                    continue
+
+                if (
+                    disk_sha is not None
+                    and disk_sha == (record.sha256 or "")
+                    and cur_size == record.size
+                    and abs(cur_mtime_ms - record.mtime_ms) <= 2000
+                ):
+                    fresh.append(record)
+                else:
+                    conflicts.append(record.path)
+            if fresh:
+                expected = {record.path: record.base_generation for record in fresh}
+                batch = getattr(self.db, "commit_file_batch", None)
                 if callable(batch):
                     outcome = batch(fresh, expected_generations=expected)
                 else:
@@ -328,7 +344,7 @@ class Reconciler:
                             pending=list(record.pending),
                         )
                     outcome = {"committed": len(fresh), "conflicts": []}
-            conflicts.extend(outcome.get("conflicts", []))
+                conflicts.extend(outcome.get("conflicts", []))
         return conflicts
 
     def _publication_gate(self):

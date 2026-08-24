@@ -33,6 +33,28 @@ class McpServiceError(Exception):
     def as_dict(self) -> Dict[str, str]:
         return {"code": self.code, "message": self.message}
 
+def resolve_and_validate_output_path(
+    project_root: str,
+    user_path: Optional[str],
+    default_relative: Optional[str] = None,
+) -> str:
+    """Confine output paths to project_root to prevent path traversal vulnerabilities."""
+    target = user_path or default_relative
+    if not target:
+        raise McpServiceError("invalid_path", "No output path specified")
+    resolved_root = os.path.realpath(os.path.abspath(project_root))
+    if not os.path.isabs(target):
+        resolved_target = os.path.realpath(os.path.abspath(os.path.join(resolved_root, target)))
+    else:
+        resolved_target = os.path.realpath(os.path.abspath(target))
+    try:
+        common = os.path.commonpath([resolved_root, resolved_target])
+    except ValueError as exc:
+        raise McpServiceError("path_traversal", f"Output path outside project root: {target}") from exc
+    if common != resolved_root:
+        raise McpServiceError("path_traversal", f"Output path outside project root: {target}")
+    return resolved_target
+
 
 @dataclass(frozen=True)
 class ServiceLimits:
@@ -629,7 +651,11 @@ class McpService:
         def op(conn: sqlite3.Connection) -> Dict[str, Any]:
             graph = AnalyticsGraph.from_connection(conn)
             bundler = ArchitectureBundler(root_dir=self.project_root, graph=graph)
-            out_dir = output_dir or os.path.join(self.project_root, ".sot", "bundle")
+            out_dir = resolve_and_validate_output_path(
+                self.project_root,
+                output_dir,
+                os.path.join(".sot", "bundle"),
+            )
             bundle = bundler.extract_bundle(out_dir)
             return self._fits_response({
                 "ok": True,
@@ -745,9 +771,9 @@ class McpService:
 
         def op(conn: sqlite3.Connection) -> Dict[str, Any]:
             view = _ConnView(conn)
-            out_file = output_file
-            if out_file and not os.path.isabs(out_file):
-                out_file = os.path.abspath(os.path.join(self.project_root, out_file))
+            out_file = None
+            if output_file:
+                out_file = resolve_and_validate_output_path(self.project_root, output_file)
             res = generate_feature_inventory(cast(Database, view), module, out_file=out_file)
             return self._fits_response({
                 "ok": True,
@@ -786,9 +812,11 @@ class McpService:
 
         def op(conn: sqlite3.Connection) -> Dict[str, Any]:
             view = _ConnView(conn)
-            out_file = output_file or os.path.join(self.project_root, ".sot", "bundle", "ContextBundle.md")
-            if not os.path.isabs(out_file):
-                out_file = os.path.abspath(os.path.join(self.project_root, out_file))
+            out_file = resolve_and_validate_output_path(
+                self.project_root,
+                output_file,
+                os.path.join(".sot", "bundle", "ContextBundle.md"),
+            )
             res = generate_solution_bundle(cast(Database, view), module, out_file=out_file)
             return self._fits_response({
                 "ok": True,

@@ -169,10 +169,11 @@ class TrustVerifier:
                 start_idx = max(0, cand_line - 5)
                 end_idx = min(len(lines), cand_line + 5)
                 span_text = "\n".join(lines[start_idx:end_idx])
-                if decl_pat.search(span_text) or (symbol_needle in span_text and not span_text.strip().startswith(("#", "//", "/*", "*"))):
+                if decl_pat.search(span_text):
                     return RelevanceType.EXACT_SPAN, "regex_decl:exact_span"
+                if symbol_needle in span_text and not span_text.strip().startswith(("#", "//", "/*", "*")):
+                    return RelevanceType.EXACT_SYMBOL, "regex_decl:structural_candidate"
             return RelevanceType.EXACT_SYMBOL, "regex_decl:exact_symbol"
-
         if symbol_needle in text_content:
             return RelevanceType.FILE_TOKEN, "lexical:file_token"
         if cov and cov >= threshold:

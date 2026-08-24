@@ -319,38 +319,42 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
         node_type = node.type
 
         # Check for named arrow functions / function expressions in variable assignments
-        if node_type in ("variable_declarator", "lexical_declaration"):
-            # Check if variable declarator contains an arrow function or function expression
-            for child in node.children:
-                if child.type == "variable_declarator":
-                    var_name = name_of(child, "name")
-                    val_node = child.child_by_field_name("value")
-                    if var_name and val_node and val_node.type in ("arrow_function", "function_expression", "function"):
-                        raw_id = f"{containers[-1]}.{var_name}" if containers else var_name
-                        if raw_id not in seen_ids:
-                            seen_ids.add(raw_id)
-                            snippet = text(node).split("\n", 1)[0][:120]
-                            nodes.append({
-                                "id": raw_id,
-                                "label": f"def {raw_id}",
-                                "kind": "function",
-                                "source_location": f"L{line(child)}",
-                                "doc": "",
-                                "signature": snippet,
-                                "line_end": val_node.end_point[0] + 1,
-                                "col_start": child.start_point[1],
-                                "col_end": val_node.end_point[1],
-                            })
-                            edges.append({
-                                "source": path.name,
-                                "target": raw_id,
-                                "relation": "defines",
-                                "source_location": f"L{line(child)}",
-                            })
-                        for sub in val_node.children:
-                            walk(sub, containers, raw_id)
-                        return
-
+        if node_type in ("variable_declarator", "lexical_declaration", "variable_declaration"):
+            declarators = (
+                [child for child in node.children if child.type == "variable_declarator"]
+                if node_type in ("lexical_declaration", "variable_declaration")
+                else [node]
+            )
+            for child in declarators:
+                var_name = name_of(child, "name")
+                val_node = child.child_by_field_name("value")
+                if var_name and val_node and val_node.type in ("arrow_function", "function_expression", "function"):
+                    raw_id = f"{containers[-1]}.{var_name}" if containers else var_name
+                    if raw_id not in seen_ids:
+                        seen_ids.add(raw_id)
+                        snippet = text(node).split("\n", 1)[0][:120]
+                        nodes.append({
+                            "id": raw_id,
+                            "label": f"def {raw_id}",
+                            "kind": "function",
+                            "source_location": f"L{line(child)}",
+                            "doc": "",
+                            "signature": snippet,
+                            "line_end": val_node.end_point[0] + 1,
+                            "col_start": child.start_point[1],
+                            "col_end": val_node.end_point[1],
+                        })
+                        edges.append({
+                            "source": path.name,
+                            "target": raw_id,
+                            "relation": "defines",
+                            "source_location": f"L{line(child)}",
+                        })
+                    for sub in val_node.children:
+                        walk(sub, containers, raw_id)
+                elif val_node:
+                    walk(val_node, containers, current_def)
+            return
         if node_type in defs_cfg:
             field, kind = defs_cfg[node_type]
             name = name_of(node, field)

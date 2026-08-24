@@ -236,20 +236,83 @@ class Database:
     def _user_version(self) -> int:
         return int(self.conn.execute("PRAGMA user_version").fetchone()[0])
 
+    def transactional_mutation(self, action):
+        """Execute a mutating action under the stable write lock and connection transaction."""
+        with self.write_lock():
+            with self.conn:
+                return action(self)
+
+    def maintenance_mutation(self, action):
+        """Execute an autocommit maintenance action (e.g. VACUUM) under the write lock."""
+        with self.write_lock():
+            return action(self)
+
+    def _migrate_database(self) -> None:
+        """Perform safe schema migration with live backup under the write lock."""
+        with self.write_lock():
+            version = self._user_version()
+            if version != SCHEMA_VERSION:
+                if version != 0 or self._schema_objects_present():
+                    # Create a backup before modifying schema
+                    backup_path = self.db_path + f".bak.{int(time.time())}"
+                    bck_conn = None
+                    try:
+                        bck_conn = sqlite3.connect(backup_path)
+                        self.conn.backup(bck_conn)
+                    except Exception as e:
+                        if bck_conn is not None:
+                            try:
+                                bck_conn.close()
+                            except Exception:
+                                pass
+                            bck_conn = None
+                        if os.path.exists(backup_path):
+                            try:
+                                os.unlink(backup_path)
+                            except OSError:
+                                pass
+                        raise RuntimeError(f"Database backup failed before migration: {e}") from e
+                    finally:
+                        if bck_conn is not None:
+                            bck_conn.close()
+
+                    # Preserve user notes before resetting disposable index
+                    notes: List[Tuple[Any, ...]] = []
+                    has_nodes = bool(self.conn.execute(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='graph_nodes'"
+                    ).fetchone()[0])
+                    if has_nodes:
+                        cols = [r[1] for r in self.conn.execute("PRAGMA table_info(graph_nodes)").fetchall()]
+                        req_cols = ["id", "path", "kind", "symbol", "fqn", "signature", "label", "body", "keywords", "line_start", "line_end", "col_start", "col_end", "updated_at"]
+                        selected_cols = [c if c in cols else "NULL" for c in req_cols]
+                        cursor = self.conn.execute(
+                            f"SELECT {', '.join(selected_cols)} FROM graph_nodes WHERE kind = 'note' OR id LIKE 'note:%'"
+                        )
+                        notes = cursor.fetchall()
+
+                    with self.conn:
+                        for statement in _DROP_ON_RESET:
+                            self.conn.execute(statement)
+                    self.schema_was_reset = True
+
+                    with self.conn:
+                        self.conn.executescript(SCHEMA)
+                        if notes:
+                            self.conn.executemany(
+                                "INSERT OR REPLACE INTO graph_nodes "
+                                "(id, path, kind, symbol, fqn, signature, label, body, keywords, line_start, line_end, col_start, col_end, updated_at) "
+                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                notes,
+                            )
+                        self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                else:
+                    with self.conn:
+                        self.conn.executescript(SCHEMA)
+                        self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     def _init_schema(self) -> None:
         version = self._user_version()
         if version != SCHEMA_VERSION:
-            if version != 0 or self._schema_objects_present():
-                # Legacy database: the index is disposable, so drop and
-                # rebuild rather than migrate; the next reconcile refills it.
-                with self.conn:
-                    for statement in _DROP_ON_RESET:
-                        self.conn.execute(statement)
-                self.schema_was_reset = True
-            with self.conn:
-                self.conn.executescript(SCHEMA)
-                self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-
+            self._migrate_database()
     def _schema_objects_present(self) -> bool:
         row = self.conn.execute(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
@@ -929,6 +992,18 @@ class Database:
                 self.conn.execute("DELETE FROM graph_edges")
                 self.conn.execute("DELETE FROM pending_edges")
                 self.conn.execute("DELETE FROM file_journal")
+                for aux_table in (
+                    "ui_navigation",
+                    "ui_decision_nodes",
+                    "api_cross_bindings",
+                    "be_execution_steps",
+                    "related_features_index",
+                    "graph_communities",
+                ):
+                    try:
+                        self.conn.execute(f"DELETE FROM {aux_table}")
+                    except sqlite3.OperationalError:
+                        pass
                 deleted.update({
                     "paths": plan.counts.get("paths", 0),
                     "nodes": plan.counts.get("nodes", 0),
