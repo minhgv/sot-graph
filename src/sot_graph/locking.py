@@ -16,13 +16,17 @@ import errno
 import os
 import time
 
-__all__ = ["LockBusy", "WriteLock"]
+__all__ = ["LockBusy", "LockTimeoutError", "WriteLock"]
 
 _RETRY_INTERVAL_S = 0.025
 
 
 class LockBusy(RuntimeError):
     """Raised when the write lock cannot be acquired within its deadline."""
+
+
+class LockTimeoutError(LockBusy):
+    """Alias/subclass for lock acquisition timeout."""
 
 
 if os.name == "nt":  # pragma: no cover - exercised only on Windows
@@ -85,8 +89,8 @@ class WriteLock:
         try:
             while not _try_acquire(fd):
                 if time.monotonic() >= deadline:
-                    raise LockBusy(
-                        f"write lock busy after {self.timeout_ms}ms: {self.path}"
+                    raise LockTimeoutError(
+                        f"Could not acquire write lock on {self.path} within {self.timeout_ms}ms"
                     )
                 time.sleep(_RETRY_INTERVAL_S)
         except BaseException:

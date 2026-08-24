@@ -8,8 +8,9 @@ binary-search the symbol count until the rendered tree fits the budget.
 """
 from __future__ import annotations
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
+from sot_graph.analytics.graph import OperationCancelledError
 from sot_graph.tokenizer import estimate_tokens
 
 DAMPING = 0.85
@@ -68,8 +69,11 @@ def pagerank(
     personalization: Optional[Dict[str, float]] = None,
     damping: float = DAMPING,
     iterations: int = ITERATIONS,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> Dict[str, float]:
     """Power iteration with uniform restart mass (dangling nodes included)."""
+    if cancel_check and cancel_check():
+        raise OperationCancelledError("Analytics operation cancelled by client")
     n = len(nodes)
     if n == 0:
         return {}
@@ -79,6 +83,8 @@ def pagerank(
     rank = dict(base)
     out_count = {u: len(out_edges.get(u, [])) for u in nodes}
     for _ in range(iterations):
+        if cancel_check and cancel_check():
+            raise OperationCancelledError("Analytics operation cancelled by client")
         nxt = {u: (1.0 - damping) * base.get(u, 0.0) for u in nodes}
         dangling = damping * sum(rank[u] for u in nodes if out_count[u] == 0) / n
         for u in nodes:

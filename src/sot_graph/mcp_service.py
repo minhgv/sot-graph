@@ -9,18 +9,21 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import os
 import re
 import sqlite3
+import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Tuple, cast
-from urllib.parse import quote
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, cast
+from urllib.parse import quote, unquote, urlparse
+
+from sot_graph.analytics.graph import OperationCancelledError
 from sot_graph.db import Database
 from sot_graph.verifier import TrustVerifier, tokenize
-
 
 class McpServiceError(Exception):
     """Stable public error with a machine-readable code."""
@@ -125,6 +128,8 @@ class McpService:
             return operation(conn)
         except McpServiceError:
             raise
+        except OperationCancelledError as exc:
+            raise McpServiceError("cancelled", str(exc)) from exc
         except sqlite3.OperationalError as exc:
             if "interrupt" in str(exc).lower() or "locked" in str(exc).lower():
                 raise McpServiceError("timeout", "graph operation timed out") from exc
@@ -612,6 +617,7 @@ class McpService:
         min_community_size: int = 1,
         sigma: float = 1.5,
         format: str = "markdown",
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         from sot_graph.analytics.graph import AnalyticsGraph
         from sot_graph.analytics.diagnostics import analyze_graph
@@ -623,6 +629,7 @@ class McpService:
                 graph,
                 min_community_size=min_community_size,
                 threshold_sigma=sigma,
+                cancel_check=cancel_check,
             )
             report_md = generate_markdown_report(
                 analysis,
@@ -686,12 +693,15 @@ class McpService:
         *,
         scope: Optional[str] = None,
         min_community_size: int = 1,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         from sot_graph.analytics.graph import AnalyticsGraph
 
         def op(conn: sqlite3.Connection) -> Dict[str, Any]:
             graph = AnalyticsGraph.from_connection(conn, scope=scope)
-            res = graph.detect_communities(min_community_size=min_community_size)
+            res = graph.detect_communities(
+                min_community_size=min_community_size, cancel_check=cancel_check
+            )
             comm_list = []
             for cid, cinfo in res.community_info.items():
                 comm_list.append({
@@ -712,6 +722,7 @@ class McpService:
         self,
         *,
         output_dir: Optional[str] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         """Extract the 5 fact bundle markdown/json files for LLM architecture reports."""
         from sot_graph.analytics.bundle import ArchitectureBundler
@@ -719,7 +730,9 @@ class McpService:
 
         def op(conn: sqlite3.Connection) -> Dict[str, Any]:
             graph = AnalyticsGraph.from_connection(conn)
-            bundler = ArchitectureBundler(root_dir=self.project_root, graph=graph)
+            bundler = ArchitectureBundler(
+                root_dir=self.project_root, graph=graph, cancel_check=cancel_check
+            )
             out_dir = resolve_and_validate_output_path(
                 self.project_root,
                 output_dir,
@@ -739,6 +752,9 @@ class McpService:
                 "providers": self._providers(conn),
             })
         return self._run(op)
+    report = get_architecture_report
+    cluster = get_communities
+    bundle = get_architecture_bundle
 
     def pack_context_bundle(
         self,
@@ -904,12 +920,39 @@ class McpService:
             })
         return self._run(op)
 
-    async def _async(self, method: Any, *args: Any, **kwargs: Any) -> Any:
+    async def _async(
+        self,
+        method: Any,
+        *args: Any,
+        cancel_event: Optional[threading.Event] = None,
+        **kwargs: Any,
+    ) -> Any:
+        event = cancel_event or threading.Event()
         try:
-            return await asyncio.wait_for(asyncio.to_thread(method, *args, **kwargs), self.timeout_ms / 1000.0)
-        except asyncio.TimeoutError as exc:
-            raise McpServiceError("timeout", "graph operation timed out") from exc
+            sig = inspect.signature(method)
+            if "cancel_check" in sig.parameters:
+                existing_cancel_check = kwargs.get("cancel_check")
+                kwargs["cancel_check"] = (
+                    lambda: event.is_set()
+                    or (bool(existing_cancel_check()) if existing_cancel_check else False)
+                )
+        except (ValueError, TypeError):
+            pass
 
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(method, *args, **kwargs),
+                self.timeout_ms / 1000.0,
+            )
+        except asyncio.TimeoutError as exc:
+            event.set()
+            raise McpServiceError("timeout", "graph operation timed out") from exc
+        except (asyncio.CancelledError, GeneratorExit):
+            event.set()
+            raise
+        except Exception:
+            event.set()
+            raise
     async def asearch(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return await self._async(self.search, *args, **kwargs)
 
@@ -948,9 +991,12 @@ class McpService:
 
     async def aget_communities(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return await self._async(self.get_communities, *args, **kwargs)
+
     async def aget_architecture_bundle(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return await self._async(self.get_architecture_bundle, *args, **kwargs)
-
+    areport = aget_architecture_report
+    acluster = aget_communities
+    abundle = aget_architecture_bundle
     async def atrace(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return await self._async(self.trace, *args, **kwargs)
 

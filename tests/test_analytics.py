@@ -226,6 +226,110 @@ class AnalyticsTests(unittest.TestCase):
         output = buf.getvalue()
         self.assertIn("Architectural Communities", output)
 
+    def test_sql_degree_aggregation_and_graph_degrees(self) -> None:
+        """Test direct SQL degree computation on AnalyticsGraph and DB."""
+        self._populate_mock_project()
+        deg_sql = AnalyticsGraph.compute_degrees_sql(self.db)
+        self.assertIsInstance(deg_sql, dict)
+        self.assertGreater(len(deg_sql), 0)
+        
+        graph = AnalyticsGraph.from_database(self.db)
+        self.assertGreater(len(graph.nodes), 0)
+        # Verify node degree matches
+        for node_id in list(graph.nodes.keys())[:5]:
+            self.assertGreaterEqual(graph.degree(node_id), 0)
+
+    def test_cooperative_cancellation_analytics_graph(self) -> None:
+        """Verify OperationCancelledError is raised across graph routines when cancel_check triggers."""
+        from sot_graph.analytics.graph import OperationCancelledError
+        self._populate_mock_project()
+        graph = AnalyticsGraph.from_database(self.db)
+
+        # Cancel Louvain / community detection
+        with self.assertRaises(OperationCancelledError):
+            graph.detect_communities(cancel_check=lambda: True)
+
+        # Cancel connected components
+        with self.assertRaises(OperationCancelledError):
+            graph.connected_components(cancel_check=lambda: True)
+        # Cancel label propagation
+        with self.assertRaises(OperationCancelledError):
+            graph._label_propagation_community(cancel_check=lambda: True)
+        with self.assertRaises(OperationCancelledError):
+            analyze_graph(graph, cancel_check=lambda: True)
+
+    def test_cooperative_cancellation_mcp_service(self) -> None:
+        """Verify McpService raises McpServiceError('cancelled') when cancel_check triggers."""
+        from sot_graph.mcp_service import McpService, McpServiceError
+        self._populate_mock_project()
+        service = McpService(str(self.db_path), str(self.root_path))
+        with self.assertRaises(McpServiceError) as ctx:
+            service.get_communities(cancel_check=lambda: True)
+        self.assertEqual(ctx.exception.code, "cancelled")
+
+        with self.assertRaises(McpServiceError) as ctx:
+            service.get_architecture_report(cancel_check=lambda: True)
+        self.assertEqual(ctx.exception.code, "cancelled")
+        with self.assertRaises(McpServiceError) as ctx:
+            service.get_architecture_bundle(cancel_check=lambda: True)
+        self.assertEqual(ctx.exception.code, "cancelled")
+
+    def test_pagerank_cancellation(self) -> None:
+        """Verify pagerank raises OperationCancelledError on cancel_check."""
+        from sot_graph.repo_map import pagerank
+        from sot_graph.analytics.graph import OperationCancelledError
+        nodes = ["a", "b", "c"]
+        out_edges = {"a": ["b"], "b": ["c"], "c": ["a"]}
+        with self.assertRaises(OperationCancelledError):
+            pagerank(nodes, out_edges, cancel_check=lambda: True)
+
+    def test_precomputed_degrees_cache_handling(self) -> None:
+        """Verify precomputed degree cache seeds from existing adjacency and updates correctly on add_node and add_edge."""
+        graph = AnalyticsGraph()
+        # Pre-populate some nodes and edges before initializing degree cache
+        graph.add_node("A")
+        graph.add_node("B")
+        graph.add_edge("A", "B")
+
+        # Enable precomputed degree cache
+        graph._precomputed_degrees = {
+            "A": {"in": 0, "out": 1, "total": 1},
+            "B": {"in": 1, "out": 0, "total": 1},
+        }
+
+        # 1. Add edge between pre-existing nodes
+        graph.add_edge("B", "A")
+        self.assertEqual(graph.in_degree("A"), 1)
+        self.assertEqual(graph.out_degree("A"), 1)
+        self.assertEqual(graph.degree("A"), 2)
+        self.assertEqual(graph.in_degree("B"), 1)
+        self.assertEqual(graph.out_degree("B"), 1)
+        self.assertEqual(graph.degree("B"), 2)
+
+        # 2. Add a new node not in precomputed_degrees
+        graph.add_node("C")
+        self.assertIn("C", graph._precomputed_degrees)
+        self.assertEqual(graph.in_degree("C"), 0)
+        self.assertEqual(graph.out_degree("C"), 0)
+        self.assertEqual(graph.degree("C"), 0)
+
+        # 3. Add edge involving newly created and existing nodes
+        graph.add_edge("A", "C")
+        self.assertEqual(graph.out_degree("A"), 2)
+        self.assertEqual(graph.in_degree("C"), 1)
+        self.assertEqual(graph.degree("A"), 3)
+        self.assertEqual(graph.degree("C"), 1)
+
+        # 4. Add edge where src / dst were not in precomputed degrees (e.g. node D with existing unindexed edges)
+        # Manually attach edge without cache then add edge via add_edge
+        graph.nodes["D"] = {"id": "D"}
+        graph._adj_out["D"].append(("A", "relates"))
+        graph._adj_in["A"].append(("D", "relates"))
+        # D is not in _precomputed_degrees yet, but has out-degree 1
+        graph.add_edge("D", "C")
+        self.assertEqual(graph.out_degree("D"), 2)
+        self.assertEqual(graph.in_degree("D"), 0)
+        self.assertEqual(graph.degree("D"), 2)
 
 if __name__ == "__main__":
     unittest.main()

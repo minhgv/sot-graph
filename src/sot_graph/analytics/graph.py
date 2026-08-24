@@ -3,13 +3,21 @@ from __future__ import annotations
 import collections
 import dataclasses
 import math
-from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+import sqlite3
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from sot_graph.db import Database
 else:
     Database = Any
 
+
+class OperationCancelledError(Exception):
+    """Standardized error raised when an analytics operation is cancelled by the client."""
+
+    def __init__(self, message: str = "Analytics operation cancelled by client") -> None:
+        super().__init__(message)
+        self.message = message
 @dataclasses.dataclass
 class CommunityInfo:
     community_id: int
@@ -37,7 +45,7 @@ class AnalyticsGraph:
         self._adj_out: Dict[str, List[Tuple[str, str]]] = collections.defaultdict(list)
         self._adj_in: Dict[str, List[Tuple[str, str]]] = collections.defaultdict(list)
         self._undirected_adj: Dict[str, Set[str]] = collections.defaultdict(set)
-
+        self._precomputed_degrees: Optional[Dict[str, Dict[str, int]]] = None
     def add_node(
         self,
         node_id: str,
@@ -63,6 +71,10 @@ class AnalyticsGraph:
         _ = self._adj_out[node_id]
         _ = self._adj_in[node_id]
         _ = self._undirected_adj[node_id]
+        if self._precomputed_degrees is not None and node_id not in self._precomputed_degrees:
+            in_cnt = len(self._adj_in.get(node_id, []))
+            out_cnt = len(self._adj_out.get(node_id, []))
+            self._precomputed_degrees[node_id] = {"in": in_cnt, "out": out_cnt, "total": in_cnt + out_cnt}
 
     def add_edge(
         self,
@@ -82,11 +94,23 @@ class AnalyticsGraph:
             **extra,
         }
         self.edges.append(edge_data)
+        if self._precomputed_degrees is not None:
+            if src not in self._precomputed_degrees:
+                in_cnt = len(self._adj_in.get(src, []))
+                out_cnt = len(self._adj_out.get(src, []))
+                self._precomputed_degrees[src] = {"in": in_cnt, "out": out_cnt, "total": in_cnt + out_cnt}
+            if dst not in self._precomputed_degrees:
+                in_cnt = len(self._adj_in.get(dst, []))
+                out_cnt = len(self._adj_out.get(dst, []))
+                self._precomputed_degrees[dst] = {"in": in_cnt, "out": out_cnt, "total": in_cnt + out_cnt}
+            self._precomputed_degrees[src]["out"] += 1
+            self._precomputed_degrees[src]["total"] += 1
+            self._precomputed_degrees[dst]["in"] += 1
+            self._precomputed_degrees[dst]["total"] += 1
         self._adj_out[src].append((dst, relation))
         self._adj_in[dst].append((src, relation))
         self._undirected_adj[src].add(dst)
         self._undirected_adj[dst].add(src)
-
     @classmethod
     def from_connection(
         cls, conn: sqlite3.Connection, scope: Optional[str] = None
@@ -152,6 +176,11 @@ class AnalyticsGraph:
                 line=r[4],
             )
 
+        try:
+            graph._precomputed_degrees = cls.compute_degrees_sql(conn, scope=scope)
+        except Exception:
+            graph._precomputed_degrees = None
+
         return graph
 
     @classmethod
@@ -161,24 +190,168 @@ class AnalyticsGraph:
         """Build an AnalyticsGraph from a Database instance."""
         return cls.from_connection(db.conn, scope=scope)
 
+    @staticmethod
+    def compute_degrees_sql(
+        conn: Any, scope: Optional[str] = None
+    ) -> Dict[str, Dict[str, int]]:
+        """Compute in-degree, out-degree, and total degree per node directly in SQLite
+        without loading all edges into Python memory.
+        """
+        raw_conn = getattr(conn, "conn", conn)
+        degrees: Dict[str, Dict[str, int]] = collections.defaultdict(
+            lambda: {"in": 0, "out": 0, "total": 0}
+        )
+        if scope:
+            like_pattern = f"{scope}%"
+            sql = """
+                SELECT n.id,
+                       (COALESCE(o.cnt, 0) + COALESCE(i.cnt, 0)) AS deg,
+                       COALESCE(i.cnt, 0) AS in_deg,
+                       COALESCE(o.cnt, 0) AS out_deg
+                FROM graph_nodes n
+                LEFT JOIN (SELECT src, COUNT(*) AS cnt FROM graph_edges WHERE path LIKE ? GROUP BY src) o ON n.id = o.src
+                LEFT JOIN (SELECT dst, COUNT(*) AS cnt FROM graph_edges WHERE path LIKE ? GROUP BY dst) i ON n.id = i.dst
+                WHERE n.path LIKE ?
+            """
+            rows = raw_conn.execute(sql, (like_pattern, like_pattern, like_pattern)).fetchall()
+        else:
+            sql = """
+                SELECT n.id,
+                       (COALESCE(o.cnt, 0) + COALESCE(i.cnt, 0)) AS deg,
+                       COALESCE(i.cnt, 0) AS in_deg,
+                       COALESCE(o.cnt, 0) AS out_deg
+                FROM graph_nodes n
+                LEFT JOIN (SELECT src, COUNT(*) AS cnt FROM graph_edges GROUP BY src) o ON n.id = o.src
+                LEFT JOIN (SELECT dst, COUNT(*) AS cnt FROM graph_edges GROUP BY dst) i ON n.id = i.dst
+            """
+            rows = raw_conn.execute(sql).fetchall()
+
+        for r in rows:
+            degrees[r[0]] = {
+                "in": int(r[2]),
+                "out": int(r[3]),
+                "total": int(r[1]),
+            }
+        return dict(degrees)
+    @staticmethod
+    def compute_top_nodes_by_degree_sql(
+        conn: Any, limit: int = 50, scope: Optional[str] = None
+    ) -> List[Tuple[str, int, int, int]]:
+        """Compute top nodes by total degree directly in SQLite with grouping and aggregation."""
+        raw_conn = getattr(conn, "conn", conn)
+        if scope:
+            like_pattern = f"{scope}%"
+            sql = """
+                WITH out_deg AS (
+                    SELECT src AS node_id, COUNT(*) AS out_c FROM graph_edges WHERE path LIKE ? GROUP BY src
+                ),
+                in_deg AS (
+                    SELECT dst AS node_id, COUNT(*) AS in_c FROM graph_edges WHERE path LIKE ? GROUP BY dst
+                ),
+                combined AS (
+                    SELECT node_id FROM out_deg UNION SELECT node_id FROM in_deg
+                )
+                SELECT c.node_id,
+                       COALESCE(i.in_c, 0) AS in_degree,
+                       COALESCE(o.out_c, 0) AS out_degree,
+                       (COALESCE(i.in_c, 0) + COALESCE(o.out_c, 0)) AS total_degree
+                FROM combined c
+                LEFT JOIN in_deg i ON c.node_id = i.node_id
+                LEFT JOIN out_deg o ON c.node_id = o.node_id
+                ORDER BY total_degree DESC
+                LIMIT ?
+            """
+            rows = raw_conn.execute(sql, (like_pattern, like_pattern, limit)).fetchall()
+        else:
+            sql = """
+                WITH out_deg AS (
+                    SELECT src AS node_id, COUNT(*) AS out_c FROM graph_edges GROUP BY src
+                ),
+                in_deg AS (
+                    SELECT dst AS node_id, COUNT(*) AS in_c FROM graph_edges GROUP BY dst
+                ),
+                combined AS (
+                    SELECT node_id FROM out_deg UNION SELECT node_id FROM in_deg
+                )
+                SELECT c.node_id,
+                       COALESCE(i.in_c, 0) AS in_degree,
+                       COALESCE(o.out_c, 0) AS out_degree,
+                       (COALESCE(i.in_c, 0) + COALESCE(o.out_c, 0)) AS total_degree
+                FROM combined c
+                LEFT JOIN in_deg i ON c.node_id = i.node_id
+                LEFT JOIN out_deg o ON c.node_id = o.node_id
+                ORDER BY total_degree DESC
+                LIMIT ?
+            """
+            rows = raw_conn.execute(sql, (limit,)).fetchall()
+        return [(r[0], int(r[1]), int(r[2]), int(r[3])) for r in rows]
+
+    @staticmethod
+    def compute_graph_metrics_sql(
+        conn: sqlite3.Connection, scope: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Compute basic graph topology metrics directly via SQL streaming aggregations."""
+        if scope:
+            like_pattern = f"{scope}%"
+            n_row = conn.execute(
+                "SELECT COUNT(*), SUM(CASE WHEN kind = 'file' THEN 1 ELSE 0 END) "
+                "FROM graph_nodes WHERE path LIKE ?",
+                (like_pattern,),
+            ).fetchone()
+            e_row = conn.execute(
+                "SELECT COUNT(*) FROM graph_edges WHERE path LIKE ?",
+                (like_pattern,),
+            ).fetchone()
+        else:
+            n_row = conn.execute(
+                "SELECT COUNT(*), SUM(CASE WHEN kind = 'file' THEN 1 ELSE 0 END) FROM graph_nodes"
+            ).fetchone()
+            e_row = conn.execute("SELECT COUNT(*) FROM graph_edges").fetchone()
+
+        node_count = int(n_row[0] or 0)
+        file_count = int(n_row[1] or 0)
+        symbol_count = max(0, node_count - file_count)
+        edge_count = int(e_row[0] or 0)
+        max_possible = node_count * (node_count - 1) if node_count > 1 else 1
+        density = (edge_count / max_possible) if node_count > 1 else 0.0
+        avg_degree = (2.0 * edge_count / node_count) if node_count > 0 else 0.0
+
+        return {
+            "node_count": node_count,
+            "edge_count": edge_count,
+            "file_count": file_count,
+            "symbol_count": symbol_count,
+            "density": round(density, 6),
+            "avg_degree": round(avg_degree, 2),
+        }
+
     def in_degree(self, node_id: str) -> int:
+        if self._precomputed_degrees is not None and node_id in self._precomputed_degrees:
+            return self._precomputed_degrees[node_id]["in"]
         return len(self._adj_in.get(node_id, []))
 
     def out_degree(self, node_id: str) -> int:
+        if self._precomputed_degrees is not None and node_id in self._precomputed_degrees:
+            return self._precomputed_degrees[node_id]["out"]
         return len(self._adj_out.get(node_id, []))
 
     def degree(self, node_id: str) -> int:
+        if self._precomputed_degrees is not None and node_id in self._precomputed_degrees:
+            return self._precomputed_degrees[node_id]["total"]
         return self.in_degree(node_id) + self.out_degree(node_id)
-
     def neighbors(self, node_id: str) -> Set[str]:
         return self._undirected_adj.get(node_id, set())
 
-    def connected_components(self) -> List[Set[str]]:
-        """Find all connected components using BFS."""
+    def connected_components(
+        self, cancel_check: Optional[Callable[[], bool]] = None
+    ) -> List[Set[str]]:
+        """Find all connected components using BFS with cancellation check."""
         visited: Set[str] = set()
         components: List[Set[str]] = []
 
         for node_id in self.nodes:
+            if cancel_check and cancel_check():
+                raise OperationCancelledError("Analytics operation cancelled by client")
             if node_id in visited:
                 continue
             component: Set[str] = set()
@@ -186,6 +359,8 @@ class AnalyticsGraph:
             visited.add(node_id)
 
             while queue:
+                if cancel_check and cancel_check():
+                    raise OperationCancelledError("Analytics operation cancelled by client")
                 current = queue.popleft()
                 component.add(current)
                 for neighbor in self._undirected_adj.get(current, set()):
@@ -197,17 +372,122 @@ class AnalyticsGraph:
         components.sort(key=len, reverse=True)
         return components
 
+    def calculate_blast_radius(
+        self,
+        start_node: str,
+        max_hops: int = 2,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> int:
+        """Calculate the number of unique nodes affected within max_hops."""
+        visited: Set[str] = {start_node}
+        queue: collections.deque[Tuple[str, int]] = collections.deque([(start_node, 0)])
+
+        while queue:
+            if cancel_check and cancel_check():
+                raise OperationCancelledError("Analytics operation cancelled by client")
+            curr, depth = queue.popleft()
+            if depth >= max_hops:
+                continue
+            for neighbor in self.neighbors(curr):
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append((neighbor, depth + 1))
+
+        return len(visited) - 1
+
+    def pagerank(
+        self,
+        personalization: Optional[Dict[str, float]] = None,
+        damping: float = 0.85,
+        iterations: int = 30,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> Dict[str, float]:
+        """Power iteration PageRank with cooperative cancellation."""
+        nodes = list(self.nodes.keys())
+        n = len(nodes)
+        if n == 0:
+            return {}
+
+        base = personalization or {u: 1.0 / n for u in nodes}
+        total = sum(base.values()) or 1.0
+        base = {u: base.get(u, 0.0) / total for u in nodes}
+        rank = dict(base)
+        out_count = {u: len(self._adj_out.get(u, [])) for u in nodes}
+
+        for _ in range(iterations):
+            if cancel_check and cancel_check():
+                raise OperationCancelledError("Analytics operation cancelled by client")
+            nxt = {u: (1.0 - damping) * base.get(u, 0.0) for u in nodes}
+            dangling = damping * sum(rank[u] for u in nodes if out_count[u] == 0) / n
+            for u in nodes:
+                nxt[u] += dangling
+            for u in nodes:
+                if out_count[u]:
+                    share = damping * rank[u] / out_count[u]
+                    for dst, _ in self._adj_out[u]:
+                        nxt[dst] = nxt.get(dst, 0.0) + share
+            rank = nxt
+        return rank
+
+    def detect_cycles(
+        self,
+        max_cycles: int = 100,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> List[List[str]]:
+        """Detect simple directed cycles with cooperative cancellation."""
+        visited: Set[str] = set()
+        rec_stack: Set[str] = set()
+        path: List[str] = []
+        cycles: List[List[str]] = []
+
+        def dfs(node: str) -> None:
+            if cancel_check and cancel_check():
+                raise OperationCancelledError("Analytics operation cancelled by client")
+            if len(cycles) >= max_cycles:
+                return
+            visited.add(node)
+            rec_stack.add(node)
+            path.append(node)
+
+            for dst, _ in self._adj_out.get(node, []):
+                if cancel_check and cancel_check():
+                    raise OperationCancelledError("Analytics operation cancelled by client")
+                if len(cycles) >= max_cycles:
+                    break
+                if dst not in visited:
+                    dfs(dst)
+                elif dst in rec_stack:
+                    # Cycle found
+                    idx = path.index(dst)
+                    cycle = list(path[idx:]) + [dst]
+                    cycles.append(cycle)
+
+            path.pop()
+            rec_stack.remove(node)
+
+        for n in self.nodes:
+            if len(cycles) >= max_cycles:
+                break
+            if n not in visited:
+                dfs(n)
+
+        return cycles
+
     def detect_communities(
         self,
         seed: int = 42,
         max_iterations: int = 30,
         min_community_size: int = 1,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> CommunityResult:
         """
         Detect architectural communities using an asynchronous Label Propagation Algorithm (LPA)
         with modularity refinement in pure Python standard library.
         If networkx is available, leverages Louvain / greedy modularity when beneficial.
         """
+        if cancel_check and cancel_check():
+            raise OperationCancelledError("Analytics operation cancelled by client")
+
         if not self.nodes:
             return CommunityResult(
                 communities={},
@@ -216,15 +496,18 @@ class AnalyticsGraph:
                 modularity=0.0,
             )
 
-        # Try networkx community detection if installed
-        nx_communities = self._try_networkx_community()
+        # Try networkx Louvain detection if installed and cancel_check is None
+        if cancel_check is None:
+            nx_communities = self._try_networkx_community(cancel_check=cancel_check)
+        else:
+            nx_communities = None
+
         if nx_communities is not None:
             raw_communities = nx_communities
         else:
-            raw_communities = self._label_propagation_community(
-                seed=seed, max_iterations=max_iterations
+            raw_communities = self._louvain_community(
+                seed=seed, max_iterations=max_iterations, cancel_check=cancel_check
             )
-
         # Filter and normalize communities: sort by size descending, assign 0..N IDs
         sorted_raw = sorted(
             [c for c in raw_communities if len(c) >= min_community_size],
@@ -273,8 +556,146 @@ class AnalyticsGraph:
             node_to_community=node_to_comm,
             modularity=modularity,
         )
-    def _try_networkx_community(self) -> Optional[List[Set[str]]]:
+    def cluster_louvain(
+        self,
+        seed: int = 42,
+        max_iterations: int = 30,
+        min_community_size: int = 1,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> CommunityResult:
+        """Detect architectural communities using Louvain modularity optimization with cooperative cancellation."""
+        return self.detect_communities(
+            seed=seed,
+            max_iterations=max_iterations,
+            min_community_size=min_community_size,
+            cancel_check=cancel_check,
+        )
+
+    def _louvain_community(
+        self,
+        seed: int = 42,
+        max_iterations: int = 30,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> List[Set[str]]:
+        """Cancellable Louvain modularity optimization algorithm (pure Python stdlib)."""
+        import random
+
+        if cancel_check and cancel_check():
+            raise OperationCancelledError("Analytics operation cancelled by client")
+
+        nodes = list(self.nodes.keys())
+        n = len(nodes)
+        if n == 0:
+            return []
+
+        # Build undirected edge weights
+        neighbor_weights: Dict[str, Dict[str, float]] = collections.defaultdict(
+            lambda: collections.defaultdict(float)
+        )
+        for e in self.edges:
+            u, v = e["src"], e["dst"]
+            if u != v:
+                neighbor_weights[u][v] += 1.0
+                neighbor_weights[v][u] += 1.0
+            else:
+                neighbor_weights[u][u] += 2.0
+
+        degrees: Dict[str, float] = {}
+        for u in nodes:
+            degrees[u] = sum(neighbor_weights[u].values())
+
+        total_weight = sum(degrees.values())
+        if total_weight == 0:
+            return [{node} for node in nodes]
+
+        two_m = total_weight
+        rng = random.Random(seed)
+
+        # Initialize each node in its own community
+        community: Dict[str, int] = {node: idx for idx, node in enumerate(nodes)}
+        community_nodes: Dict[int, Set[str]] = {
+            idx: {node} for idx, node in enumerate(nodes)
+        }
+        tot_degree: Dict[int, float] = {
+            idx: degrees[node] for idx, node in enumerate(nodes)
+        }
+
+        nodes_list = list(nodes)
+        for iter_idx in range(max_iterations):
+            if cancel_check and cancel_check():
+                raise OperationCancelledError("Analytics operation cancelled by client")
+
+            rng.shuffle(nodes_list)
+            improved = False
+
+            for node in nodes_list:
+                if cancel_check and cancel_check():
+                    raise OperationCancelledError("Analytics operation cancelled by client")
+
+                k_i = degrees[node]
+                if k_i == 0:
+                    continue
+
+                curr_comm = community[node]
+
+                # Weight of links from node to its current community (excluding self loops)
+                k_i_in_curr = sum(
+                    wt
+                    for nbr, wt in neighbor_weights[node].items()
+                    if community[nbr] == curr_comm and nbr != node
+                )
+
+                # Temporarily remove node from its current community
+                tot_degree[curr_comm] -= k_i
+                community_nodes[curr_comm].remove(node)
+
+                # Find candidate neighbor communities
+                candidate_comms: Set[int] = {
+                    community[nbr] for nbr in neighbor_weights[node]
+                }
+                candidate_comms.add(curr_comm)
+
+                best_comm = curr_comm
+                best_gain = 0.0
+                # Baseline gain if staying in current community (relative to being isolated)
+                base_gain = k_i_in_curr - (tot_degree[curr_comm] * k_i / two_m)
+
+                for cand in candidate_comms:
+                    if cand == curr_comm:
+                        gain = base_gain
+                    else:
+                        k_i_in_cand = sum(
+                            wt
+                            for nbr, wt in neighbor_weights[node].items()
+                            if community[nbr] == cand
+                        )
+                        gain = k_i_in_cand - (tot_degree[cand] * k_i / two_m)
+
+                    if gain > best_gain:
+                        best_gain = gain
+                        best_comm = cand
+
+                # Place node into best community
+                community[node] = best_comm
+                tot_degree[best_comm] += k_i
+                community_nodes[best_comm].add(node)
+
+                if best_comm != curr_comm:
+                    improved = True
+
+            if not improved:
+                break
+
+        res: List[Set[str]] = [
+            st for st in community_nodes.values() if len(st) > 0
+        ]
+        return res
+    def _try_networkx_community(
+        self, cancel_check: Optional[Callable[[], bool]] = None
+    ) -> Optional[List[Set[str]]]:
         try:
+            if cancel_check and cancel_check():
+                raise OperationCancelledError("Analytics operation cancelled by client")
             import networkx as nx  # type: ignore[import-not-found]
 
             G = nx.Graph()
@@ -286,19 +707,31 @@ class AnalyticsGraph:
             if G.number_of_nodes() == 0:
                 return []
 
+            if cancel_check and cancel_check():
+                raise OperationCancelledError("Analytics operation cancelled by client")
+
             # Use louvain_communities if available (nx 2.8+)
             if hasattr(nx.community, "louvain_communities"):
                 comms = nx.community.louvain_communities(G, seed=42)
+                if cancel_check and cancel_check():
+                    raise OperationCancelledError("Analytics operation cancelled by client")
                 return [set(c) for c in comms]
             elif hasattr(nx.community, "greedy_modularity_communities"):
                 comms = nx.community.greedy_modularity_communities(G)
+                if cancel_check and cancel_check():
+                    raise OperationCancelledError("Analytics operation cancelled by client")
                 return [set(c) for c in comms]
+        except OperationCancelledError:
+            raise
         except Exception:
             pass
         return None
 
     def _label_propagation_community(
-        self, seed: int = 42, max_iterations: int = 30
+        self,
+        seed: int = 42,
+        max_iterations: int = 30,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> List[Set[str]]:
         """Asynchronous Label Propagation Algorithm (pure Python stdlib)."""
         import random
@@ -309,9 +742,13 @@ class AnalyticsGraph:
         nodes_list = list(self.nodes.keys())
 
         for _ in range(max_iterations):
+            if cancel_check and cancel_check():
+                raise OperationCancelledError("Analytics operation cancelled by client")
             rng.shuffle(nodes_list)
             changed = False
             for node in nodes_list:
+                if cancel_check and cancel_check():
+                    raise OperationCancelledError("Analytics operation cancelled by client")
                 neighbors = self._undirected_adj.get(node, set())
                 if not neighbors:
                     continue

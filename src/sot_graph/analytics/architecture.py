@@ -10,10 +10,13 @@ import dataclasses
 import enum
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from sot_graph.analytics.graph import AnalyticsGraph, CommunityResult
-
+from sot_graph.analytics.graph import (
+    AnalyticsGraph,
+    CommunityResult,
+    OperationCancelledError,
+)
 
 class ArchitecturalLayer(str, enum.Enum):
     PRESENTATION = "Presentation (UI / View)"
@@ -370,11 +373,14 @@ def detect_pattern_and_framework(
 def aggregate_business_domains(
     graph: AnalyticsGraph,
     community_res: CommunityResult,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> List[BusinessDomain]:
     """
     Group low-level nodes and communities into High-Level Functional Business Domains.
     Extracts domains from feature paths (/features/<name>/, /modules/<name>/, etc.).
     """
+    if cancel_check and cancel_check():
+        raise OperationCancelledError("Analytics operation cancelled by client")
     domain_buckets: Dict[str, Dict[str, Any]] = collections.defaultdict(
         lambda: {
             "nodes": [],
@@ -511,13 +517,15 @@ def aggregate_functional_modules(
     graph: AnalyticsGraph,
     domains: List[BusinessDomain],
     node_layers: Dict[str, ArchitecturalLayer],
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> List[FunctionalModule]:
     """
     Decompose the codebase into comprehensive Functional Modules (Features/Subsystems).
     Maps responsibilities, core entities, entrypoints, and cross-module dependencies.
     """
+    if cancel_check and cancel_check():
+        raise OperationCancelledError("Analytics operation cancelled by client")
     modules: List[FunctionalModule] = []
-
     for d in domains:
         name = d.name
         cat = d.category
@@ -591,11 +599,14 @@ def extract_routing_architecture(
     primary_lang: str,
     pattern_name: str,
     include_tests: bool = False,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> RoutingArchitecture:
     """
     Extract routing topology across HTTP APIs, UI Pages, and Event Dispatches.
     Supports multi-stack conventions (Flutter, FastAPI, Odoo, Spring, NestJS, etc.).
     """
+    if cancel_check and cancel_check():
+        raise OperationCancelledError("Analytics operation cancelled by client")
     http_routes: List[RouteEndpoint] = []
     ui_routes: List[RouteEndpoint] = []
     event_routes: List[RouteEndpoint] = []
@@ -828,6 +839,7 @@ def generate_mermaid_routing_tree_diagram(
 def detect_architectural_violations(
     graph: AnalyticsGraph,
     node_layers: Dict[str, ArchitecturalLayer],
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> List[ArchitectureViolation]:
     """
     Detect anti-patterns and rule breaches:
@@ -835,6 +847,8 @@ def detect_architectural_violations(
     2. Inverted Dependency: Data or Domain depending on Presentation.
     3. High-coupling God Components.
     """
+    if cancel_check and cancel_check():
+        raise OperationCancelledError("Analytics operation cancelled by client")
     violations: List[ArchitectureViolation] = []
 
     # Valid dependency flow order:
@@ -1043,8 +1057,12 @@ def generate_mermaid_domain_flow(
 def build_architecture_profile(
     graph: AnalyticsGraph,
     community_res: CommunityResult,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> ArchitectureProfile:
     """Construct the complete multi-layer architecture profile for report generation."""
+    if cancel_check and cancel_check():
+        raise OperationCancelledError("Analytics operation cancelled by client")
+
     # 1. Classify all nodes into layers
     node_layers: Dict[str, ArchitecturalLayer] = {}
     layer_nodes: Dict[ArchitecturalLayer, List[str]] = collections.defaultdict(list)
@@ -1052,6 +1070,8 @@ def build_architecture_profile(
     layer_symbols: Dict[ArchitecturalLayer, List[str]] = collections.defaultdict(list)
 
     for node_id, data in graph.nodes.items():
+        if cancel_check and cancel_check():
+            raise OperationCancelledError("Analytics operation cancelled by client")
         layer = classify_node_layer(node_id, data)
         node_layers[node_id] = layer
         layer_nodes[layer].append(node_id)
@@ -1080,14 +1100,20 @@ def build_architecture_profile(
     pattern_name, primary_lang, frameworks = detect_pattern_and_framework(graph)
 
     # 3. Aggregate Business Domains and Functional Modules
-    domains = aggregate_business_domains(graph, community_res)
-    functional_modules = aggregate_functional_modules(graph, domains, node_layers)
+    domains = aggregate_business_domains(graph, community_res, cancel_check=cancel_check)
+    functional_modules = aggregate_functional_modules(
+        graph, domains, node_layers, cancel_check=cancel_check
+    )
 
     # 4. Extract Routing Architecture
-    routing_arch = extract_routing_architecture(graph, node_layers, primary_lang, pattern_name)
+    routing_arch = extract_routing_architecture(
+        graph, node_layers, primary_lang, pattern_name, cancel_check=cancel_check
+    )
 
     # 5. Detect Architectural Violations
-    violations = detect_architectural_violations(graph, node_layers)
+    violations = detect_architectural_violations(
+        graph, node_layers, cancel_check=cancel_check
+    )
 
     # 6. Generate Diagrams
     mermaid_layer = generate_mermaid_layer_diagram(layer_breakdown, pattern_name)

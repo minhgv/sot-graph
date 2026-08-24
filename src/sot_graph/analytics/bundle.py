@@ -5,16 +5,15 @@ Extracts structured codebase facts from sot.db into high-density Markdown artifa
 serving as Stage 1 inputs for LLM-assisted architectural report synthesis.
 """
 from __future__ import annotations
-
 import json
 import os
-import re
 from pathlib import Path
-from typing import Dict, List, Optional
+import re
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from sot_graph.analytics.architecture import ArchitectureProfile, FunctionalModule, is_test_or_mock_path
 from sot_graph.analytics.diagnostics import AnalysisResult, analyze_graph
-from sot_graph.analytics.graph import AnalyticsGraph
+from sot_graph.analytics.graph import AnalyticsGraph, OperationCancelledError
 from sot_graph.db import Database
 
 class ArchitectureBundler:
@@ -26,8 +25,8 @@ class ArchitectureBundler:
         root_dir: str = ".",
         graph: Optional[AnalyticsGraph] = None,
         include_tests: bool = False,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ):
-        self.db = db
         self.root_dir = os.path.abspath(root_dir)
         self.include_tests = include_tests
         if graph is not None:
@@ -36,7 +35,7 @@ class ArchitectureBundler:
             self.graph = AnalyticsGraph.from_database(db)
         else:
             raise ValueError("Either db or graph must be provided to ArchitectureBundler")
-        self.analysis: AnalysisResult = analyze_graph(self.graph)
+        self.analysis: AnalysisResult = analyze_graph(self.graph, cancel_check=cancel_check)
         self.profile: Optional[ArchitectureProfile] = self.analysis.architecture_profile
 
     def extract_bundle(self, output_dir: Optional[str] = None) -> Dict[str, str]:

@@ -3,11 +3,16 @@ from __future__ import annotations
 import collections
 import dataclasses
 import math
-from typing import Any, Dict, List, Optional, Set, Tuple
-from sot_graph.analytics.graph import AnalyticsGraph, CommunityResult
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+
 from sot_graph.analytics.architecture import (
     ArchitectureProfile,
     build_architecture_profile,
+)
+from sot_graph.analytics.graph import (
+    AnalyticsGraph,
+    CommunityResult,
+    OperationCancelledError,
 )
 
 @dataclasses.dataclass
@@ -64,9 +69,13 @@ class AnalysisResult:
     architecture_profile: Optional[ArchitectureProfile] = None
 
 def calculate_graph_metrics(
-    graph: AnalyticsGraph, community_res: CommunityResult
+    graph: AnalyticsGraph,
+    community_res: CommunityResult,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> GraphMetrics:
     """Calculate summary topology metrics."""
+    if cancel_check and cancel_check():
+        raise OperationCancelledError("Analytics operation cancelled by client")
     n = len(graph.nodes)
     m = len(graph.edges)
 
@@ -78,7 +87,11 @@ def calculate_graph_metrics(
     max_possible_edges = n * (n - 1) if n > 1 else 1
     density = (m / max_possible_edges) if n > 1 else 0.0
 
-    degrees = [graph.degree(node_id) for node_id in graph.nodes]
+    degrees: List[int] = []
+    for node_id in graph.nodes:
+        if cancel_check and cancel_check():
+            raise OperationCancelledError("Analytics operation cancelled by client")
+        degrees.append(graph.degree(node_id))
     avg_deg = sum(degrees) / n if n > 0 else 0.0
     max_deg = max(degrees) if degrees else 0
     isolated = sum(1 for d in degrees if d == 0)
@@ -101,11 +114,14 @@ def find_god_nodes(
     graph: AnalyticsGraph,
     threshold_sigma: float = 1.5,
     min_degree: int = 4,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> List[GodNodeInfo]:
     """
     Identify architectural God Nodes (super-connected hubs / central dependencies).
     A node is flagged if total degree > max(mean + threshold_sigma * std, min_degree).
     """
+    if cancel_check and cancel_check():
+        raise OperationCancelledError("Analytics operation cancelled by client")
     if len(graph.nodes) < 3:
         return []
 
@@ -121,14 +137,15 @@ def find_god_nodes(
 
     god_nodes: List[GodNodeInfo] = []
     for node_id, deg in degrees.items():
+        if cancel_check and cancel_check():
+            raise OperationCancelledError("Analytics operation cancelled by client")
         if deg >= cutoff:
             data = graph.nodes.get(node_id, {})
             in_deg = graph.in_degree(node_id)
             out_deg = graph.out_degree(node_id)
 
             # Calculate 2-hop blast radius
-            blast = _calculate_blast_radius(graph, node_id, max_hops=2)
-
+            blast = _calculate_blast_radius(graph, node_id, max_hops=2, cancel_check=cancel_check)
             # Assign risk level based on degree and blast radius
             if deg >= mean_val + (3.0 * std_dev) or blast >= len(graph.nodes) * 0.3:
                 risk = "CRITICAL"
@@ -159,13 +176,18 @@ def find_god_nodes(
 
 
 def _calculate_blast_radius(
-    graph: AnalyticsGraph, start_node: str, max_hops: int = 2
+    graph: AnalyticsGraph,
+    start_node: str,
+    max_hops: int = 2,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> int:
     """Calculate the number of unique nodes affected within max_hops."""
     visited: Set[str] = {start_node}
     queue: collections.deque[Tuple[str, int]] = collections.deque([(start_node, 0)])
 
     while queue:
+        if cancel_check and cancel_check():
+            raise OperationCancelledError("Analytics operation cancelled by client")
         curr, depth = queue.popleft()
         if depth >= max_hops:
             continue
@@ -179,12 +201,16 @@ def _calculate_blast_radius(
 
 
 def find_surprising_connections(
-    graph: AnalyticsGraph, community_res: CommunityResult
+    graph: AnalyticsGraph,
+    community_res: CommunityResult,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> List[SurprisingConnection]:
     """
     Identify cross-cutting edges connecting different architectural clusters.
     Flags dependencies that bridge separate functional boundaries.
     """
+    if cancel_check and cancel_check():
+        raise OperationCancelledError("Analytics operation cancelled by client")
     node_to_comm = community_res.node_to_community
     surprising: List[SurprisingConnection] = []
 
@@ -194,10 +220,11 @@ def find_surprising_connections(
     )
 
     for edge in graph.edges:
+        if cancel_check and cancel_check():
+            raise OperationCancelledError("Analytics operation cancelled by client")
         src, dst = edge["src"], edge["dst"]
         c_src = node_to_comm.get(src, -1)
         c_dst = node_to_comm.get(dst, -1)
-
         if c_src != c_dst and c_src != -1 and c_dst != -1:
             comm_links[(c_src, c_dst)].append(edge)
 
@@ -276,15 +303,27 @@ def analyze_graph(
     graph: AnalyticsGraph,
     min_community_size: int = 1,
     threshold_sigma: float = 1.5,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> AnalysisResult:
     """Execute complete end-to-end graph intelligence analysis."""
-    comm_res = graph.detect_communities(min_community_size=min_community_size)
-    metrics = calculate_graph_metrics(graph, comm_res)
-    god_nodes = find_god_nodes(graph, threshold_sigma=threshold_sigma)
-    surprising = find_surprising_connections(graph, comm_res)
+    if cancel_check and cancel_check():
+        raise OperationCancelledError("Analytics operation cancelled by client")
+
+    comm_res = graph.detect_communities(
+        min_community_size=min_community_size, cancel_check=cancel_check
+    )
+    metrics = calculate_graph_metrics(graph, comm_res, cancel_check=cancel_check)
+    god_nodes = find_god_nodes(
+        graph, threshold_sigma=threshold_sigma, cancel_check=cancel_check
+    )
+    surprising = find_surprising_connections(
+        graph, comm_res, cancel_check=cancel_check
+    )
     focus_areas = suggest_focus_areas(metrics, god_nodes, comm_res)
 
-    arch_profile = build_architecture_profile(graph, comm_res)
+    arch_profile = build_architecture_profile(
+        graph, comm_res, cancel_check=cancel_check
+    )
 
     return AnalysisResult(
         metrics=metrics,

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from sot_graph.analytics.graph import AnalyticsGraph, CommunityInfo, CommunityResult
+from sot_graph.analytics.graph import (
+    AnalyticsGraph,
+    CommunityInfo,
+    CommunityResult,
+    OperationCancelledError,
+)
 from sot_graph.analytics.diagnostics import (
     GodNodeInfo,
     SurprisingConnection,
@@ -25,6 +30,7 @@ __all__ = [
     "AnalyticsGraph",
     "CommunityInfo",
     "CommunityResult",
+    "OperationCancelledError",
     "GodNodeInfo",
     "SurprisingConnection",
     "GraphMetrics",
