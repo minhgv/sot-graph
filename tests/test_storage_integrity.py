@@ -5,10 +5,9 @@ import time
 from pathlib import Path
 import pytest
 
-from sot_graph.db import Database
-from sot_graph.reconciler import Reconciler
 from sot_graph.cli import main as cli_main
-
+from sot_graph.db import Database, SCHEMA_VERSION
+from sot_graph.reconciler import Reconciler
 
 @pytest.fixture
 def temp_project(tmp_path):
@@ -28,7 +27,7 @@ def test_integrity_check_clean_and_populated(temp_project):
     assert diag["ok"] is True
     assert diag["quick_check"] == "ok"
     assert diag["journal_mode"] == "WAL"
-    assert diag["schema_version"] == 4
+    assert diag["schema_version"] == SCHEMA_VERSION
     assert diag["stats"]["paths"] == 0
     assert diag["stats"]["nodes"] == 0
     assert diag["errors"] == []

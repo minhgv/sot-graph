@@ -486,6 +486,7 @@ def extract_js(path: Path) -> Dict[str, Any]:
         {"regex": r"(?:export\s+)?type\s+([a-zA-Z0-9_$]+)\s*=", "kind": "type", "prefix": "type"},
         {"regex": r"(?:export\s+)?enum\s+([a-zA-Z0-9_$]+)", "kind": "enum", "prefix": "enum"},
         {"regex": r"(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([a-zA-Z0-9_$]+)\s*(?:<[^>]*>)?\s*\(", "kind": "function", "prefix": "function"},
+        {"regex": r"(?:(?:public|private|protected|static|override|async)\s+)+([a-zA-Z0-9_$]+)\s*(?:<[^>]*>)?\s*\(", "kind": "function", "prefix": "method"},
         {"regex": r"(?:export\s+)?(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?(?:<[^>]*>)?\s*(?:\([^)]*\)|[a-zA-Z0-9_$]+)(?:\s*:\s*[^=>]+)?\s*=>", "kind": "function", "prefix": "arrow_func"},
         {"regex": r"import\s+.*?from\s+['\"]([^'\"]+)['\"]", "kind": "import", "prefix": "import"},
     ]

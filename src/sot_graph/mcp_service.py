@@ -160,6 +160,50 @@ class McpService:
         if len(raw) <= self.limits.body_bytes:
             return text
         return raw[: self.limits.body_bytes].decode("utf-8", errors="ignore")
+    def _providers(self, conn: sqlite3.Connection) -> List[Dict[str, str]]:
+        try:
+            has_runs = bool(conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='provider_runs'"
+            ).fetchone()[0])
+            if has_runs:
+                rows = conn.execute(
+                    "SELECT DISTINCT provider_name, provider_version, capability FROM provider_runs"
+                ).fetchall()
+                if rows:
+                    return [
+                        {
+                            "name": r[0],
+                            "provider_name": r[0],
+                            "version": r[1] or "unknown",
+                            "capability": r[2] or "UNKNOWN",
+                        }
+                        for r in rows
+                    ]
+        except Exception:
+            pass
+        default_name = "tree-sitter-ast"
+        default_ver = "unknown"
+        try:
+            import importlib.metadata
+            default_ver = importlib.metadata.version("tree_sitter")
+        except Exception:
+            try:
+                import tree_sitter
+                import sys
+                default_ver = getattr(tree_sitter, "__version__", None) or f"{sys.version_info.major}.{sys.version_info.minor}"
+            except Exception:
+                import sys
+                default_name = "core-ast"
+                default_ver = f"python-{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        return [
+            {
+                "name": default_name,
+                "provider_name": default_name,
+                "version": default_ver,
+                "capability": "AST_HEURISTIC_PARSER",
+            }
+        ]
+
 
     def _fits_response(self, value: Any) -> Any:
         # Keep the API JSON-ready while enforcing a hard response ceiling.  A
@@ -219,7 +263,15 @@ class McpService:
                     tokens.add(f'"{part_strip}"*')
                     tokens_l.append(part_strip.lower())
         if not tokens:
-            return {"query": query, "results": [], "returned": 0, "stale": 0}
+            def empty_op(conn: sqlite3.Connection) -> Dict[str, Any]:
+                return {
+                    "query": query,
+                    "results": [],
+                    "returned": 0,
+                    "stale": 0,
+                    "providers": self._providers(conn),
+                }
+            return self._run(empty_op)
         expr = " OR ".join(sorted(tokens))
 
         def op(conn: sqlite3.Connection) -> Dict[str, Any]:
@@ -275,8 +327,15 @@ class McpService:
             for item in out:
                 item.pop("_bucket", None)
             stale = sum(item["verdict"] == "STALE" for item in out)
-            return self._fits_response({"query": query, "results": out[:limit], "returned": min(len(out), limit), "stale": stale})
+            return self._fits_response({
+                "query": query,
+                "results": out[:limit],
+                "returned": min(len(out), limit),
+                "stale": stale,
+                "providers": self._providers(conn),
+            })
         return self._run(op)
+
     def explore(self, node_id: str, *, depth: int = 1, limit: int = 100) -> Dict[str, Any]:
         if not isinstance(node_id, str) or not node_id.strip():
             raise McpServiceError("invalid_argument", "node_id must not be empty")
@@ -335,9 +394,12 @@ class McpService:
             hop2_count = sum(1 for r in relations if r.get("hop", 0) > 1)
             return self._fits_response({
                 "node": node,
+                "target": node,
                 "relations": relations,
+                "relations_count": len(relations),
                 "hop_summary": {"1_hop_direct": hop1_count, "transitive_hops": hop2_count},
                 "truncated": len(relations) >= limit,
+                "providers": self._providers(conn),
             })
         return self._run(op)
 
@@ -392,6 +454,7 @@ class McpService:
                 "risk": risk,
                 "next_steps": data.get("next_steps", []),
                 "truncated": len(data["callers"]) > limit or len(data["risk"]) > limit,
+                "providers": self._providers(conn),
             })
         return self._run(op)
 
@@ -421,6 +484,7 @@ class McpService:
                 "derived": [_rel(e) for e in data["derived"]],
                 "pending_bases": [_pen(e) for e in data["pending_bases"]],
                 "pending_derived": [_pen(e) for e in data["pending_derived"]],
+                "providers": self._providers(conn),
             })
         return self._run(op)
 
@@ -446,6 +510,7 @@ class McpService:
                 "files": len(result["files"]),
                 "focus": result["focus"],
                 "truncated": result["truncated"],
+                "providers": self._providers(conn),
             })
         return self._run(op)
 
@@ -474,7 +539,7 @@ class McpService:
                 "keywords": (row["keywords"] or "").split(),
                 "updated_at": row["updated_at"],
             } for row in conn.execute(sql, params).fetchall()]
-            return self._fits_response({"notes": out, "returned": len(out)})
+            return self._fits_response({"notes": out, "returned": len(out), "providers": self._providers(conn)})
         return self._run(op)
 
     def graph_generation(self) -> Dict[str, Any]:
@@ -483,9 +548,8 @@ class McpService:
             row = conn.execute(
                 "SELECT COALESCE(MAX(generation), 0), COUNT(*) FROM file_journal"
             ).fetchone()
-            return {"generation": row[0], "paths": row[1]}
+            return {"generation": row[0], "paths": row[1], "providers": self._providers(conn)}
         return self._run(op)
-
     def _node_dict(self, row: Mapping[str, Any]) -> Dict[str, Any]:
         return {"id": row["id"], "path": self._relative_path(row["path"]), "kind": row["kind"], "symbol": row["symbol"], "label": row["label"], "body": self._body(row["body"]), "keywords": row["keywords"], "line": row["line_start"]}
 
@@ -498,7 +562,9 @@ class McpService:
             row = conn.execute("SELECT id,path,kind,symbol,label,body,keywords,line_start FROM graph_nodes WHERE id=?", (node_id,)).fetchone()
             if row is None:
                 raise McpServiceError("not_found", "node was not found")
-            return self._fits_response(self._node_dict(row))
+            res = self._node_dict(row)
+            res["providers"] = self._providers(conn)
+            return self._fits_response(res)
         return self._run(op)
 
     def verify_drift(self, *, deep: bool = False, limit: int = 100) -> Dict[str, Any]:
@@ -529,15 +595,16 @@ class McpService:
                     drift.append({"path": rel, "why": "mtime_size_mismatch"})
                 if len(drift) >= limit:
                     break
-            return self._fits_response({"deep": bool(deep), "drift": drift, "truncated": len(rows) > limit})
+            return self._fits_response({"deep": bool(deep), "drift": drift, "truncated": len(rows) > limit, "providers": self._providers(conn)})
         return self._run(op)
 
     def stats(self) -> Dict[str, Any]:
         def op(conn: sqlite3.Connection) -> Dict[str, Any]:
             counts = {"paths": "file_journal", "nodes": "graph_nodes", "edges": "graph_edges", "pending": "pending_edges"}
-            return {key: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]) for key, table in counts.items()}
+            res = {key: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]) for key, table in counts.items()}
+            res["providers"] = self._providers(conn)
+            return res
         return self._run(op)
-
     def get_architecture_report(
         self,
         *,
@@ -610,6 +677,7 @@ class McpService:
                 "communities": comms_summary,
                 "god_nodes": gods_summary,
                 "surprising_connections": surprises,
+                "providers": self._providers(conn),
             })
         return self._run(op)
 
@@ -637,6 +705,7 @@ class McpService:
                 "modularity": res.modularity,
                 "community_count": len(comm_list),
                 "communities": comm_list,
+                "providers": self._providers(conn),
             })
         return self._run(op)
     def get_architecture_bundle(
@@ -667,6 +736,7 @@ class McpService:
                     "total_edges": len(bundler.graph.edges),
                     "modularity": bundler.analysis.metrics.modularity,
                 },
+                "providers": self._providers(conn),
             })
         return self._run(op)
 
@@ -694,12 +764,14 @@ class McpService:
                     "code": exc.code,
                     "error": str(exc),
                     "candidates": exc.candidates,
+                    "providers": self._providers(conn),
                 }
             return self._fits_response({
                 "ok": True,
                 "status": "success",
                 "yaml": render_yaml(bundle),
                 "limits": bundle["limits"],
+                "providers": self._providers(conn),
             })
         return self._run(op)
 
@@ -720,6 +792,7 @@ class McpService:
                 "status": "success",
                 "target": target,
                 "depth": depth,
+                "providers": self._providers(conn),
                 **res,
             })
         return self._run(op)
@@ -738,6 +811,7 @@ class McpService:
                 "ok": True,
                 "status": "success",
                 "component": component,
+                "providers": self._providers(conn),
                 **res,
             })
         return self._run(op)
@@ -756,6 +830,7 @@ class McpService:
                 "ok": True,
                 "status": "success",
                 "service": service,
+                "providers": self._providers(conn),
                 **res,
             })
         return self._run(op)
@@ -779,6 +854,7 @@ class McpService:
                 "ok": True,
                 "status": "success",
                 "module": module or "all",
+                "providers": self._providers(conn),
                 **res,
             })
         return self._run(op)
@@ -797,6 +873,7 @@ class McpService:
                 "ok": True,
                 "status": "success",
                 "method": method,
+                "providers": self._providers(conn),
                 **res,
             })
         return self._run(op)
@@ -822,6 +899,7 @@ class McpService:
                 "ok": True,
                 "status": "success",
                 "module": module or "all",
+                "providers": self._providers(conn),
                 **res,
             })
         return self._run(op)

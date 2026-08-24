@@ -16,9 +16,8 @@ import sqlite3
 from sot_graph.db import CleanPlan, Database
 from sot_graph.locking import LockBusy
 from sot_graph.reconciler import Reconciler
+from sot_graph.envelope import wrap_envelope
 from sot_graph.verifier import TrustVerifier, tokenize
-
-
 def _maintenance_json(payload: dict) -> None:
     """Emit machine-readable maintenance output without terminal decoration."""
     print(json.dumps(payload, sort_keys=True))
@@ -151,9 +150,8 @@ def cmd_search(args: argparse.Namespace, db: Database, root: str) -> int:
         candidates = res["results"]
         mode = res["mode"]
     else:
-        candidates = db.search_fts(args.query, limit=args.limit, scope=args.scope)
+        candidates = db.search_fts(args.query, limit=args.limit, scope=getattr(args, "scope", None))
         mode = "bm25"
-
     verified = []
     has_stale = False
     jit_enabled = getattr(args, "jit", True)
@@ -189,9 +187,9 @@ def cmd_search(args: argparse.Namespace, db: Database, root: str) -> int:
     final_list = verified[:args.limit]
 
     if args.json:
-        print(json.dumps({"query": args.query, "results": final_list}, indent=2))
+        envelope = wrap_envelope({"query": args.query, "results": final_list}, db=db, project_root=root)
+        print(json.dumps(envelope, indent=2))
         return 0
-
     mode_note = " [hybrid: bm25+vector]" if hybrid and mode == "hybrid" else ""
     print(f"\n🔍 Knowledge Search: \"{args.query}\" (Found: {len(final_list)} verified hits){mode_note}")
     print("=" * 80)
@@ -268,7 +266,8 @@ def cmd_explore(args: argparse.Namespace, db: Database) -> int:
             "hop_summary": hop_summary,
             "relations": relations,
         }
-        print(json.dumps(payload, indent=2))
+        envelope = wrap_envelope(payload, db=db)
+        print(json.dumps(envelope, indent=2))
         return 0
 
     print(f"\n🌐 Graph Walk: [{label}] ({kind}) @ {path}:{line or 1}")
@@ -332,7 +331,8 @@ def cmd_usages(args: argparse.Namespace, db: Database) -> int:
     unresolved_count = data.get("unresolved_count", len(data.get("risk", [])))
 
     if getattr(args, "json", False):
-        print(json.dumps(data, indent=2))
+        envelope = wrap_envelope(data, db=db)
+        print(json.dumps(envelope, indent=2))
         return 0
 
     print(f"\n🔎 Usages of [{label}] ({kind}) — {total} site(s) across "
@@ -673,6 +673,17 @@ def cmd_pack(args: argparse.Namespace, db: Database, root: str) -> int:
         detail = f" candidates: {', '.join(exc.candidates)}" if exc.candidates else ""
         print(f"❌ pack failed [{exc.code}]: {exc}{detail}")
         return 2
+    if getattr(args, "json", False):
+        envelope = wrap_envelope(bundle, db=db, project_root=root)
+        payload_json = json.dumps(envelope, indent=2)
+        if args.output:
+            os.makedirs(os.path.dirname(os.path.abspath(args.output)) or ".", exist_ok=True)
+            with open(args.output, "w", encoding="utf-8") as handle:
+                handle.write(payload_json)
+        else:
+            print(payload_json)
+        return 0
+
     payload = render_yaml(bundle)
     if args.output:
         os.makedirs(os.path.dirname(os.path.abspath(args.output)) or ".", exist_ok=True)
@@ -1169,6 +1180,39 @@ def cmd_export(args: argparse.Namespace, db: Database, root: str) -> int:
         print(f"❌ Unknown export format: {fmt}. Supported: graphrag, obsidian, graphml, scip")
         return 1
     return 0
+
+def cmd_import_scip(args: argparse.Namespace, db: Database, root: str) -> int:
+    from sot_graph.importer.scip import ScipImporter
+    index_path = args.index_file
+    if not os.path.isabs(index_path):
+        index_path = os.path.join(root, index_path)
+    if not os.path.isfile(index_path):
+        print(f"❌ SCIP index file not found: {index_path}", file=sys.stderr)
+        return 1
+    importer = ScipImporter(db, project_root=root)
+    try:
+        p_name = getattr(args, "provider", None) or getattr(args, "provider_name", None)
+        p_ver = getattr(args, "provider_version", None)
+        summary = importer.import_file(
+            index_path,
+            provider_name=p_name,
+            provider_version=p_ver,
+        )
+    except Exception as exc:
+        print(f"❌ Failed to import SCIP index: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json", False):
+        envelope = wrap_envelope(summary, db=db, project_root=root)
+        print(json.dumps(envelope, indent=2))
+    else:
+        print(f"🧭 SCIP index imported successfully:")
+        print(f"   Provider: {summary['provider_name']} (v{summary['provider_version']})")
+        print(f"   Run ID: {summary['run_id']}")
+        print(f"   Documents: {summary['documents_count']}")
+        print(f"   Occurrences: {summary['occurrences_count']} ({summary['definitions_count']} defs, {summary['references_count']} refs)")
+        print(f"   Relationships: {summary['relationships_count']}")
+        print(f"   Evidence Recorded: {summary['evidence_recorded']} in {summary['duration_ms']}ms")
+    return 0
 def cmd_setup(args: argparse.Namespace, root: str) -> int:
     from pathlib import Path
     from sot_graph.adapters.installer import install_harnesses, list_supported_harnesses
@@ -1384,6 +1428,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_pack.add_argument("--max-nodes", type=int, default=50, help="Node cap (default: 50)")
     p_pack.add_argument("--max-bytes", type=int, default=65536, help="Byte cap (default: 64KB)")
     p_pack.add_argument("--max-tokens", type=int, default=None, help="Hard token budget cap (default: None)")
+    p_pack.add_argument("--json", action="store_true", help="Output result as JSON envelope")
     p_watch = subparsers.add_parser(
         "watch", help="Watch filesystem and reconcile in real time (daemon & multi-project support)")
     p_watch.add_argument("--debounce-ms", type=int, default=200,
@@ -1407,6 +1452,12 @@ def build_parser() -> argparse.ArgumentParser:
     # trace
     p_trace = subparsers.add_parser("trace", help="Extract Full-Stack execution path, UI decisions, API binding, and Mermaid diagrams")
     p_trace.add_argument("target", help="Ticket ID, keyword, symbol, or endpoint to trace")
+    # import-scip
+    p_scip = subparsers.add_parser("import-scip", help="Import compiler-backed SCIP index into Multi-Provider Evidence Storage")
+    p_scip.add_argument("index_file", help="Path to .scip (protobuf) or .json index file")
+    p_scip.add_argument("--provider", default=None, help="Provider name override (e.g. scip-typescript, scip-python)")
+    p_scip.add_argument("--provider-version", default=None, help="Provider version override")
+    p_scip.add_argument("--json", action="store_true", help="Output result as JSON envelope")
     p_trace.add_argument("--depth", type=int, default=2, help="Trace exploration depth (default: 2)")
     p_trace.add_argument("-o", "--output", default=None, help="Write markdown output to file")
     p_trace.add_argument("--json", action="store_true", help="Output raw structured JSON")
@@ -1517,6 +1568,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return cmd_viz(args, db, root)
         elif args.command == "export":
             return cmd_export(args, db, root)
+        elif args.command == "import-scip":
+            return cmd_import_scip(args, db, root)
         elif args.command == "bundle":
             return cmd_bundle(args, db, root)
         elif args.command == "pack":

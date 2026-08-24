@@ -16,7 +16,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, 
 from urllib.parse import quote
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS file_journal (
@@ -139,12 +139,55 @@ CREATE TABLE IF NOT EXISTS related_features_index (
     key_files TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_rel_feat_module ON related_features_index(module_name);
+CREATE TABLE IF NOT EXISTS provider_runs (
+    id TEXT PRIMARY KEY,
+    provider_name TEXT NOT NULL,
+    provider_version TEXT,
+    capability TEXT NOT NULL,
+    snapshot_hash TEXT,
+    project_root TEXT,
+    position_encoding TEXT DEFAULT 'UTF-8',
+    arguments_json TEXT,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_provider_runs_prov ON provider_runs(provider_name);
+CREATE TABLE IF NOT EXISTS provider_evidence (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    provider_name TEXT,
+    file_path TEXT,
+    path TEXT NOT NULL,
+    symbol TEXT,
+    src_symbol TEXT NOT NULL,
+    target_symbol TEXT,
+    dst_symbol TEXT,
+    role TEXT,
+    relation TEXT NOT NULL,
+    line_start INTEGER,
+    line_end INTEGER,
+    col_start INTEGER,
+    col_end INTEGER,
+    syntax_kind TEXT,
+    documentation TEXT,
+    confidence REAL DEFAULT 1.0,
+    metadata_json TEXT,
+    recorded_at INTEGER,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(run_id) REFERENCES provider_runs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_p_evidence_run ON provider_evidence(run_id);
+CREATE INDEX IF NOT EXISTS idx_p_evidence_prov ON provider_evidence(provider_name);
+CREATE INDEX IF NOT EXISTS idx_p_evidence_path ON provider_evidence(path);
+CREATE INDEX IF NOT EXISTS idx_p_evidence_src ON provider_evidence(src_symbol);
+CREATE INDEX IF NOT EXISTS idx_p_evidence_dst ON provider_evidence(dst_symbol);
+CREATE INDEX IF NOT EXISTS idx_p_evidence_sym ON provider_evidence(symbol);
 """
-
 # Ordered drop list for the disposable-index migration: the filesystem is the
 # source of truth, so a legacy schema is dropped and rebuilt by the next
 # reconcile instead of being migrated in place.
 _DROP_ON_RESET = (
+    "DROP TABLE IF EXISTS provider_evidence",
+    "DROP TABLE IF EXISTS provider_runs",
     "DROP TABLE IF EXISTS related_features_index",
     "DROP TABLE IF EXISTS be_execution_steps",
     "DROP TABLE IF EXISTS api_cross_bindings",
@@ -157,7 +200,6 @@ _DROP_ON_RESET = (
     "DROP TABLE IF EXISTS graph_nodes",
     "DROP TABLE IF EXISTS file_journal",
 )
-
 @dataclass(frozen=True)
 class CleanPlan:
     mode: str
@@ -275,6 +317,58 @@ class Database:
                     finally:
                         if bck_conn is not None:
                             bck_conn.close()
+
+                    # Non-destructive upgrade from v4 to v5:
+                    if version == 4:
+                        with self.conn:
+                            self.conn.execute("""
+                                CREATE TABLE IF NOT EXISTS provider_runs (
+                                    id TEXT PRIMARY KEY,
+                                    provider_name TEXT NOT NULL,
+                                    provider_version TEXT,
+                                    capability TEXT NOT NULL,
+                                    snapshot_hash TEXT,
+                                    project_root TEXT,
+                                    position_encoding TEXT DEFAULT 'UTF-8',
+                                    arguments_json TEXT,
+                                    created_at INTEGER NOT NULL
+                                );
+                            """)
+                            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_provider_runs_prov ON provider_runs(provider_name);")
+                            self.conn.execute("""
+                                CREATE TABLE IF NOT EXISTS provider_evidence (
+                                    id TEXT PRIMARY KEY,
+                                    run_id TEXT NOT NULL,
+                                    provider_name TEXT,
+                                    file_path TEXT,
+                                    path TEXT NOT NULL,
+                                    symbol TEXT,
+                                    src_symbol TEXT NOT NULL,
+                                    target_symbol TEXT,
+                                    dst_symbol TEXT,
+                                    role TEXT,
+                                    relation TEXT NOT NULL,
+                                    line_start INTEGER,
+                                    line_end INTEGER,
+                                    col_start INTEGER,
+                                    col_end INTEGER,
+                                    syntax_kind TEXT,
+                                    documentation TEXT,
+                                    confidence REAL DEFAULT 1.0,
+                                    metadata_json TEXT,
+                                    recorded_at INTEGER NOT NULL,
+                                    created_at INTEGER NOT NULL,
+                                    FOREIGN KEY(run_id) REFERENCES provider_runs(id) ON DELETE CASCADE
+                                );
+                            """)
+                            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_run ON provider_evidence(run_id);")
+                            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_prov ON provider_evidence(provider_name);")
+                            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_path ON provider_evidence(path);")
+                            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_src ON provider_evidence(src_symbol);")
+                            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_dst ON provider_evidence(dst_symbol);")
+                            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_sym ON provider_evidence(symbol);")
+                            self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                        return
 
                     # Preserve user notes before resetting disposable index
                     notes: List[Tuple[Any, ...]] = []
@@ -1470,3 +1564,238 @@ class Database:
             "nodes": nodes,
             "created_at": row[5],
         }
+    def record_provider_run(
+        self,
+        provider_name: str,
+        provider_version: Optional[str] = None,
+        capability: str = "COMPILER_INDEXED_SYMBOLS",
+        snapshot_hash: Optional[str] = None,
+        project_root: Optional[str] = None,
+        position_encoding: str = "UTF-8",
+        arguments_json: Optional[str] = None,
+        run_id: Optional[str] = None,
+    ) -> str:
+        import uuid
+        rid = run_id or f"run_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+        now = int(time.time())
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO provider_runs "
+                "(id, provider_name, provider_version, capability, snapshot_hash, project_root, position_encoding, arguments_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    rid,
+                    provider_name,
+                    provider_version,
+                    capability,
+                    snapshot_hash,
+                    project_root,
+                    position_encoding,
+                    arguments_json,
+                    now,
+                ),
+            )
+        return rid
+
+    def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a single node by its unique id."""
+        row = self.conn.execute(
+            "SELECT id, path, kind, symbol, fqn, signature, label, body, keywords, "
+            "line_start, line_end, col_start, col_end, updated_at "
+            "FROM graph_nodes WHERE id = ?", (node_id,)
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0], "path": row[1], "kind": row[2], "symbol": row[3],
+            "fqn": row[4], "signature": row[5], "label": row[6], "body": row[7],
+            "keywords": row[8], "line_start": row[9], "line_end": row[10],
+            "col_start": row[11], "col_end": row[12], "updated_at": row[13]
+        }
+
+    def record_provider_evidence(
+        self,
+        run_id: str,
+        evidence_items: Sequence[Dict[str, Any]],
+    ) -> int:
+        """Batch insert provider evidence items."""
+        if not evidence_items:
+            return 0
+        now = int(time.time())
+        import uuid
+        # Lookup provider_name from run_id if available
+        p_row = self.conn.execute("SELECT provider_name FROM provider_runs WHERE id = ?", (run_id,)).fetchone()
+        p_name = p_row[0] if p_row else "unknown"
+
+        rows = []
+        for item in evidence_items:
+            eid = item.get("id") or f"ev_{uuid.uuid4().hex}"
+            path = item.get("path") or item.get("file_path", "")
+            src_symbol = item.get("src_symbol") or item.get("symbol", "")
+            dst_symbol = item.get("dst_symbol") or item.get("target_symbol")
+            relation = item.get("relation") or item.get("role", "reference")
+            line_start = item.get("line_start")
+            line_end = item.get("line_end")
+            col_start = item.get("col_start")
+            col_end = item.get("col_end")
+            syntax_kind = item.get("syntax_kind")
+            documentation = item.get("documentation")
+            confidence = float(item.get("confidence", 1.0))
+            prov_name = item.get("provider_name") or p_name
+            meta = item.get("metadata_json")
+            if meta is not None and not isinstance(meta, str):
+                meta = json.dumps(meta)
+            rows.append((
+                eid, run_id, prov_name, path, path, src_symbol, src_symbol,
+                dst_symbol, dst_symbol, relation, relation,
+                line_start, line_end, col_start, col_end,
+                syntax_kind, documentation, confidence, meta, now, now
+            ))
+        with self.conn:
+            self.conn.executemany(
+                "INSERT OR REPLACE INTO provider_evidence "
+                "(id, run_id, provider_name, file_path, path, symbol, src_symbol, target_symbol, dst_symbol, role, relation, line_start, line_end, col_start, col_end, syntax_kind, documentation, confidence, metadata_json, recorded_at, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+        return len(rows)
+
+    insert_provider_evidence = record_provider_evidence
+
+    def get_provider_runs(self) -> List[Dict[str, Any]]:
+        """Retrieve all recorded provider runs."""
+        rows = self.conn.execute(
+            "SELECT id, provider_name, provider_version, capability, snapshot_hash, "
+            "project_root, position_encoding, arguments_json, created_at "
+            "FROM provider_runs ORDER BY created_at DESC"
+        ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "provider_name": r[1],
+                "provider_version": r[2],
+                "capability": r[3],
+                "snapshot_hash": r[4],
+                "project_root": r[5],
+                "position_encoding": r[6],
+                "arguments_json": r[7],
+                "created_at": r[8],
+            }
+            for r in rows
+        ]
+
+    def get_active_providers(self) -> List[Dict[str, str]]:
+        """List distinct active providers from provider_runs or default heuristic."""
+        try:
+            rows = self.conn.execute(
+                "SELECT DISTINCT provider_name, provider_version, capability FROM provider_runs"
+            ).fetchall()
+            if rows:
+                return [
+                    {
+                        "name": r[0],
+                        "version": r[1] or "unknown",
+                        "capability": r[2] or "UNKNOWN",
+                    }
+                    for r in rows
+                ]
+        except Exception:
+            pass
+        default_name = "tree-sitter-ast"
+        default_ver = "unknown"
+        try:
+            import importlib.metadata
+            default_ver = importlib.metadata.version("tree_sitter")
+        except Exception:
+            try:
+                import tree_sitter
+                default_ver = getattr(tree_sitter, "__version__", None) or f"{sys.version_info.major}.{sys.version_info.minor}"
+            except Exception:
+                default_name = "core-ast"
+                default_ver = f"python-{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        return [
+            {
+                "name": default_name,
+                "version": default_ver,
+                "capability": "AST_HEURISTIC_PARSER",
+            }
+        ]
+
+    def get_provider_evidence(
+        self,
+        run_id: Optional[str] = None,
+        provider_name: Optional[str] = None,
+        path: Optional[str] = None,
+        file_path: Optional[str] = None,
+        symbol: Optional[str] = None,
+        role: Optional[str] = None,
+        limit: int = 1000,
+    ) -> List[Dict[str, Any]]:
+        """Query recorded provider evidence with optional filters."""
+        query = (
+            "SELECT id, run_id, provider_name, file_path, path, symbol, src_symbol, "
+            "target_symbol, dst_symbol, role, relation, line_start, line_end, "
+            "col_start, col_end, syntax_kind, documentation, confidence, metadata_json, "
+            "recorded_at, created_at "
+            "FROM provider_evidence WHERE 1=1"
+        )
+        params: List[Any] = []
+        if run_id:
+            query += " AND run_id = ?"
+            params.append(run_id)
+        if provider_name:
+            query += " AND (provider_name = ? OR run_id IN (SELECT id FROM provider_runs WHERE provider_name = ?))"
+            params.extend([provider_name, provider_name])
+        target_path = path or file_path
+        if target_path:
+            query += " AND (path = ? OR file_path = ?)"
+            params.extend([target_path, target_path])
+        if symbol:
+            query += " AND (src_symbol = ? OR dst_symbol = ? OR symbol = ? OR target_symbol = ?)"
+            params.extend([symbol, symbol, symbol, symbol])
+        if role:
+            query += " AND (role = ? OR relation = ?)"
+            params.extend([role, role])
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+
+        rows = self.conn.execute(query, tuple(params)).fetchall()
+        return [
+            {
+                "id": r[0],
+                "run_id": r[1],
+                "provider_name": r[2],
+                "file_path": r[3] or r[4],
+                "path": r[4] or r[3],
+                "symbol": r[5] or r[6],
+                "src_symbol": r[6] or r[5],
+                "target_symbol": r[7] or r[8],
+                "dst_symbol": r[8] or r[7],
+                "role": r[9] or r[10],
+                "relation": r[10] or r[9],
+                "line_start": r[11],
+                "line_end": r[12],
+                "col_start": r[13],
+                "col_end": r[14],
+                "syntax_kind": r[15],
+                "documentation": r[16],
+                "confidence": r[17],
+                "metadata_json": r[18],
+                "recorded_at": r[19] or r[20],
+                "created_at": r[20] or r[19],
+            }
+            for r in rows
+        ]
+
+    def get_symbol_evidence(self, symbol: str) -> List[Dict[str, Any]]:
+        """Retrieve all recorded provider evidence for a specific symbol."""
+        return self.get_provider_evidence(symbol=symbol)
+    def purge_provider_run(self, run_id: str) -> int:
+        """Purge a provider run and cascade delete all associated evidence."""
+        with self.conn:
+            ev_count = self.conn.execute(
+                "SELECT COUNT(*) FROM provider_evidence WHERE run_id = ?", (run_id,)
+            ).fetchone()[0]
+            self.conn.execute("DELETE FROM provider_evidence WHERE run_id = ?", (run_id,))
+            self.conn.execute("DELETE FROM provider_runs WHERE id = ?", (run_id,))
+        return int(ev_count)
