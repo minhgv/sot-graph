@@ -27,6 +27,8 @@ replacement for verifying against disk.
 - **Verifying disk consistency**: Audit phantom anchors and drift (`sot verify` / `sot_verify`).
 - **Recording knowledge**: Record non-obvious architecture choices or critical bug solutions (`sot insert` / `sot_insert`).
 - **Architecture analysis & reports**: Extract 5 fact bundle files (`sot bundle` / `sot_bundle`), generate visual graphs, community clustering, or health reports (`sot cluster`, `sot report`, `sot viz`, `sot export`).
+- **Git diff & revision blast radius**: Trace upstream callers, breaking API impacts, and affected tests across commits or working tree changes (`sot diff-impact` / `sot_diff_impact`).
+- **Git commit risk analysis**: Inspect commit history with automated risk scoring and impacted symbol tracking (`sot log` / `sot_git_history`).
 - **Database maintenance**: Purge stale records and vacuum freelists (`sot clean`, `sot vacuum`, `sot doctor`).
 
 ## Trust Verdicts
@@ -66,6 +68,8 @@ replacement for verifying against disk.
 | **Feature Inventory** | `sot solution inventory [module] [-o <file>]` | `sot_solution_inventory` |
 | **Micro-steps Decompose** | `sot solution steps "<method>" [--format table/json]` | `sot_solution_steps` |
 | **Solution Bundle** | `sot solution bundle [module] [-o <file>]` | `sot_solution_bundle` |
+| **Diff Impact** | `sot diff-impact [target] [--staged] [--depth 2]` | `sot_diff_impact` |
+| **Commit History** | `sot log [-n 10] [--author <name>] [--since <date>]` | `sot_git_history` |
 | **Embed Index** | `sot embed [--limit 5000]` | CLI |
 | **File Watcher** | `sot watch [--debounce-ms 200]` | CLI (Daemon) |
 | **Harness Setup** | `sot setup [--harness <name>]` | CLI |
@@ -92,7 +96,8 @@ Before modifying, refactoring, or renaming core functions/classes:
 2. Run `sot usages "<symbol>"` or `sot_usages` to locate all calling sites.
 3. For interfaces or abstract classes, run `sot implementations "<symbol>"` or `sot_implementations`.
 4. For multi-file symbol renames, run `sot rename "<symbol>" --to "<new_name>"` to review staged changes.
-
+5. Before submitting PRs or finalizing diffs, run `sot diff-impact` or `sot_diff_impact` to analyze blast radius, upstream inward callers, API contract impacts, and affected tests.
+6. Inspect commit risk history via `sot log` or `sot_git_history`.
 ### 4. Context Isolation & Subgraph Packaging Protocol
 When delegating code context to subagents or prompt registers:
 1. Run `sot pack "<symbol>" --depth 2 -o .sot/bundle/context.yaml` to extract a token-efficient k-hop subgraph.
@@ -216,6 +221,33 @@ sot bundle $ARGUMENTS --out .sot/bundle/
 ```
 """
 
+ZCODE_COMMAND_DIFF_IMPACT = """---
+description: Analyze git diff blast radius, upstream inward callers, API contract impacts, and affected tests
+---
+
+Run SOT-Graph diff impact analysis across git revisions or working tree:
+
+```bash
+sot diff-impact $ARGUMENTS
+```
+
+- Target can be a revision (e.g. `HEAD~1`, `main...HEAD`, commit hash).
+- Useful flags: `--depth <n>` (default 2), `--staged`, `--working-tree`, `--auto-reconcile`.
+"""
+
+ZCODE_COMMAND_LOG = """---
+description: Inspect git commit history with automated risk scoring and impacted symbols
+---
+
+Run SOT-Graph commit history inspection:
+
+```bash
+sot log $ARGUMENTS
+```
+
+- Useful flags: `-n <limit>` (default 10), `--author <name>`, `--since <date>`, `--no-impact`.
+"""
+
 ZCODE_COMMANDS = {
     "sot-search.md": ZCODE_COMMAND_SEARCH,
     "sot-map.md": ZCODE_COMMAND_MAP,
@@ -224,6 +256,8 @@ ZCODE_COMMANDS = {
     "sot-rename.md": ZCODE_COMMAND_RENAME,
     "sot-pack.md": ZCODE_COMMAND_PACK,
     "sot-bundle.md": ZCODE_COMMAND_BUNDLE,
+    "sot-diff-impact.md": ZCODE_COMMAND_DIFF_IMPACT,
+    "sot-log.md": ZCODE_COMMAND_LOG,
 }
 
 

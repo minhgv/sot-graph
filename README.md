@@ -24,7 +24,7 @@ It replaces slow, blind, and hallucination-prone text grepping with an increment
 1. **Zero Hallucinated Anchors**: The filesystem is the single source of truth. Every symbol returned is physically verified on disk with confidence scores and Trust Verdicts (`[STRONG]`, `[WEAK]`, `[REBUILT]`).
 2. **Multi-Provider Provenance Ledger (Schema v5)**: Transparently records both fast AST Heuristics (`AST_HEURISTIC_PARSER`) and exact compiler-backed SCIP indices (`COMPILER_INDEXED_SYMBOLS`) in dedicated `provider_runs` and `provider_evidence` tables.
 3. **Token-Bounded Context Packaging (`sot pack`)**: Extracts exact target spans (L0) + 1-hop caller/callee contracts (L1) + 2-hop signature stubs (L2) within strict hard token budgets (`--tokens` / `--max-tokens`), preventing prompt bloat.
-4. **Architectural Blast Radius (`sot usages` / `sot explore`)**: Inbound and outbound dependency traversal identifying transitive callers and unresolved bare-name shadowing risk before refactoring.
+4. **Architectural Blast Radius (`sot usages` / `sot explore` / `sot diff-impact`)**: Inbound and outbound dependency traversal identifying transitive callers, breaking API contracts, and unresolved bare-name shadowing risk before refactoring or landing PRs.
 5. **Atomic Two-Phase Mutation Gateway**: All database mutations (`reconcile`, `batch-reconcile`, `insert`, `clean`, `import-scip`) execute inside write locks (`BEGIN IMMEDIATE` + write lock file) with automatic WAL backups and note preservation across schema migrations.
 
 ---
@@ -164,11 +164,26 @@ sot export --format graphrag -o graphrag_dataset.json
 sot export --format obsidian -o .sot/obsidian_vault
 ```
 
+### 7. Git Diff Blast Radius & Commit Risk Analysis
+```bash
+# Analyze blast radius and upstream caller impact for working tree changes
+sot diff-impact --working-tree
+
+# Analyze blast radius of staged changes against HEAD~1 with reverse call graph depth 2
+sot diff-impact HEAD~1 --depth 2 --staged
+
+# Auto-reconcile knowledge graph and output impact analysis in JSON
+sot diff-impact HEAD~1 --auto-reconcile --json
+
+# Inspect recent commit history with automated risk scoring and impacted symbols
+sot log -n 10 --author "developer"
+```
+
 ---
 
 ## Model Context Protocol (MCP) Server
 
-`sot-graph` exposes 17 structured MCP tools and resources over standard I/O for AI coding agents:
+`sot-graph` exposes 19 structured MCP tools and resources over standard I/O for AI coding agents:
 
 ```bash
 # Start MCP server over stdio
@@ -194,6 +209,8 @@ sot mcp
 | `sot_ui_tree` | Frontend UI decision tree, validation rules, button triggers, modals | `component` (str) | — |
 | `sot_backend_flow` | Backend service micro-steps, multi-datasources, exception branches | `service` (str) | — |
 | `sot_solution_steps` | Stage 2 Micro-step decomposition (4-column table) for manpower effort | `method` (str) | — |
+| `sot_diff_impact` | Analyze git diff blast radius, inward callers, API contract impacts, and affected tests | — | `target` (str, default 'HEAD~1'), `depth` (int, default 2), `staged` (bool), `working_tree` (bool), `auto_reconcile` (bool), `format` ('markdown'\|'json') |
+| `sot_git_history` | Inspect git commit history with automated risk scoring and impacted symbol detection | — | `limit` (int, default 10), `author` (str), `since` (str), `with_impact` (bool, default true), `format` ('markdown'\|'json') |
 
 #### Workspace Artifact Generator Tools (Confined to Project Root)
 | MCP Tool | Description | Required Parameters | Optional Parameters |

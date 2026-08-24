@@ -22,6 +22,8 @@ When to use:
 - **Verifying disk consistency**: Audit phantom anchors and drift (`sot verify` / `sot_verify_drift`).
 - **Recording knowledge**: Record non-obvious architecture choices or critical bug solutions (`sot insert` / `sot_notes`).
 - **Architecture analysis & reports**: Extract 5 fact bundle files (`sot bundle` / `sot_bundle`), generate visual graphs, community clustering, or health reports (`sot cluster`, `sot report`, `sot viz`, `sot export`).
+- **Git diff & revision blast radius**: Trace upstream callers, breaking API impacts, and affected tests across commits or working tree changes (`sot diff-impact` / `sot_diff_impact`).
+- **Git commit risk analysis**: Inspect commit history with automated risk scoring and impacted symbol tracking (`sot log` / `sot_git_history`).
 - **Database maintenance**: Purge stale records and vacuum freelists (`sot clean`, `sot vacuum`, `sot doctor`).
 
 ## Trust Verdicts
@@ -59,6 +61,8 @@ When to use:
 | **Feature Inventory** | `sot solution inventory [module] [-o <file>]` | `xd://sot_solution_inventory` |
 | **Micro-steps Decompose** | `sot solution steps "<method>" [--format table/json]` | `xd://sot_solution_steps` |
 | **Solution Bundle** | `sot solution bundle [module] [-o <file>]` | `xd://sot_solution_bundle` |
+| **Diff Impact** | `sot diff-impact [target] [--staged] [--depth 2]` | `xd://sot_diff_impact` |
+| **Commit History** | `sot log [-n 10] [--author <name>] [--since <date>]` | `xd://sot_git_history` |
 | **Embed Index** | `sot embed [--limit 5000]` | CLI |
 | **File Watcher** | `sot watch [--debounce-ms 200]` | CLI (Daemon) |
 | **Harness Setup** | `sot setup [--harness <name>]` | CLI |
@@ -85,7 +89,8 @@ Before modifying, refactoring, or renaming core functions/classes:
 1. Run `sot explore "<symbol>"` or `sot usages "<symbol>"` to inspect both Outward Calls and Incoming References.
 2. When working with interfaces or abstract classes, run `sot implementations "<interface>"` to identify all concrete implementations.
 3. Ensure you understand all upstream callers before changing signatures.
-
+4. Before finalizing changes or submitting PRs, run `sot diff-impact` (or `xd://sot_diff_impact`) to analyze blast radius, upstream inward callers, API contract impacts, and affected tests.
+5. Inspect commit risk history via `sot log` (or `xd://sot_git_history`).
 ## 4. Context Isolation & Subgraph Packaging Protocol
 - When modifying multi-module features, avoid reading dozens of raw source files sequentially.
 - Run `sot pack "<symbol>" --depth 2` to generate a token-efficient YAML ContextBundle for subagents.

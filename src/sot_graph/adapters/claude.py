@@ -29,7 +29,8 @@ Before modifying, refactoring, or renaming core functions/classes:
 2. Run `sot usages "<symbol>"` or `sot_usages` to locate all calling sites.
 3. For interfaces or abstract classes, run `sot implementations "<symbol>"` or `sot_implementations`.
 4. For multi-file symbol renames, run `sot rename "<symbol>" --to "<new_name>"` to review staged changes.
-
+5. Before submitting PRs or finalizing diffs, run `sot diff-impact` or `sot_diff_impact` to analyze blast radius, upstream inward callers, API contract impacts, and affected tests.
+6. Inspect commit risk history via `sot log` or `sot_git_history`.
 ### 4. Context Isolation & Subgraph Packaging Protocol
 When delegating code context to subagents or prompt registers:
 1. Run `sot pack "<symbol>" --depth 2 -o .sot/bundle/context.yaml` to extract a token-efficient k-hop subgraph.
@@ -87,6 +88,8 @@ When requested to review or synthesize architecture documentation:
 | **Feature Inventory** | `sot solution inventory [module] [-o <file>]` | `sot_solution_inventory` |
 | **Micro-steps Decompose** | `sot solution steps "<method>" [--format table/json]` | `sot_solution_steps` |
 | **Solution Bundle** | `sot solution bundle [module] [-o <file>]` | `sot_solution_bundle` |
+| **Diff Impact** | `sot diff-impact [target] [--staged] [--depth 2]` | `sot_diff_impact` |
+| **Commit History** | `sot log [-n 10] [--author <name>] [--since <date>]` | `sot_git_history` |
 """
 
 

@@ -20,6 +20,8 @@
  * - sot_viz: Interactive D3.js Knowledge Graph Visualizer Generation
  * - sot_export: Multi-format Graph Export (GraphRAG JSON, Obsidian, GraphML, SCIP)
  * - sot_bundle: Architecture Fact Bundler for LLM Report Synthesis
+ * - sot_diff_impact: Git Diff Blast Radius & API Impact Analysis
+ * - sot_git_history: Git Commit History Risk Scoring & Symbol Detection
  */
 import { execFile } from "node:child_process";
 import { join } from "node:path";
@@ -672,6 +674,69 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
       const args = ["solution", "bundle"];
       if (params.module) args.push(String(params.module));
       if (params.output) args.push("-o", String(params.output));
+      if (params.json) args.push("--json");
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
+  // 25. sot_diff_impact: Git Diff Blast Radius & Impact Analysis
+  pi.registerTool({
+    name: "sot_diff_impact",
+    label: "SOT Diff Impact Analysis",
+    description:
+      "Analyze git diff blast radius, upstream inward callers, API contract impacts, and affected tests.",
+    promptSnippet: "Analyze blast radius and upstream caller impact for git diff/revisions",
+    parameters: {
+      type: "object",
+      properties: {
+        target: { type: "string", description: "Git revision target (e.g. 'HEAD~1', 'main...HEAD', commit hash; default: 'HEAD~1')" },
+        depth: { type: "number", description: "Reverse call graph traversal depth (default: 2)" },
+        staged: { type: "boolean", description: "Analyze staged changes (--cached)" },
+        workingTree: { type: "boolean", description: "Analyze unstaged working tree changes" },
+        autoReconcile: { type: "boolean", description: "Reconcile knowledge graph before analyzing impact" },
+        format: { type: "string", description: "Output format: 'markdown' or 'json'" },
+        json: { type: "boolean", description: "Output raw JSON" },
+      },
+    },
+    async execute(_id, params) {
+      const args = ["diff-impact"];
+      if (params.target) args.push(String(params.target));
+      if (params.depth) args.push("--depth", String(params.depth));
+      if (params.staged) args.push("--staged");
+      if (params.workingTree) args.push("--working-tree");
+      if (params.autoReconcile) args.push("--auto-reconcile");
+      if (params.json || params.format === "json") args.push("--json");
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
+  // 26. sot_git_history: Git Commit History Risk Scoring & Impacted Symbols
+  pi.registerTool({
+    name: "sot_git_history",
+    label: "SOT Git History & Risk Scoring",
+    description:
+      "Inspect git commit history with automated risk scoring and impacted symbol detection.",
+    promptSnippet: "Inspect git commit history with risk scoring and symbol impact",
+    parameters: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Maximum commits to evaluate (default: 10)" },
+        author: { type: "string", description: "Filter commits by author" },
+        since: { type: "string", description: "Filter commits since date/time (e.g. '2026-01-01' or '2.weeks')" },
+        impact: { type: "boolean", description: "Enable or disable knowledge graph symbol impact analysis (default: true)" },
+        json: { type: "boolean", description: "Output raw JSON format" },
+      },
+    },
+    async execute(_id, params) {
+      const args = ["log"];
+      if (params.limit) args.push("-n", String(params.limit));
+      if (params.author) args.push("--author", String(params.author));
+      if (params.since) args.push("--since", String(params.since));
+      if (params.impact === false) args.push("--no-impact");
       if (params.json) args.push("--json");
 
       const { ok, output } = await runCmd(getSotBin(), args);

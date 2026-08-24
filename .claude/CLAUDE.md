@@ -9,3 +9,5 @@
 - **Graph-First Symbol & God Node Auditing**: Always query `sot explore` or Fact Bundles before inspecting code. Do NOT run blind `glob`/`grep` across the repository when `sot.db` exists.
 - **Token-Bounded Subgraph Packaging**: When delegating work to subagents, use `sot pack "<symbol>" --tokens 1500 --json` (or `xd://sot_pack`) to produce live-verified context bundles without token waste.
 - **Drift Synchronization & Note Preservation**: After refactoring, renaming, or deleting files, run `sot reconcile` for atomic content-hash rehoming. Run `sot doctor` to audit schema v5 health. User notes (`kind == 'note'`) are strictly preserved across index resets.
+- **Diff & Revision Impact Analysis**: Before finalizing changes or opening pull requests, run `sot diff-impact` (or `sot_diff_impact` / `xd://sot_diff_impact`) to evaluate blast radius, upstream inward callers, API contract impacts, and affected test suites.
+- **Git Commit History & Risk Scoring**: Inspect commit risk and impacted symbols via `sot log` (or `sot_git_history` / `xd://sot_git_history`).

@@ -115,7 +115,7 @@ class TestHarnessAdapters(unittest.TestCase):
             ws_skill = self.root / ".zcode" / "skills" / "sot-graph" / "SKILL.md"
             self.assertTrue(ws_cfg.exists())
             self.assertTrue(ws_skill.exists())
-            for cmd in ("sot-search.md", "sot-map.md", "sot-explore.md", "sot-usages.md", "sot-rename.md", "sot-pack.md", "sot-bundle.md"):
+            for cmd in ("sot-search.md", "sot-map.md", "sot-explore.md", "sot-usages.md", "sot-rename.md", "sot-pack.md", "sot-bundle.md", "sot-diff-impact.md", "sot-log.md"):
                 self.assertTrue((self.root / ".zcode" / "commands" / cmd).exists())
 
             cfg = json.loads(ws_cfg.read_text())
