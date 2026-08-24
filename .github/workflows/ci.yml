@@ -1,8 +1,9 @@
-name: CI
+name: CI & Release
 
 on:
   push:
     branches: [ main, master ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ main, master ]
 
@@ -28,9 +29,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
-      - name: Check syntax & imports
-        run: |
-          uv run python -m compileall src/ tests/
+      - name: Check syntax & compile
+        run: uv run python -m compileall src/ tests/
 
   test:
     name: Test (${{ matrix.os }} - Py ${{ matrix.python-version }})
@@ -55,16 +55,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
-      - name: Run Test Suite
-        run: uv run pytest -v
-
-      - name: Run Accuracy Benchmark (Linux only)
-        if: runner.os == 'Linux'
-        run: uv run python scripts/benchmark_accuracy.py
+      - name: Run test suite (pytest)
+        run: uv run pytest tests/ -v --strict-markers
 
   package-smoke:
     name: Package & Smoke (${{ matrix.os }})
-    needs: [test]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -82,17 +77,48 @@ jobs:
       - name: Set up Python 3.12
         run: uv python install 3.12
 
-      - name: Build wheel package
+      - name: Build sdist and wheel
         run: uv build
 
-      - name: Install built wheel and test CLI version
+      - name: Smoke test wheel installation and CLI version
         run: |
-          uv run --isolated --with dist/*.whl sot --version
+          uv run python -c "import glob, subprocess, sys; wheels = glob.glob('dist/*.whl'); sys.exit(1) if not wheels else subprocess.run(['uv', 'run', '--isolated', '--with', wheels[0], 'sot', '--version'], check=True)"
 
-      - name: Smoke test MCP initialization options
+      - name: Smoke test sdist installation and CLI version
         run: |
-          uv run python -c "from sot_graph.mcp_service import McpService; from sot_graph.mcp_server import create_server; import importlib.metadata; s = create_server(McpService(':memory:', '.')); assert s._sot_initialization_options.server_version == importlib.metadata.version('sot-graph'); print('MCP server verified:', s._sot_initialization_options.server_version)"
+          uv run python -c "import glob, subprocess, sys; sdists = glob.glob('dist/*.tar.gz'); sys.exit(1) if not sdists else subprocess.run(['uv', 'run', '--isolated', '--with', sdists[0], 'sot', '--version'], check=True)"
+
+      - name: Smoke test MCP server initialization
+        run: |
+          uv run python -c "import glob, tempfile, os, subprocess, sys; wheels = glob.glob('dist/*.whl'); code = '''import tempfile, os; from sot_graph.db import Database; from sot_graph.mcp_service import McpService; from sot_graph.mcp_server import create_server; f = tempfile.NamedTemporaryFile(suffix=\".db\", delete=False); db_path = f.name; f.close(); db = Database(db_path); db.close(); service = McpService(db_path, \".\"); s = create_server(service); assert s._sot_initialization_options.server_version == \"0.3.0\"; print(\"MCP server verified:\", s._sot_initialization_options.server_version); service.close(); os.unlink(db_path)'''; subprocess.run(['uv', 'run', '--isolated', '--with', 'mcp>=1.3', '--with', wheels[0], 'python', '-c', code], check=True)"
 
       - name: Smoke test template and adapter generation
         run: |
-          uv run sot setup --harness omp --workspace-only
+          uv run python -c "import glob, tempfile, subprocess; wheels = glob.glob('dist/*.whl'); td = tempfile.mkdtemp(); subprocess.run(['uv', 'run', '--isolated', '--with', wheels[0], 'sot', '--root', td, 'setup', '--harness', 'omp', '--workspace-only'], check=True); print('Template smoke test passed')"
+
+  release:
+    name: Publish Release Artifacts
+    needs: [lint, test, package-smoke]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

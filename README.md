@@ -6,419 +6,255 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](pyproject.toml)
 [![SQLite: WAL + FTS5](https://img.shields.io/badge/SQLite-FTS5%20%2B%20WAL-orange.svg)](src/sot_graph/db.py)
-[![Tests: 199 passed](https://img.shields.io/badge/Tests-199%2F199%20Passed-brightgreen.svg)](tests/)
+[![Schema: v5 Multi-Provider](https://img.shields.io/badge/Schema-v5%20Multi--Provider-purple.svg)](src/sot_graph/db.py)
+[![Tests: 295 passed](https://img.shields.io/badge/Tests-295%2F295%20Passed-brightgreen.svg)](tests/)
 [![Architecture: Zero-Daemon](https://img.shields.io/badge/Architecture-Zero--Daemon-purple.svg)](#-database-architecture--project-isolation)
-[![Tree-Sitter: 12+ Languages](https://img.shields.io/badge/Tree--Sitter-12%2B%20Languages-success.svg)](src/sot_graph/ts_extract.py)
+[![Tree-Sitter: 10 Grammars](https://img.shields.io/badge/Tree--Sitter-10%20Grammars-success.svg)](src/sot_graph/ts_extract.py)
 
 ---
 
-## 🎯 What is sot-graph?
+## What is sot-graph?
 
-`sot-graph` is an ultra-fast, zero-daemon knowledge graph and symbol navigation engine designed specifically for **Autonomous AI Coding Agents** (Oh My Pi / OMP, Claude Code, Cursor, Windsurf, OpenCode, Google Antigravity / Gemini CLI).
+`sot-graph` is an ultra-fast, zero-daemon knowledge graph and symbol navigation engine designed specifically for **Autonomous AI Coding Agents** (Oh My Pi / OMP, Claude Code, Cursor, OpenCode, Google Antigravity / Gemini CLI, ZCode IDE).
 
-Traditional agent memory and RAG tools suffer from **Phantom Anchors and Hallucinated Paths**—pointing to files that were moved, deleted, or refactored during multi-turn coding sessions. `sot-graph` solves this at the architectural root:
+It replaces slow, blind, and hallucination-prone text grepping with an incremental, AST-verified structural graph stored in SQLite (WAL mode + FTS5 full-text indexing + Schema v5 Multi-Provider Provenance Ledger).
 
-1. **Filesystem as Single Source of Truth (SSOT)**: Physical disk reality is absolute truth. The knowledge graph is an auto-synchronizing projection.
-2. **Trust Verdict System**: Every search result is physically checked against the filesystem before the agent sees it (`[STRONG]`, `[WEAK]`, `[REBUILT]`, `[REMOVED]`, `[NOPATH]`).
-3. **Two-Tiered Hybrid AST Engine**:
-   - **Tier 1 (High-Fidelity Tree-Sitter)**: Real concrete syntax tree parsing for **PHP (5.4–8.3), TypeScript, TSX, JavaScript, Python (3.8–3.12+), C# (.NET), Go, Rust, Java, Kotlin, Swift**.
-   - **Tier 2 (Resilient State Machine Fallback)**: Tokenizer state machine handling codebases if tree-sitter grammars are not yet installed.
-4. **Binding-Aware Dependency Tracing**: Cross-file edges resolve via lexical scopes, call types, receivers, and import aliases—never by bare string matching.
-5. **LLM Context Optimization (`sot pack` / `sot bundle`)**: Slices k-hop subgraphs into bounded, untrusted-flagged YAML/Markdown context bundles, saving up to 70% of LLM prompt tokens compared to dumping raw source files.
-6. **Sub-millisecond Performance**: SQLite WAL mode + FTS5 full-text search ($< 1.5\text{ ms}$ retrieval), bounded connection caches ($\le 8\text{MB}$), zero external server daemons.
+### Core Value Pillars
 
----
-
-## ⚡ Quick Start & Installation
-
-### Prerequisites
-- **Python 3.10+** (CPython 3.10, 3.11, or 3.12).
-- Standard **SQLite3 with FTS5 module enabled** (included by default in official Python distributions).
+1. **Zero Hallucinated Anchors**: The filesystem is the single source of truth. Every symbol returned is physically verified on disk with confidence scores and Trust Verdicts (`[STRONG]`, `[WEAK]`, `[REBUILT]`).
+2. **Multi-Provider Provenance Ledger (Schema v5)**: Transparently records both fast AST Heuristics (`AST_HEURISTIC_PARSER`) and exact compiler-backed SCIP indices (`COMPILER_INDEXED_SYMBOLS`) in dedicated `provider_runs` and `provider_evidence` tables.
+3. **Token-Bounded Context Packaging (`sot pack`)**: Extracts exact target spans (L0) + 1-hop caller/callee contracts (L1) + 2-hop signature stubs (L2) within strict hard token budgets (`--tokens` / `--max-tokens`), preventing prompt bloat.
+4. **Architectural Blast Radius (`sot usages` / `sot explore`)**: Inbound and outbound dependency traversal identifying transitive callers and unresolved bare-name shadowing risk before refactoring.
+5. **Atomic Two-Phase Mutation Gateway**: All database mutations (`reconcile`, `batch-reconcile`, `insert`, `clean`, `import-scip`) execute inside write locks (`BEGIN IMMEDIATE` + write lock file) with automatic WAL backups and note preservation across schema migrations.
 
 ---
 
-### 📦 Installation Guide
+## Polyglot AST Engine (Tree-sitter Grammars)
 
-#### 🚀 Fresh Machine Setup & Quickstart Guide (Cài đặt trên máy mới)
+`sot-graph` includes native concrete syntax tree extractors across 10+ major programming languages:
 
-Khi bắt đầu trên một máy mới (fresh machine) hoặc môi trường làm việc mới, thực hiện 4 bước sau:
-
-```bash
-# 1. Clone repository & tạo môi trường ảo Python 3.10+
-git clone https://github.com/minhgv/sot-graph.git
-cd sot-graph
-python3 -m venv .venv
-source .venv/bin/activate
-chmod +x bin/sot
-
-# 2. Cài đặt toàn bộ dependencies & Tree-Sitter parsers
-pip install -e '.[all]'
-# Hoặc dùng uv để cài đặt siêu tốc:
-# uv pip install -e '.[all]'
-
-# 3. Kích hoạt Adapter cho AI Harness của bạn
-./bin/sot setup --harness pi          # Cho Pi Harness / Oh My Pi
-./bin/sot setup --harness zcode       # Cho ZCode IDE & Assistant
-./bin/sot setup --harness claude      # Cho Claude Code & Cursor
-./bin/sot setup --harness opencode    # Cho OpenCode
-./bin/sot setup --harness antigravity # Cho Google Antigravity / Gemini CLI
-# Hoặc cấu hình tất cả các harness cùng lúc:
-./bin/sot setup --harness all
-
-# 4. Kiểm tra trạng thái & đồng bộ Single Source of Truth
-./bin/sot doctor
-./bin/sot reconcile
-```
-
----
-
-#### 2. Installing Tree-Sitter & Specific Dependency Groups
-
-`sot-graph` organizes optional components into distinct extras in `pyproject.toml`:
-
-```bash
-# Install Tree-Sitter AST extractors only (12+ languages)
-pip install -e '.[tree-sitter]'
-
-# Install MCP stdio server only (for Claude Code, Cursor, Windsurf)
-pip install -e '.[mcp]'
-
-# Install Graph Analytics only (NetworkX & SciPy for Louvain Modularity)
-pip install -e '.[analytics]'
-
-# Install Real-Time File Watcher only (watchfiles for sot watch)
-pip install -e '.[watch]'
-
-# Install Hybrid Vector Search only (sqlite-vec for BM25 + Cosine fusion)
-pip install -e '.[vector]'
-```
-
-#### 🧩 Detailed Tree-Sitter Language Grammars Included in `[tree-sitter]`
-
-When you install `sot-graph[tree-sitter]`, the following official grammar packages are installed:
-
-| Language | Tree-Sitter Grammar Package | Supported Language Features |
+| Language | Extractor Engine | Key AST Constructs |
 | :--- | :--- | :--- |
-| **PHP** | `tree-sitter-php>=0.23` | PHP 5.4–8.3, Attributes `#[Route]`, `enum`, Readonly classes, Match expressions, Arrow functions |
-| **TypeScript / TSX** | `tree-sitter-typescript>=0.23` | TS Interfaces, Type Aliases, Generic constraints, Decorators, TSX/JSX components |
-| **JavaScript** | `tree-sitter-javascript>=0.23` | ES6+ Classes, Modules (ESM/CJS), Arrow functions, Object destructuring |
-| **Python** | `tree-sitter-python>=0.23` | Python 3.8–3.12+, PEP 695 `type` statements, Async functions, Decorators |
-| **C# (.NET)** | `tree-sitter-c-sharp>=0.23` | Records, Structs, File-scoped namespaces, Generic base types, Properties |
-| **Go** | `tree-sitter-go>=0.23` | Structs, Interfaces, Receiver methods, Type declarations, Generics |
-| **Rust** | `tree-sitter-rust>=0.23` | Structs, Enums, Traits, `impl` blocks, Function signatures |
-| **Java** | `tree-sitter-java>=0.23` | Classes, Interfaces, Records, Generics, Method overrides |
-| **Kotlin** | `tree-sitter-kotlin>=0.7` | Classes, Data classes, Companion objects, Extension functions |
-| **Swift** | `tree-sitter-swift>=0.7` | Protocols, Structs, Classes, Extensions, Actor declarations |
+| **Python** | `ast` + `symtable` (stdlib) | Classes, Functions, Methods, Decorators, Lexical Scope & Shadowing |
+| **TypeScript / TSX** | `tree-sitter-typescript>=0.23` | Interfaces, TypeAliases, Classes, Methods, Enums, Exported Consts |
+| **JavaScript / JSX** | `tree-sitter-javascript>=0.23` | Classes, Functions, Arrow Functions, Lexical Declarations (`const`/`let`/`var`) |
+| **Go** | `tree-sitter-go>=0.23` | Structs, Interfaces, Functions, Methods, Type Definitions |
+| **Rust** | `tree-sitter-rust>=0.23` | Structs, Enums, Traits, Impl Blocks, Functions, Modules |
+| **Java** | `tree-sitter-java>=0.23` | Classes, Interfaces, Enums, Records, Methods, Fields |
+| **C#** | `tree-sitter-c-sharp>=0.23` | Classes, Structs, Interfaces, Enums, Records, Namespaces |
+| **PHP** | `tree-sitter-php>=0.23` | Classes, Interfaces, Traits, Enums, Methods, Functions |
+| **Kotlin** | `tree-sitter-kotlin>=0.7` | Classes, Interfaces, Objects, Companion Objects, Extension Functions |
+| **Swift** | `tree-sitter-swift>=0.7` | Protocols, Structs, Classes, Extensions, Actor Declarations |
 
-*(Other languages such as Ruby, Dart, C/C++ are extracted via high-fidelity token state machines in `src/sot_graph/_vendor/graphify/extract.py`).*
+*(Other languages such as Ruby, Dart, C/C++ are supported via high-fidelity token state machines).*
 
 ---
 
-## 🤖 1-Command AI Agent Harness Provisioning (`sot setup`)
+## 1-Command AI Agent Harness Provisioning (`sot setup`)
 
-`sot-graph` includes automated provisioning for all major AI coding harnesses to instantly configure MCP tools, extensions, and SSOT agent rules:
+`sot-graph` provisions MCP tools, extensions, and SSOT agent rules across all major AI coding harnesses:
 
 ```bash
 # Provision all supported harnesses at once (Global + Workspace)
-./bin/sot setup --harness all
+sot setup --harness all
 
 # Or provision specific harnesses
-./bin/sot setup --harness pi          # Pi Harness / Oh My Pi (OMP)
-./bin/sot setup --harness zcode       # ZCode IDE (MCP + Skill + Slash Commands)
-./bin/sot setup --harness opencode     # OpenCode
-./bin/sot setup --harness claude       # Claude Code & Cursor
-./bin/sot setup --harness antigravity  # Google Antigravity / Gemini CLI
+sot setup --harness pi          # Pi Harness / Oh My Pi (OMP)
+sot setup --harness zcode       # ZCode IDE (MCP + Skill + Slash Commands)
+sot setup --harness opencode    # OpenCode
+sot setup --harness claude      # Claude Code & Cursor
+sot setup --harness antigravity # Google Antigravity / Gemini CLI
 
 # Scope configuration to current workspace only
-./bin/sot setup --harness all --workspace-only
+sot setup --harness all --workspace-only
+```
 
 ### Supported Harnesses & Deployed Integrations
 
 | Harness | Configuration Files & Artifacts | Integration Highlights |
 | :--- | :--- | :--- |
-| **Pi Harness / Oh My Pi (OMP)** | `~/.omp/agent/extensions/sot-graph.ts`<br>`.omp/extensions/sot-graph.ts`<br>`.omp/skills/sot-graph/SKILL.md`<br>`.omp/RULES.md`<br>`.omp/rules/sot-graph.md` | **24 Native TypeScript Agent Tools** (`sot_search`, `sot_map`, `sot_explore`, `sot_usages`, `sot_implementations`, `sot_rename`, `sot_pack`, `sot_reconcile`, `sot_verify`, `sot_doctor`, `sot_clean`, `sot_vacuum`, `sot_insert`, `sot_cluster`, `sot_report`, `sot_viz`, `sot_export`, `sot_bundle`, `sot_trace`, `sot_ui_tree`, `sot_backend_flow`, `sot_solution_inventory`, `sot_solution_steps`, `sot_solution_bundle`). Enforces SSOT Knowledge Reuse Rules. |
-| **ZCode** | `~/.zcode/config.json`<br>`.zcode/config.json`<br>`.zcode/skills/sot-graph/SKILL.md`<br>`.zcode/commands/*.md` | **Nested MCP Server (`mcp.servers.sot-graph`) + Skill + 7 Slash Commands** (`/sot-search`, `/sot-map`, `/sot-explore`, `/sot-usages`, `/sot-rename`, `/sot-pack`, `/sot-bundle`). Works seamlessly inside ZCode chat. |
-| **OpenCode** | `~/.config/opencode/skill/sot-graph/SKILL.md`<br>`.opencode/skills/sot-graph/SKILL.md`<br>`opencode.json` (auto-merged)<br>`opencode_plugin.ts` | **JSON Auto-Merge & Background Sync Plugin**. Auto-reconciles project index on `session.created` and `file.edited` lifecycle hooks. |
-| **Claude Code & Cursor** | `.mcp.json`<br>`.cursor/mcp.json`<br>`.claude/CLAUDE.md`<br>`AGENTS.md` | **Standard MCP Stdio Server (2025-06-18 spec)** and Knowledge Reuse Protocol embedded directly into agent context instructions. |
-| **Google Antigravity & Gemini CLI** | `~/.gemini/settings.json`<br>`.gemini/settings.json`<br>`~/.gemini/skills/sot-graph/SKILL.md`<br>`GEMINI.md` | **Settings Auto-Merge & Custom Skills**. Configures MCP server and appends SSOT prompt rules. |
+| **Pi Harness / Oh My Pi (OMP)** | `~/.omp/agent/extensions/sot-graph.ts`<br>`.omp/extensions/sot-graph.ts`<br>`.omp/skills/sot-graph/SKILL.md`<br>`.omp/RULES.md`<br>`.omp/rules/sot-graph.md` | Full `xd://sot_*` tool devices, SSOT system prompt rules, and background subagent knowledge reuse |
+| **Claude Code & Cursor** | `~/.claude/CLAUDE.md`<br>`.claude/CLAUDE.md` | SSOT Knowledge Reuse Protocol, Blast Radius Pre-Check, and Token-Bounded Context packaging |
+| **Google Antigravity** | `~/.gemini/GEMINI.md`<br>`.gemini/GEMINI.md`<br>`.gemini/skills/sot-graph/SKILL.md` | Single-Source-of-Truth directives, pure-read search, and architectural fact bundles |
+| **OpenCode** | `~/.config/opencode/opencode.json`<br>`~/.config/opencode/skill/sot-graph/SKILL.md`<br>`~/.config/opencode/plugins/sot-graph/index.ts`<br>`.opencode/opencode.json`<br>`.opencode/skills/sot-graph/SKILL.md` | OpenCode skill integration, local MCP server configuration, and file permissions |
+| **ZCode IDE** | `~/.zcode/config.json`<br>`~/.zcode/skills/sot-graph/SKILL.md`<br>`~/.zcode/commands/sot-*.md`<br>`.zcode/config.json`<br>`.zcode/skills/sot-graph/SKILL.md`<br>`.zcode/commands/sot-*.md` | MCP server registration, slash command suite (`/sot-search`, `/sot-map`, `/sot-explore`, `/sot-usages`, `/sot-rename`), and IDE skill |
 
 ---
 
-### 🥧 Pi Harness / Oh My Pi Integration Guide
-
-Khi chạy `sot setup --harness pi` (hoặc `omp`), adapter sẽ tự động triển khai:
-1. **Native TypeScript Extension** (`.omp/extensions/sot-graph.ts` & `~/.omp/agent/extensions/sot-graph.ts`): Đăng ký 24 công cụ native tool devices qua `xd://` (`xd://sot_search`, `xd://sot_explore`, `xd://sot_bundle`,...) tương tác trực tiếp với binary `sot`.
-2. **Declarative Skill & Rules** (`.omp/skills/sot-graph/SKILL.md`, `.omp/RULES.md`): Định nghĩa quy tắc bắt buộc kiểm tra mã nguồn bằng SOT trước khi tạo code mới.
-
-### ⚡ ZCode Integration & Usage Guide
-
-Khi chạy `sot setup --harness zcode`, adapter sẽ tự động cấu hình môi trường ZCode:
-1. **MCP Configuration (`.zcode/config.json`)**: Tự động merge server `sot-graph` vào `mcp.servers` với Python binary và `PYTHONPATH` hiện tại, bảo toàn các cấu hình khác của ZCode:
-   ```json
-   {
-     "mcp": {
-       "transport": "stdio",
-       "servers": {
-         "sot-graph": {
-           "command": "/path/to/.venv/bin/python3",
-           "args": ["-m", "sot_graph.cli", "mcp"],
-           "env": { "PYTHONPATH": "src" }
-         }
-       }
-     }
-   }
-   ```
-2. **ZCode Skills (`.zcode/skills/sot-graph/SKILL.md`)**: Cung cấp ngữ cảnh đầy đủ về Trust Verdicts và cách sử dụng các tools.
-3. **7 ZCode Slash Commands (`.zcode/commands/`)**: Cho phép lập trình viên gõ trực tiếp trong ZCode chat:
-   - `/sot-search <query>`: Tìm kiếm symbol / file với Trust Verdicts `[STRONG]`, `[WEAK]`, `[REBUILT]`.
-   - `/sot-map`: Xem tổng quan cấu trúc repository.
-   - `/sot-explore <symbol>`: Tracing quan hệ gọi hàm đa file (inward & outward calls).
-   - `/sot-usages <symbol>`: Tra cứu tất cả vị trí gọi hàm.
-   - `/sot-rename <old> <new>`: Phân tích và thực hiện đổi tên an toàn.
-   - `/sot-pack <symbol>`: Đóng gói ContextBundle YAML cho LLM prompt context.
-   - `/sot-bundle`: Xuất 5 fact bundle markdown/json files phục vụ sinh tài liệu kiến trúc.
----
-
-## 🛡️ Agent Protocol & Trust Verdict System
-
-When an agent executes `sot search` or calls `sot_search`, every candidate result is verified live against disk reality before being returned to the LLM:
-
-```
-                       [ Search Query / Symbol ]
-                                   │
-                                   ▼
-                   [ SQLite FTS5 (BM25 Retrieval) ]
-                                   │
-                                   ▼
-                   ┌───────────────────────────────┐
-                   │   Trust Verification Engine   │
-                   └───────────────┬───────────────┘
-                                   │
-         ┌─────────────────────────┼─────────────────────────┐
-         ▼                         ▼                         ▼
-   [ File Exists? ]         [ Content Coverage ]      [ File Missing? ]
-   ├── Yes (Coverage >= 50%) ➔ [STRONG]              ├── Unique Basename Match?
-   ├── Yes (Coverage < 50%)  ➔ [WEAK]                │   ├── Yes ➔ Auto-Heal [REBUILT]
-   └── No Disk File Attached ➔ [NOPATH]              │   └── No  ➔ Auto-Purge [REMOVED]
-```
-
-### Trust Verdict Definitions & Agent Actions
-
-| Verdict | Meaning | Mandatory Agent Action |
-| :--- | :--- | :--- |
-| `[STRONG]` | Path physically exists on disk AND content matches query tokens ($\ge 50\%$). | **High Confidence**: Proceed directly to referenced file and line number. |
-| `[WEAK]` | Semantic / index match only; low lexical overlap in current file content. | **Caution**: Inspect line ranges using targeted reading before making edits. |
-| `[REBUILT]` | File was moved or renamed elsewhere in the project. | **Auto-Healed**: Database automatically updated to new path. Use new path. |
-| `[REMOVED]` | Path was permanently deleted from disk. | **Auto-Purged**: Node removed from index immediately. Do not reference. |
-| `[NOPATH]` | Virtual knowledge note (Architectural Decision Records, conventions). | **Knowledge Anchor**: Treat as strict project rule/decision. |
-
----
-
-## 📋 Mandatory Agent Instructions (Rules for AI Prompts)
-
-Copy and add these instructions to your agent rules (`AGENTS.md`, `CLAUDE.md`, `.omp/RULES.md`, or system prompt):
-
-```markdown
-# SOT-Graph Knowledge Reuse Protocol (SSOT)
-
-## 1. Filesystem as Single Source of Truth (SSOT)
-- The physical filesystem is the absolute ground truth. The SOT knowledge graph (`.sot/sot.db`) is an authoritative projection.
-- Never assume a file path exists based on historical context without verification.
-
-## 2. Knowledge Reuse Protocol (Mandatory Before Implementation)
-Before writing any new utility, helper function, or class:
-1. Run `sot search "<keyword>"` or use the `sot_search` tool.
-2. Check Trust Verdicts:
-   - `[STRONG]`: Code physically exists and is verified on disk.
-   - `[WEAK]`: Semantic match only; inspect the file range first.
-   - `[REBUILT]`: File was moved; use the updated path.
-
-## 3. Dependency Impact & Blast Radius Tracing
-Before modifying or refactoring core functions, classes, or API contracts:
-1. Run `sot explore "<symbol>"` or use `sot_explore` to inspect both Outward Calls and Incoming References.
-2. Ensure you understand all upstream callers before changing signatures.
-
-## 4. Self-Healing & Drift
-- If you create, move, or delete files, run `sot reconcile` or `sot_reconcile` tool.
-- After completing tricky bugs or complex architectural designs, record knowledge:
-  `sot insert --title "..." --body "..." --keywords "..."`.
-
-## 5. Architecture Analysis & Fact Bundle Extraction
-When requested to review or synthesize architecture documentation for a repository:
-1. Run `sot bundle` (or tool `sot_bundle`) to generate 5 high-density fact files in `.sot/bundle/`.
-2. Ingest the 5 fact files along with `src/sot_graph/templates/ARCHITECTURE_TEMPLATE.md` to produce grounded reports without reading raw files sequentially.
-```
-
----
-
-## 💻 CLI & Agent Tool Usage Reference
+## CLI & Agent Tool Usage Reference
 
 ### 1. Codebase Indexing & Synchronization
 ```bash
-# Full indexing / self-healing sync with filesystem
-./bin/sot reconcile
+# Incrementally reconcile modified files into SQLite graph
+sot reconcile
 
-# Multi-worker parallel sync for large codebases
-./bin/sot reconcile --workers 4 --batch-size 64
+# Parallel multi-worker reconciliation for large codebases (100k+ LOC)
+sot reconcile --workers 4
 
-# Real-time file watcher (debounced 200ms, CAS write-lock gated)
-./bin/sot watch
+# Batch reconcile multiple distinct repositories under a parent directory
+sot batch-reconcile /path/to/parent_projects --workers 4
+
+# Import exact compiler-backed SCIP index (e.g. from scip-typescript or scip-python)
+sot import-scip index.scip
+
+# Watch filesystem and reconcile automatically on file changes
+sot watch --debounce-ms 200
+
+# Audit graph health and Schema v5 table counts
+sot doctor
 ```
 
-### 2. Verified Search & Symbol Discovery
+### 2. Pure-Read Code Search & Trust Verdicts
 ```bash
-# Search functions, classes, methods, and files
-./bin/sot search "Database acquire_connection"
+# Ranked symbol search with Trust Verdicts ([STRONG], [WEAK], [REBUILT])
+sot search "Database.commit_file_batch"
 
-# Scoped search within a specific module with structured JSON output
-./bin/sot search "reconcile" --scope src/sot_graph --json
-
-# Hybrid search (FTS5 BM25 + Vector Cosine via RRF fusion)
-./bin/sot embed && ./bin/sot search "retry with backoff" --hybrid
+# Search scoped to specific path or module
+sot search "Reconciler" --scope "src/sot_graph" -n 10
 ```
 
-### 3. Dependency Graph & Blast Radius Exploration
+### 3. Dependency Impact & Blast Radius
 ```bash
-# Explore callers and callees up to 2 hops
-./bin/sot explore "Reconciler" --depth 2
+# Bounded graph traversal (inward callers and outward dependencies)
+sot explore "Database" --depth 2
 
-# Find all references grouped by caller (with bare-name renaming risk)
-./bin/sot usages "commit_file_batch"
+# Find all references grouped by caller with bare-name renaming risk
+sot usages "commit_file_batch"
 
 # Find implementations and interface extensions in both directions
-./bin/sot implementations "BaseStore"
+sot implementations "BaseStore"
 
-# Dry-run rename impact analysis (non-destructive)
-./bin/sot rename "explore_node" --to "walk_node"
+# Non-destructive dry-run rename impact analysis
+sot rename "explore_node" --to "walk_node"
 ```
 
 ### 4. Context Bundling for Agent Prompts (`sot pack`)
 ```bash
 # Package exact target span (L0) + 1-hop contracts (L1) + 2-hop signature stubs (L2)
-./bin/sot pack "Database.commit_file_batch" -o .sot/bundle.yaml
+sot pack "Database.commit_file_batch" -o .sot/bundle.yaml
+
+# Hard token budget cap (using --tokens or --max-tokens)
+sot pack "Database.commit_file_batch" --tokens 1500 --json
 
 # Token-budgeted repository map ranked by personalized PageRank
-./bin/sot map --tokens 1024 --focus "Database.commit_file_batch"
+sot map --tokens 1024 --focus "Database.commit_file_batch"
 ```
 
 ### 5. Architecture Fact Bundles & SDLC Documentation
 ```bash
 # Extract 5 high-density fact files into .sot/bundle/ for LLM documentation
-./bin/sot bundle -o .sot/bundle
+sot bundle -o .sot/bundle
 
 # Generate human-readable Markdown architecture report
-./bin/sot report -o ARCHITECTURE_REPORT.md
+sot report -o ARCHITECTURE_REPORT.md
 
 # Run Louvain community detection to evaluate modularity (Q) and cohesion
-./bin/sot cluster
+sot cluster
 ```
 
 ### 6. Interactive Visualizer & Knowledge Graph Export
 ```bash
 # Launch zero-server D3.js interactive force-directed visualizer
-./bin/sot viz --open
+sot viz --open
 
 # Export graph for GraphRAG pipelines (JSON)
-./bin/sot export --format graphrag -o graphrag_dataset.json
+sot export --format graphrag -o graphrag_dataset.json
 
 # Export Obsidian Markdown Vault with [[wikilinks]]
-./bin/sot export --format obsidian -o obsidian_vault/
-
-# Export GraphML for Gephi / Cytoscape
-./bin/sot export --format graphml -o graph.graphml
-```
-
-### 7. Integrity Audit, Health & Vacuum
-```bash
-# Deep drift audit between disk and index (CI-safe read-only)
-./bin/sot verify --deep
-
-# System health diagnostics, entity statistics, and SQLite page usage
-./bin/sot doctor
-
-# Purge stale references and vacuum database
-./bin/sot clean --all --yes
-./bin/sot vacuum --analyze
+sot export --format obsidian -o .sot/obsidian_vault
 ```
 
 ---
 
-## 🔌 MCP Server Configuration (Model Context Protocol)
+## Model Context Protocol (MCP) Server
 
-`sot-graph` implements a compliant, read-only MCP server over `stdio` (`sot mcp` or `python3 -m sot_graph.mcp_server`).
-
-### MCP Stdio Configuration (`.mcp.json` / `claude_desktop_config.json` / Cursor)
-
-```json
-{
-  "mcpServers": {
-    "sot-graph": {
-      "command": "python3",
-      "args": ["-m", "sot_graph.mcp_server"],
-      "cwd": "${workspaceFolder}"
-    }
-  }
-}
-```
-
-### Exposed MCP Tools (Read-Only)
-
-| MCP Tool | Description | Input Parameters |
-| :--- | :--- | :--- |
-| `sot_search` | Trust-verified search across symbols, functions, classes, and notes with live disk checks. | `query` (string, required), `scope` (string, optional) |
-| `sot_explore` | Graph BFS traversal showing callers, callees, and Blast Radius. | `name` (string, required), `depth` (integer, default: 1) |
-| `sot_verify_drift` | Non-mutating integrity audit checking disk-to-database synchronization. | `deep` (boolean, default: false) |
-| `sot_architecture_report`| Generates structured architectural analysis (God Nodes, Louvain modularity). | `scope` (string, optional) |
-| `sot_communities` | Returns detected functional communities and cohesion scores. | `scope` (string, optional) |
-| `sot_bundle` | Extracts 5 standardized fact markdown/JSON files for LLM report synthesis. | `output_dir` (string, optional) |
-| `sot_pack` | Packages a k-hop ContextBundle (YAML) around one symbol (exact span + 1-hop contracts). | `target` (string, required), `max_hops`, `max_nodes`, `max_bytes` |
-
----
-
-## 📁 Database Architecture & Project Isolation
-
-`sot-graph` maintains a fully isolated, local SQLite database inside each project directory:
-
-```text
-<project-root>/
-├── .sot/
-│   ├── sot.db          # Primary SQLite database (nodes, edges, FTS5 index)
-│   ├── sot.db-wal      # SQLite Write-Ahead Log
-│   ├── sot.db-shm      # Shared-memory index for concurrent WAL reads
-│   └── write.lock      # Cross-platform publication lock (never truncated)
-├── src/
-└── README.md
-```
-
-- **Default Location**: `<project-root>/.sot/sot.db`
-- **Zero Central Server Daemons**: Operates purely in-process via SQLite. No separate database server process, socket, or global database shared across repos.
-- **Versioned Schema (v3)**: `graph_nodes` stores FQNs, signatures, and exact spans; `pending_edges` stores call contexts (kind/receiver/import source).
-- **Disposable Index**: The filesystem is the single source of truth. If `.sot/sot.db` is deleted, running `sot reconcile` reconstructs the entire graph index in milliseconds.
-
-Add `.sot/` to your `.gitignore`:
-```gitignore
-# sot-graph local index
-.sot/
-```
-
----
-
-## 🧪 Testing & Verification
-
-The test suite covers idempotency, trust scoring, AST extractions across 12+ languages, CAS publication under write lock, schema migration, ContextBundle packaging, file watch daemon, community determinism, exporters, and MCP protocol integration:
+`sot-graph` exposes 17 structured MCP tools and resources over standard I/O for AI coding agents:
 
 ```bash
-# Run full test suite with uv
-uv run --extra all --with pytest --with pytest-asyncio pytest tests/ -v
+# Start MCP server over stdio
+sot mcp
 ```
 
-```text
-======================= 199 passed, 30 subtests passed in 5.82s =======================
+### Registered MCP Tools & Exact Schemas
+
+#### Read-Only Inspection Tools
+| MCP Tool | Description | Required Parameters | Optional Parameters |
+| :--- | :--- | :--- | :--- |
+| `sot_search` | Read-only verified graph search with resource links (`sot://node/{id}`) | `query` (str) | `limit` (int, default 6), `scope` (str), `threshold` (float 0-1) |
+| `sot_explore` | Bounded graph traversal (inbound and outbound) | `node_id` (str) | `depth` (int, default 1), `limit` (int, default 100) |
+| `sot_usages` | Find all references grouped by caller + bare-name shadowing risk | `target` (str) | `limit` (int, default 100) |
+| `sot_implementations`| Extends and implements type hierarchy relationships | `target` (str) | — |
+| `sot_verify_drift` | Non-destructive filesystem vs database drift check | — | `deep` (bool), `limit` (int) |
+| `sot_architecture_report` | Architectural analysis with god nodes and modularity metrics | — | `scope` (str), `min_size` (int), `sigma` (float) |
+| `sot_communities` | Louvain / Label Propagation community detection with cohesion scores | — | `scope` (str), `min_size` (int) |
+| `sot_pack` | ContextBundle (YAML/JSON) with 1-hop contracts and 2-hop signature stubs | `target` (str) | `max_hops` (int, 1-3), `max_nodes` (int), `max_bytes` (int) |
+| `sot_map` | Token-budgeted repository map ranked by personalized PageRank | — | `focus` (str), `max_tokens` (int, default 1024) |
+| `sot_notes` | Persisted architectural knowledge notes query | — | `query` (str), `limit` (int, default 50) |
+| `sot_trace` | Execution path trace, UI decision branches, and Mermaid diagrams | `target` (str) | `depth` (int, 1-5, default 2) |
+| `sot_ui_tree` | Frontend UI decision tree, validation rules, button triggers, modals | `component` (str) | — |
+| `sot_backend_flow` | Backend service micro-steps, multi-datasources, exception branches | `service` (str) | — |
+| `sot_solution_steps` | Stage 2 Micro-step decomposition (4-column table) for manpower effort | `method` (str) | — |
+
+#### Workspace Artifact Generator Tools (Confined to Project Root)
+| MCP Tool | Description | Required Parameters | Optional Parameters |
+| :--- | :--- | :--- | :--- |
+| `sot_bundle` | Generates 5 high-density architecture fact bundle markdown files | — | `output_dir` (str, default `.sot/bundle`) |
+| `sot_solution_inventory` | Stage 1 Feature Discovery by User Role for Solution docs | — | `module` (str), `output_file` (str) |
+| `sot_solution_bundle` | Full solution context bundle (UI forms, DataTable schemas, API specs) | — | `module` (str), `output_file` (str) |
+
+---
+
+## Database Architecture & Durability
+
+- **Storage Engine**: SQLite in WAL (Write-Ahead Logging) mode with `NORMAL` synchronous mode and 64MB memory-mapped I/O (`mmap_size = 67108864`).
+- **Physical Tables (Schema v5)**:
+  - `graph_nodes`: AST symbols, signatures, docstrings, content hashes, roles, and generation timestamps.
+  - `graph_edges`: Directed dependency edges (`calls`, `imports`, `extends`, `implements`, `defines`).
+  - `provider_runs`: Immutable ledger of extraction runs (`AST_HEURISTIC_PARSER` vs SCIP tool providers, versions, argument digests, snapshot hashes, status).
+  - `provider_evidence`: Multi-provider provenance assertions keyed by run, target, capability, confidence score, and JSON payload.
+  - `meta`: Key-value store tracking schema version, repository generation, and commit state.
+- **Atomic Two-Phase Mutation Gateway**: All database-mutating operations acquire an exclusive file lock (`.sot/write.lock`) and execute inside `BEGIN IMMEDIATE` transactions.
+- **Note Preservation**: User notes (`kind == 'note'`) are preserved across schema migrations and `sot clean --all` resets. *(Note: physically deleting the `.sot/sot.db` file from the disk destroys all database data including notes).*
+
+---
+
+## Installation
+
+### From Source / Git
+```bash
+git clone https://github.com/minhgv/sot-graph.git
+cd sot-graph
+pip install -e ".[all,dev]"
+```
+
+### Optional Dependency Extras
+- `sot-graph[mcp]`: MCP server and JSON-RPC stdio protocol (`mcp>=1.3,<2`).
+- `sot-graph[analytics]`: Graph community detection and modularity analysis (`networkx>=3.0`, `scipy>=1.10`).
+- `sot-graph[tokens]`: Fast Rust BPE tokenizer for prompt budgeting (`tiktoken>=0.7`).
+- `sot-graph[watch]`: Real-time filesystem watcher daemon (`watchfiles>=0.21`).
+- `sot-graph[scip]`: Compiler-backed SCIP index importer (`protobuf>=4.21`).
+- `sot-graph[all]`: All optional dependencies and polyglot Tree-sitter parsers.
+
+---
+
+## Verification & Test Suite
+
+The test suite includes 295 tests covering unit functionality, multi-OS file locking, stateful Hypothesis property testing, fault injection (WAL crash simulation, disk-full ENOSPC simulation, mid-batch connection drops), and cross-language AST extractions:
+
+```bash
+# Run full test suite with pytest
+pytest tests/ -v --strict-markers
+
+# Run fault-injection and process-crash resilience tests
+pytest tests/fault/test_fault_injection.py -v
+
+# Run Hypothesis state-machine property invariant tests
+pytest tests/property/test_invariants.py -v
 ```
 
 ---
 
-## 📜 Attribution & Third-Party Licenses
+## Open-Source Acknowledgments & Third-Party Licenses
 
 `sot-graph` acknowledges and credits the following open-source projects:
 
@@ -429,6 +265,6 @@ uv run --extra all --with pytest --with pytest-asyncio pytest tests/ -v
 
 ---
 
-## 📄 License
+## License
 
 MIT License. Copyright (c) 2026 Minh Giap.

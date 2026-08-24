@@ -1266,7 +1266,7 @@ def build_parser() -> argparse.ArgumentParser:
         import importlib.metadata
         __version__ = importlib.metadata.version("sot-graph")
     except Exception:
-        __version__ = "0.2.0"
+        __version__ = "0.3.0"
     parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--root", default=".", help="Project root directory (default: current dir)")
     parser.add_argument("--db", default=None, help="Custom SQLite DB path (default: .sot/sot.db)")
@@ -1427,7 +1427,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_pack.add_argument("--max-hops", type=int, default=2, help="Hop depth (default: 2)")
     p_pack.add_argument("--max-nodes", type=int, default=50, help="Node cap (default: 50)")
     p_pack.add_argument("--max-bytes", type=int, default=65536, help="Byte cap (default: 64KB)")
-    p_pack.add_argument("--max-tokens", type=int, default=None, help="Hard token budget cap (default: None)")
+    p_pack.add_argument("--tokens", "--max-tokens", dest="max_tokens", type=int, default=None, help="Hard token budget cap (default: None)")
     p_pack.add_argument("--json", action="store_true", help="Output result as JSON envelope")
     p_watch = subparsers.add_parser(
         "watch", help="Watch filesystem and reconcile in real time (daemon & multi-project support)")
