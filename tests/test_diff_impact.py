@@ -791,11 +791,39 @@ class TestFormatters(unittest.TestCase):
         self.assertIn("🔴 **HIGH**", md)
         self.assertIn("1122334", md)
         self.assertIn("Alice", md)
+        self.assertNotIn("<br>", md)
+        self.assertNotIn("•", md)
 
         js = format_commit_history_json(res)
         parsed = json.loads(js)
         self.assertEqual(parsed["total_commits"], 1)
         self.assertEqual(parsed["risk_breakdown"]["HIGH"], 1)
+
+    def test_commit_history_multiple_reasons_and_escaping(self):
+        summary = CommitSummary(
+            commit_hash="abcdef1234567890",
+            short_hash="abcdef1",
+            author="Bob | Dev",
+            date="2026-08-24 14:00:00",
+            message="feat: payment | webhook\nwith extra line",
+            files_changed=["src/pay.py", "src/hook.py"],
+            insertions=120,
+            deletions=40,
+            touched_symbols=["PayService"],
+            risk_level="HIGH",
+            risk_reasons=["Reason 1 | with pipe", "Reason 2\nwith newline"],
+        )
+        res = CommitHistoryResult(
+            commits=[summary],
+            total_commits=1,
+            risk_breakdown={"LOW": 0, "MEDIUM": 0, "HIGH": 1},
+        )
+        md = format_commit_history_markdown(res)
+        self.assertNotIn("<br>", md)
+        self.assertNotIn("•", md)
+        self.assertIn("Bob \\| Dev", md)
+        self.assertIn("feat: payment \\| webhook with extra line", md)
+        self.assertIn("Reason 1 \\| with pipe; Reason 2 with newline", md)
 
 
 class TestStandaloneFunctions(unittest.TestCase):

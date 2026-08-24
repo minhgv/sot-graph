@@ -1149,6 +1149,13 @@ def analyze_commit_history(
 # Report Formatters (Markdown & JSON)
 # ============================================================================
 
+def _sanitize_cell(text: Any) -> str:
+    """Sanitize string for Markdown table cell (escape pipes, remove newlines)."""
+    if text is None:
+        return ""
+    return str(text).replace("|", "\\|").replace("\n", " ").replace("\r", "")
+
+
 def format_diff_impact_markdown(result: DiffImpactResult) -> str:
     """Render DiffImpactResult into an informative Markdown report."""
     summary = result.summary
@@ -1158,7 +1165,7 @@ def format_diff_impact_markdown(result: DiffImpactResult) -> str:
     lines: List[str] = [
         f"# SOT-Graph Diff Impact Analysis Report",
         f"",
-        f"**Target:** `{result.target}` | **Risk Level:** {risk_icon} **{risk_level}** (Score: {summary.get('risk_score', 0)}/100) | **Execution Time:** {summary.get('execution_time_ms', 0)}ms",
+        f"**Target:** `{_sanitize_cell(result.target)}` | **Risk Level:** {risk_icon} **{risk_level}** (Score: {summary.get('risk_score', 0)}/100) | **Execution Time:** {summary.get('execution_time_ms', 0)}ms",
         f"",
         f"## 📊 Summary Metrics",
         f"",
@@ -1180,7 +1187,11 @@ def format_diff_impact_markdown(result: DiffImpactResult) -> str:
         lines.append(f"| Symbol | Kind | File | Lines | Change Type |")
         lines.append(f"| :--- | :--- | :--- | :--- | :--- |")
         for n in result.direct_nodes:
-            lines.append(f"| `{n.symbol or n.label}` | `{n.kind}` | `{n.path}` | L{n.line_start}-L{n.line_end} | **{n.change_type}** |")
+            sym = _sanitize_cell(n.symbol or n.label)
+            kind = _sanitize_cell(n.kind)
+            path = _sanitize_cell(n.path)
+            chg = _sanitize_cell(n.change_type)
+            lines.append(f"| `{sym}` | `{kind}` | `{path}` | L{n.line_start}-L{n.line_end} | **{chg}** |")
     else:
         lines.append(f"_No matching AST nodes in knowledge graph for modified line intervals._")
     lines.append(f"")
@@ -1192,7 +1203,12 @@ def format_diff_impact_markdown(result: DiffImpactResult) -> str:
         lines.append(f"| Depth | Caller Symbol | Kind | File : Line | Relation | Target Symbol |")
         lines.append(f"| :--- | :--- | :--- | :--- | :--- | :--- |")
         for c in result.caller_impacts:
-            lines.append(f"| Hop {c.depth} | `{c.symbol or c.label}` | `{c.kind}` | `{c.path}:{c.line_start}` | `{c.via_relation}` | `{c.callee_symbol}` |")
+            sym = _sanitize_cell(c.symbol or c.label)
+            kind = _sanitize_cell(c.kind)
+            loc = _sanitize_cell(f"{c.path}:{c.line_start}")
+            rel = _sanitize_cell(c.via_relation)
+            callee = _sanitize_cell(c.callee_symbol)
+            lines.append(f"| Hop {c.depth} | `{sym}` | `{kind}` | `{loc}` | `{rel}` | `{callee}` |")
     else:
         lines.append(f"_Zero inward caller dependencies detected (low ripple effect)._")
     lines.append(f"")
@@ -1204,7 +1220,12 @@ def format_diff_impact_markdown(result: DiffImpactResult) -> str:
         lines.append(f"| Method | Normalized URI | Frontend Caller | Backend Controller | Impact Source |")
         lines.append(f"| :--- | :--- | :--- | :--- | :--- |")
         for a in result.api_impacts:
-            lines.append(f"| **{a.http_method}** | `{a.normalized_uri}` | `{a.fe_caller_symbol}` | `{a.be_controller_symbol}` | `{a.impact_source}` |")
+            method = _sanitize_cell(a.http_method)
+            uri = _sanitize_cell(a.normalized_uri)
+            fe = _sanitize_cell(a.fe_caller_symbol)
+            be = _sanitize_cell(a.be_controller_symbol)
+            src = _sanitize_cell(a.impact_source)
+            lines.append(f"| **{method}** | `{uri}` | `{fe}` | `{be}` | `{src}` |")
     else:
         lines.append(f"_No direct or indirect API contract bindings affected._")
     lines.append(f"")
@@ -1216,8 +1237,12 @@ def format_diff_impact_markdown(result: DiffImpactResult) -> str:
         lines.append(f"| Test Target | Kind | File | Reason |")
         lines.append(f"| :--- | :--- | :--- | :--- |")
         for t in result.test_impacts:
-            target_desc = f" -> `{t.target_symbol}`" if t.target_symbol else ""
-            lines.append(f"| `{t.symbol or t.path}` | `{t.kind}` | `{t.path}` | `{t.impact_reason}`{target_desc} |")
+            target_desc = f" -> `{_sanitize_cell(t.target_symbol)}`" if t.target_symbol else ""
+            target_str = _sanitize_cell(t.symbol or t.path)
+            kind = _sanitize_cell(t.kind)
+            path = _sanitize_cell(t.path)
+            reason = _sanitize_cell(t.impact_reason)
+            lines.append(f"| `{target_str}` | `{kind}` | `{path}` | `{reason}`{target_desc} |")
     else:
         lines.append(f"_No existing test suites mapped directly to modified symbols. Consider adding new test coverage._")
     lines.append(f"")
@@ -1245,11 +1270,13 @@ def format_commit_history_markdown(result: CommitHistoryResult) -> str:
     for c in result.commits:
         risk_icon = "🔴" if c.risk_level == "HIGH" else "🟡" if c.risk_level == "MEDIUM" else "🟢"
         churn_str = f"+{c.insertions}/-{c.deletions} ({len(c.files_changed)} files)"
-        reasons_str = "<br>".join(f"• {r}" for r in c.risk_reasons) if c.risk_reasons else "-"
-        # Escape pipe in commit message
-        safe_msg = c.message.replace("|", "\\|")
+        reasons_str = "; ".join(_sanitize_cell(r) for r in c.risk_reasons) if c.risk_reasons else "-"
+        safe_msg = _sanitize_cell(c.message)
+        safe_author = _sanitize_cell(c.author)
+        safe_date = _sanitize_cell(c.date[:10])
+        safe_hash = _sanitize_cell(c.short_hash)
         lines.append(
-            f"| `{c.short_hash}` | {c.author} | {c.date[:10]} | {churn_str} | {risk_icon} **{c.risk_level}** | {safe_msg} | {reasons_str} |"
+            f"| `{safe_hash}` | {safe_author} | {safe_date} | {churn_str} | {risk_icon} **{c.risk_level}** | {safe_msg} | {reasons_str} |"
         )
 
     lines.append("")
