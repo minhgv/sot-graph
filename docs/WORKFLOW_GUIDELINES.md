@@ -1,23 +1,27 @@
-# SOT-Graph Agent Workflow & Operational Guidelines
+# SOT-Graph Agent Workflow & Operational Guidelines (v0.3.0)
 
-> **Standard Operating Procedures (SOP) and Behavioral Protocols for AI Coding Agents utilizing `sot-graph` as a Verified Single Source of Truth (SSOT) Knowledge Layer.**
+> **Standard Operating Procedures (SOP) and Behavioral Protocols for AI Coding Agents utilizing `sot-graph` as a Verified Single Source of Truth (SSOT) Multi-Provider Knowledge Layer (Schema v5).**
 
 ---
 
 ## 📑 Table of Contents
 
 1. [Overview & Core Philosophy](#1-overview--core-philosophy)
-2. [SOT-Graph 4-Stage Agent Operational Protocol](#2-sot-graph-4-stage-agent-operational-protocol)
+2. [Multi-Provider Evidence Ledger & Trust Veracity](#2-multi-provider-evidence-ledger--trust-veracity)
+3. [North-Star Response Envelope Contract](#3-north-star-response-envelope-contract)
+4. [SOT-Graph 5-Stage Agent Operational Protocol](#4-sot-graph-5-stage-agent-operational-protocol)
    - [Stage 1: Orientation & Discovery](#stage-1-orientation--discovery)
-   - [Stage 2: Dependency Tracing & Context Packaging](#stage-2-dependency-tracing--context-packaging)
-   - [Stage 3: Safe Implementation & Refactoring](#stage-3-safe-implementation--refactoring)
-   - [Stage 4: Self-Healing & Drift Verification](#stage-4-self-healing--drift-verification)
-3. [Practical Walkthrough: 5-Step Task Impact Scoping](#3-practical-walkthrough-5-step-task-impact-scoping)
-4. [Comprehensive Command & Tool Reference](#4-comprehensive-command--tool-reference)
-5. [Multi-Harness Configuration Directives](#5-multi-harness-configuration-directives)
+   - [Stage 2: Compiler Indexing & SCIP Ingestion](#stage-2-compiler-indexing--scip-ingestion)
+   - [Stage 3: Dependency Tracing & Context Packaging](#stage-3-dependency-tracing--context-packaging)
+   - [Stage 4: Safe Implementation & Refactoring](#stage-4-safe-implementation--refactoring)
+   - [Stage 5: Self-Healing, Note Retention & Verification](#stage-5-self-healing-note-retention--verification)
+5. [Practical Walkthrough: 5-Step Task Impact Scoping](#5-practical-walkthrough-5-step-task-impact-scoping)
+6. [Comprehensive Command & Tool Reference](#6-comprehensive-command--tool-reference)
+7. [Multi-Harness Configuration Directives](#7-multi-harness-configuration-directives)
    - [Oh My Pi (OMP) Rules & Skills](#oh-my-pi-omp-rules--skills)
-   - [Claude Code & Cursor MCP Directives](#claude-code--cursor-mcp-directives)
-6. [Best Practices & Anti-Patterns](#6-best-practices--anti-patterns)
+   - [Claude Code, OpenCode & Gemini Directives](#claude-code-opencode--gemini-directives)
+8. [Best Practices & Anti-Patterns](#8-best-practices--anti-patterns)
+9. [Dual-Target Markdown, LaTeX & Unicode Rendering Rules](#9-dual-target-markdown-latex--unicode-rendering-rules)
 
 ---
 
@@ -28,54 +32,97 @@ Autonomous AI coding agents operating across multi-thousand-line codebases often
 2. **Context Window Exhaustion:** Ingesting dozens of raw source files sequentially (>100 lines each) to discover relationships, wasting thousands of input tokens.
 3. **Refactoring Blind Spots:** Modifying a core symbol without auditing upstream callers, causing subtle cross-module breakage.
 
-`sot-graph` addresses these challenges by establishing the **Physical Filesystem as the Absolute Ground Truth**, mapped through an embedded, zero-daemon SQLite storage layer with sub-millisecond retrieval, deterministic AST parsing across 12+ languages, and a real-time **Trust Verdict Engine**.
+`sot-graph` addresses these challenges by establishing the **Physical Filesystem as the Absolute Ground Truth**, mapped through an embedded, zero-daemon SQLite storage layer (Schema v5) with sub-millisecond retrieval, deterministic AST parsing across 12+ languages, SCIP compiler index ingestion, and a real-time **Multi-Provider Trust Verdict Engine**.
+
+---
+
+## 2. Multi-Provider Evidence Ledger & Trust Veracity
+
+`sot-graph` maintains a structured evidence ledger distinguishing fast heuristic extractions from compiler-backed semantic indices:
+
+```json
+{
+  "verdict": "STRONG",
+  "evidence": {
+    "freshness": "FRESH",
+    "relevance": "EXACT_SPAN",
+    "resolution": "EXACT",
+    "completeness": "COMPLETE_WITHIN_INDEX_CAPABILITY",
+    "confidence": 1.0,
+    "provenance": "ast_visitor:exact_span",
+    "file_path": "src/module/service.py",
+    "file_hash": "sha256:...",
+    "details": { "mtime_ms": 1787548621000, "stale": false }
+  }
+}
+```
 
 ### The Trust Verdict Hierarchy
 
-Before returning any search or discovery result, `sot-graph` physically audits candidate nodes against disk:
-
 | Verdict | Definition | Agent Action Required |
 | :--- | :--- | :--- |
-| `[STRONG]` | File exists on disk, symbol exists in AST, token coverage verified. | **Proceed directly.** 100% reliable anchor. |
+| `[STRONG]` | File exists on disk, symbol exists in AST/SCIP, physical token coverage verified. | **Proceed directly.** 100% reliable anchor. |
 | `[WEAK]` | Semantic or partial match; low lexical coverage. | **Inspect snippet range** before relying on symbol. |
-| `[REBUILT]` | File moved or renamed; auto-rehomed by reconciler. | **Use updated path** reported in result. |
+| `[REBUILT]` | File moved or renamed; auto-rehomed by atomic content-hash matching. | **Use updated path** reported in result. |
 | `[REMOVED]` | Node deleted on disk; scheduled for purge. | **Do NOT use.** Symbol no longer exists. |
 | `[NOPATH]` | Virtual or inline node without a physical file backing. | **Context-only.** Verify origin. |
 
 ---
 
-## 2. SOT-Graph 4-Stage Agent Operational Protocol
+## 3. North-Star Response Envelope Contract
 
-All autonomous agents MUST follow this four-stage execution cycle:
+All CLI commands supporting `--json` (`search`, `explore`, `usages`, `pack`, `doctor`) and 100% MCP tool responses wrap data inside a standardized envelope:
+
+```json
+{
+  "schema_version": "2.0.0",
+  "snapshot_generation": 1,
+  "manifest_digest": "sha256:...",
+  "completeness": "COMPLETE_WITHIN_INDEX_CAPABILITY",
+  "providers": [
+    { "name": "tree-sitter-ast", "version": "0.26.0", "capability": "AST_HEURISTIC_PARSER" }
+  ],
+  "fallbacks_applied": [],
+  "conflicts_detected": [],
+  "data": { ... }
+}
+```
+
+Agents MUST extract output from `.data` while checking `.completeness` and `.providers` to distinguish static heuristics from compiler-grounded indices.
+
+---
+
+## 4. SOT-Graph 5-Stage Agent Operational Protocol
 
 ```mermaid
 flowchart TD
     subgraph S1 [Stage 1: Orientation & Discovery]
-        A["sot map --focus &lt;area&gt;"] --> B["sot search &lt;keyword&gt; [STRONG]"]
+        A["sot map --tokens 1024"] --> B["sot search &lt;keyword&gt; [--json]"]
     end
     
-    subgraph S2 [Stage 2: Tracing & Context Packaging]
-        B --> C["sot explore &lt;symbol&gt; / sot usages"]
-        C --> D["sot pack &lt;symbol&gt; --depth 2 (ContextBundle)"]
+    subgraph S2 [Stage 2: Compiler Indexing]
+        B --> C["sot import-scip &lt;index.scip&gt; (Optional for 100% exact types)"]
     end
     
-    subgraph S3 [Stage 3: Implementation & Refactoring]
-        D --> E["sot implementations / sot rename"]
-        E --> F["Perform surgical code edits"]
+    subgraph S3 [Stage 3: Tracing & Context Packaging]
+        C --> D["sot explore &lt;symbol&gt; / sot usages"]
+        D --> E["sot pack &lt;symbol&gt; --tokens 1500 --json"]
     end
     
-    subgraph S4 [Stage 4: Self-Healing & Verification]
-        F --> G["sot reconcile"]
-        G --> H["sot verify --deep"]
+    subgraph S4 [Stage 4: Implementation & Refactoring]
+        E --> F["sot implementations / sot rename"]
+        F --> G["Perform surgical code edits via Range Selectors"]
+    end
+    
+    subgraph S5 [Stage 5: Self-Healing & Verification]
+        G --> H["sot reconcile --force"]
+        H --> I["sot verify --deep / sot doctor"]
     end
 ```
 
 ---
 
 ### Stage 1: Orientation & Discovery
-
-*Goal: Understand repository structure without dumping raw files into context.*
-
 1. **Top-Down Repository Mapping:**
    Run PageRank-based repository mapping to identify top architectural landmark symbols:
    ```bash
@@ -84,85 +131,62 @@ flowchart TD
 2. **Ground Truth Symbol Search:**
    Search for targeted classes, methods, or database models:
    ```bash
-   sot search "PaymentProcessor" -n 5
-   # Or hybrid search with vector embeddings (if configured)
-   sot search "handle stripe webhook refund" --hybrid
+   sot search "PaymentProcessor" -n 5 --json
    ```
-3. **Verification Invariant:** Check for `[STRONG]` verdict before using any file path.
 
----
+### Stage 2: Compiler Indexing & SCIP Ingestion
+When working with complex cross-package types (TypeScript, Go, Java, Rust, Python):
+```bash
+sot import-scip index.scip --provider-version "v1.0.0"
+```
 
-### Stage 2: Dependency Tracing & Context Packaging
-
-*Goal: Understand caller/callee relationships and pack relevant subgraphs to minimize token consumption.*
-
+### Stage 3: Dependency Tracing & Context Packaging
 1. **Call Graph & Blast Radius Audit:**
-   Inspect incoming callers and outbound dependencies:
    ```bash
-   sot explore "PaymentProcessor.charge" --depth 2
+   sot explore "PaymentProcessor.charge" --depth 2 --json
    ```
 2. **Call-Site Precision Audit:**
-   Locate exact line-anchored locations where the target symbol is invoked:
    ```bash
-   sot usages "PaymentProcessor.charge"
+   sot usages "PaymentProcessor.charge" --json
    ```
-3. **k-Hop Subgraph Packaging (`sot pack`):**
-   Extract a self-contained, token-efficient YAML context bundle (saves ~70% context tokens compared to reading raw files):
+3. **Hard-Budget Subgraph Packaging (`sot pack`):**
+   Extract a self-contained, token-efficient YAML or JSON context bundle:
    ```bash
-   sot pack "PaymentProcessor" --depth 2 --output .sot/bundle/payment_context.yaml
+   sot pack "PaymentProcessor" --tokens 1500 --json
    ```
 
----
-
-### Stage 3: Safe Implementation & Refactoring
-
-*Goal: Execute code modifications with complete visibility of contracts and implementations.*
-
+### Stage 4: Safe Implementation & Refactoring
 1. **Polymorphic & Interface Tracking:**
-   When working with abstract classes or interfaces, discover all concrete implementations across modules:
    ```bash
    sot implementations "IPaymentGateway"
    ```
 2. **Safe Multi-File Symbol Renaming:**
-   Simulate or apply structural renames across all reference sites:
    ```bash
-   # Preview mode (dry-run)
-   sot rename "oldMethodName" "newMethodName" --dry-run
-   
-   # Execute rename across codebase
-   sot rename "oldMethodName" "newMethodName" --apply
+   sot rename "oldMethodName" --to "newMethodName"
    ```
-3. **Surgical Edits:** Apply edits only to the specific line ranges identified by SOT AST nodes.
 
----
-
-### Stage 4: Self-Healing & Drift Verification
-
-*Goal: Re-synchronize the knowledge graph with disk changes and guarantee zero drift.*
-
+### Stage 5: Self-Healing, Note Retention & Verification
 1. **Incremental Database Reconciliation:**
-   After creating, modifying, or deleting files, synchronize the knowledge graph:
    ```bash
    sot reconcile --workers 4
    ```
-2. **Drift Audit:**
-   Verify that no phantom anchors or dangling edges exist:
+2. **Database Health & Note Preservation:**
    ```bash
-   sot verify --deep
+   sot doctor --json
+   sot clean --all  # Purges disposable index while preserving kind == 'note'
    ```
 3. **Knowledge Retention (ADR):**
-   Record non-obvious architecture decisions or tricky bug solutions for future sessions:
    ```bash
-   sot insert --title "Postpaid Limit Check Bypass via BCCS Secondary DataSource" \
-              --body "When subscriber is postpaid, route credit limit checks to BCCS Secondary DataSource instead of local Ledger DB." \
-              --keywords "bccs,postpaid,credit-limit,datasource"
+   sot insert --title "Postpaid Limit Check Bypass" \
+              --body "Route credit limit checks to BCCS DataSource instead of local Ledger DB." \
+              --keywords "bccs,postpaid,credit-limit"
    ```
 
 ---
 
-## 3. Practical Walkthrough: 5-Step Task Impact Scoping
+## 5. Practical Walkthrough: 5-Step Task Impact Scoping
 
-When assigned an enterprise task (e.g., *UNPAY-1: Postpaid subscriber limit check via BCCS & LaoID Webhook API*), follow this standard 5-step analysis pattern:
+When assigned an enterprise task, follow this standard 5-step analysis pattern:
 
 ```
   [1. SOT Reconcile & Search] ──────► Locate file/symbol with [STRONG] Trust Verdict
@@ -176,95 +200,41 @@ When assigned an enterprise task (e.g., *UNPAY-1: Postpaid subscriber limit chec
   [5. SOT Bundle Synthesis]   ──────► Generate 5 Fact Bundles for Documentation
 ```
 
-### Step 1: Physical Grounding with `sot search`
-```bash
-sot reconcile && sot search "MobileBalanceServiceImpl" && sot search "postpaid_subscriber"
-```
-*Output yields exact physical file paths, line anchors, and Trust Verdicts.*
-
-### Step 2: Historical Git Scoping
-```bash
-git log --grep="UNPAY-1" --stat --name-only
-git log -S "postpaid_subscriber" --oneline
-```
-*Identifies specific commits, authors, and modified files associated with the task.*
-
-### Step 3: Architectural Call Graph Exploration
-```bash
-sot explore "MobileBalanceServiceImpl"
-sot explore "LaoIdWebhookController"
-sot pack "MobileBalanceServiceImpl" --depth 2 --output .sot/bundle/task_unpay1_bundle.yaml
-```
-*Extracts secondary datasources (BCCS) and caller pipelines.*
-
-### Step 4: Workflow Reconstruction
-Agents translate AST state transitions into Mermaid sequence diagrams for solution proposals.
-
-### Step 5: Fact Bundle Generation for Solution Documents
-```bash
-sot bundle --module "unipay-service" --out .sot/bundle/
-```
-*Generates the 5 dense fact bundle files:*
-1. `01_module_inventory.md`: Inventory of controllers, services, repositories.
-2. `02_routing_endpoints.md`: REST endpoints and Webhook definitions.
-3. `03_workflows_states.md`: State machines and conditional branches.
-4. `04_dependencies_violations.md`: Dependency injection and secondary datasources.
-5. `05_system_metrics.json`: Node/edge complexity counts and cohesion scores.
-
 ---
 
-## 4. Comprehensive Command & Tool Reference
+## 6. Comprehensive Command & Tool Reference
 
 | Category | CLI Command | Native MCP Tool | Purpose |
 | :--- | :--- | :--- | :--- |
-| **Discovery** | `sot search "<query>" [-n 5] [--hybrid]` | `sot_search` | BM25 FTS5 + Hybrid vector search with Trust Verdicts. |
+| **Discovery** | `sot search "<query>" [-n 5] [--json]` | `sot_search` | Pure-read verified AST symbol & knowledge search with North-Star envelope. |
 | **Orientation** | `sot map [--focus <areas>] [--tokens 2000]` | `sot_map` | PageRank-weighted architectural repo map. |
-| **Call Graph** | `sot explore "<symbol>" [--depth 2]` | `sot_explore` | 2-way incoming callers and outgoing dependencies. |
-| **Call-Sites** | `sot usages "<symbol>"` | `sot_usages` | Exact line-anchored invocations across codebase. |
+| **Call Graph** | `sot explore "<symbol>" [--depth 2] [--json]` | `sot_explore` | 2-way incoming callers and outgoing dependencies with 2-Hop collapse. |
+| **Call-Sites** | `sot usages "<symbol>" [--json]` | `sot_usages` | Exact line-anchored invocations across codebase with pending candidate semantics. |
+| **SCIP Ingestion**| `sot import-scip <path> [--provider-version v1]` | CLI | Ingest compiler-backed SCIP index into multi-provider evidence ledger. |
 | **Polymorphism**| `sot implementations "<interface>"` | `sot_implementations` | Concrete classes implementing an interface/trait. |
-| **Refactoring** | `sot rename "<old>" "<new>" [--apply]` | — | Structural symbol renaming across all call-sites. |
-| **Packaging** | `sot pack "<symbol>" [--depth 2] [--output <f>]`| `sot_pack` | Extracts k-hop subgraph into token-efficient YAML context. |
-| **Fact Bundle** | `sot bundle [--module <m>] [--out <dir>]` | `sot_bundle` | Generates 5 fact markdown/json bundle files for reports. |
-| **Communities** | `sot cluster [--scope <path>]` | `sot_communities` | Louvain / Label Propagation modularity analysis. |
-| **Diagnostics** | `sot report [--out <path>]` | `sot_architecture_report`| Detects God Nodes, 2-hop Blast Radius, and violations. |
-| **Visualizer** | `sot viz [--port 8000]` | — | Interactive standalone HTML force-directed graph. |
-| **Export** | `sot export --format <obsidian\|graphrag\|scip>` | — | Exports graph to Obsidian Vault, GraphRAG JSON, or SCIP. |
-| **Sync** | `sot reconcile [--workers 4] [--force]` | `sot_reconcile` | Incremental AST sync with SHA-256 dirty checking. |
-| **Drift Audit** | `sot verify [--deep]` | `sot_verify_drift` | Audits physical existence and detects phantom nodes. |
-| **Knowledge** | `sot insert --title "..." --body "..."` | `sot_notes` | Persists Architecture Decision Records into SQLite. |
-| **Vector** | `sot embed [--model <m>]` | — | Indexes node contents into `sqlite-vec` virtual table. |
-| **Health** | `sot doctor` | `sot_doctor` | SQLite page count, freelist, journal mode, and stats. |
-| **Clean** | `sot clean [--reset] [--include-notes]` | — | Purges stale records and deleted file nodes. |
-| **Vacuum** | `sot vacuum [--analyze]` | — | Reclaims unallocated SQLite freelist pages. |
-| **Provision** | `sot setup [--harness omp\|claude\|all]` | — | Installs skills, rules, and MCP configurations. |
+| **Refactoring** | `sot rename "<old>" --to "<new>"` | `sot_rename` | Structural symbol renaming blast radius analysis. |
+| **Packaging** | `sot pack "<symbol>" [--tokens 1500] [--json]`| `sot_pack` | Extracts k-hop subgraph into token-efficient ContextBundle with hard token ceiling. |
+| **Fact Bundle** | `sot bundle [--module <m>] [-o <dir>]` | `sot_bundle` | Generates 5 fact markdown/json bundle files for reports (confined path). |
+| **Communities** | `sot cluster [--scope <path>]` | `sot_cluster` | Louvain / Label Propagation modularity analysis with Newman-Girvan Q. |
+| **Diagnostics** | `sot report [-o <path>]` | `sot_report` | Detects God Nodes, 2-hop Blast Radius, and layer violations. |
+| **Visualizer** | `sot viz [-o graph.html]` | `sot_viz` | Interactive standalone HTML force-directed graph. |
+| **Export** | `sot export -f <obsidian\|graphrag\|scip>` | `sot_export` | Exports graph to Obsidian Vault, GraphRAG JSON, or SCIP. |
+| **Sync** | `sot reconcile [--workers 4] [--force]` | `sot_reconcile` | Incremental AST sync with SHA-256 dirty checking and atomic rehoming. |
+| **Drift Audit** | `sot verify [--deep]` | `sot_verify` | Audits physical existence and detects phantom nodes. |
+| **Knowledge** | `sot insert --title "..." --body "..."` | `sot_insert` | Persists Architecture Decision Records into SQLite (preserved on reset). |
+| **Health** | `sot doctor [--json]` | `sot_doctor` | SQLite page count, freelist, journal mode, schema v5 health. |
+| **Clean** | `sot clean [--all] [--include-notes]` | `sot_clean` | Purges stale records and deleted file nodes. |
+| **Vacuum** | `sot vacuum [--analyze]` | `sot_vacuum` | Reclaims unallocated SQLite freelist pages under maintenance lock. |
+| **Provision** | `sot setup [--harness omp\|claude\|all]` | CLI | Installs skills, rules, and MCP configurations. |
 
 ---
 
-## 5. Multi-Harness Configuration Directives
+## 7. Multi-Harness Configuration Directives
 
 ### Oh My Pi (OMP) Rules & Skills
-
 Install configurations via `sot setup --harness omp`.
 
-Add the following invariants into `~/.omp/rules/sot-graph.md`:
-
-```markdown
-# SOT-Graph Project Rules for OMP (Oh My Pi)
-
-1. Filesystem as Single Source of Truth (SSOT):
-   The physical filesystem is absolute truth. Always ground symbol existence via `sot search` or `sot_search`.
-2. Pre-Implementation Knowledge Reuse:
-   Before writing any new utility, search for `[STRONG]` implementations.
-3. Architectural Blast Radius Tracing:
-   Before refactoring core functions/classes, run `sot explore "<symbol>"` or `sot usages "<symbol>"`.
-4. Subgraph Context Packing:
-   When modifying multi-module features, generate a context bundle with `sot pack` instead of reading dozens of raw files.
-5. Self-Healing & Drift Reconciliation:
-   After creating, moving, or deleting files, run `sot reconcile` and `sot verify`.
-```
-
-### Claude Code & Cursor MCP Directives
-
+### Claude Code, OpenCode & Gemini Directives
 Configure MCP in `~/.claude/mcp.json` or `.cursor/mcp.json`:
 
 ```json
@@ -281,7 +251,7 @@ Configure MCP in `~/.claude/mcp.json` or `.cursor/mcp.json`:
 
 ---
 
-## 6. Best Practices & Anti-Patterns
+## 8. Best Practices & Anti-Patterns
 
 ### ❌ Anti-Patterns to Avoid
 1. **Sequential Raw File Ingestion:** DO NOT sequentially read 10+ raw files (>100 lines) with generic file read tools. Use `sot map` -> `sot search` -> `sot pack`.
@@ -289,13 +259,13 @@ Configure MCP in `~/.claude/mcp.json` or `.cursor/mcp.json`:
 3. **Blind Assumptions on Renamed Files:** DO NOT assume a file path exists based on historical prompt memory. Verify with `sot verify` or `sot search`.
 
 ### ✅ Best Practices
-1. **Always Check Trust Verdicts:** Prioritize `[STRONG]` results; inspect `[WEAK]` results; update paths for `[REBUILT]`.
-2. **Pack Before Slicing:** Extract subgraphs via `sot pack` when delegating tasks to worker subagents.
+1. **Always Check Trust Verdicts & Providers:** Prioritize `[STRONG]` results; inspect `[WEAK]` results; verify provider capability (`AST_HEURISTIC_PARSER` vs `COMPILER_SCIP_INDEX`).
+2. **Pack Before Slicing:** Extract subgraphs via `sot pack "<symbol>" --tokens 1500 --json` when delegating tasks to worker subagents.
 3. **Reconcile on Exit:** Always run `sot reconcile` after completing code generation to ensure the next session inherits a clean, synchronized state.
 
 ---
 
-## 7. Dual-Target Markdown, LaTeX & Unicode Rendering Rules
+## 9. Dual-Target Markdown, LaTeX & Unicode Rendering Rules
 
 All AI Agents and reports generated using SOT-Graph MUST adhere to these rendering guardrails:
 
@@ -311,4 +281,3 @@ All AI Agents and reports generated using SOT-Graph MUST adhere to these renderi
 ### 3. Markdown Tables & Formatting
 - **Escape Comparison Operators:** In table cells, escape `<` and `>` as `&lt;` and `&gt;` or use Unicode `≤`, `≥`.
 - **Escape Table Pipes:** Always escape column pipe characters `\\|` inside table cell text to avoid collapsing table rows.
-
