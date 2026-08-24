@@ -983,6 +983,86 @@ def cmd_solution(args: argparse.Namespace, db: Database, root: str) -> int:
     return 1
 
 
+def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
+    from sot_graph.diff_impact import (
+        analyze_diff_impact,
+        format_diff_impact_markdown,
+        format_diff_impact_json,
+    )
+
+    if getattr(args, "auto_reconcile", False):
+        try:
+            reconciler = Reconciler(db, root)
+            reconciler.reconcile()
+        except Exception as exc:
+            print(f"⚠️  Auto-reconcile failed: {exc}", file=sys.stderr)
+
+    target = getattr(args, "target", "HEAD~1") or "HEAD~1"
+    depth = getattr(args, "depth", 2)
+    staged = getattr(args, "staged", False)
+    working_tree = getattr(args, "working_tree", False)
+
+    res = analyze_diff_impact(
+        db=db,
+        repo_path=root,
+        target=target,
+        depth=depth,
+        staged=staged,
+        working_tree=working_tree,
+    )
+
+    if getattr(args, "json", False):
+        print(format_diff_impact_json(res))
+        return 0
+
+    md = format_diff_impact_markdown(res)
+    if getattr(args, "output", None):
+        out_path = os.path.abspath(os.path.join(root, args.output)) if not os.path.isabs(args.output) else args.output
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as fp:
+            fp.write(md)
+        print(f"📊 Diff impact report written to: {out_path}")
+    else:
+        print(md)
+    return 0
+
+
+def cmd_log(args: argparse.Namespace, db: Database, root: str) -> int:
+    from sot_graph.diff_impact import (
+        analyze_commit_history,
+        format_commit_history_markdown,
+        format_commit_history_json,
+    )
+
+    limit = getattr(args, "limit", 10)
+    author = getattr(args, "author", None)
+    since = getattr(args, "since", None)
+    impact = getattr(args, "impact", True)
+
+    res = analyze_commit_history(
+        repo_path=root,
+        count=limit,
+        author=author,
+        since=since,
+        db=db if impact else None,
+        with_impact=impact,
+    )
+
+    if getattr(args, "json", False):
+        print(format_commit_history_json(res))
+        return 0
+
+    md = format_commit_history_markdown(res)
+    if getattr(args, "output", None):
+        out_path = os.path.abspath(os.path.join(root, args.output)) if not os.path.isabs(args.output) else args.output
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as fp:
+            fp.write(md)
+        print(f"📜 Commit history report written to: {out_path}")
+    else:
+        print(md)
+    return 0
+
 def cmd_report(args: argparse.Namespace, db: Database, root: str) -> int:
     from sot_graph.analytics.graph import AnalyticsGraph
     from sot_graph.analytics.diagnostics import analyze_graph
@@ -1490,6 +1570,26 @@ def build_parser() -> argparse.ArgumentParser:
     p_sol_bun.add_argument("module", nargs="?", default="", help="Module name (default: all)")
     p_sol_bun.add_argument("-o", "--output", default=None, help="Output file path (default: .sot/bundle/ContextBundle.md)")
     p_sol_bun.add_argument("--json", action="store_true", help="Output JSON format")
+
+    # diff-impact
+    p_diff = subparsers.add_parser("diff-impact", help="Git diff blast radius, upstream caller traversal, and API impact analysis")
+    p_diff.add_argument("target", nargs="?", default="HEAD~1", help="Git revision target (e.g. 'HEAD~1', 'main...HEAD', commit hash; default: HEAD~1)")
+    p_diff.add_argument("--depth", type=int, default=2, help="Reverse call graph walk depth (default: 2)")
+    p_diff.add_argument("--staged", action="store_true", help="Analyze staged changes (--cached)")
+    p_diff.add_argument("--working-tree", action="store_true", help="Analyze unstaged working tree changes")
+    p_diff.add_argument("--auto-reconcile", action="store_true", help="Reconcile knowledge graph before analyzing impact")
+    p_diff.add_argument("-o", "--output", default=None, help="Output markdown file path")
+    p_diff.add_argument("--json", action="store_true", help="Output raw JSON format")
+
+    # log / commits
+    p_log = subparsers.add_parser("log", aliases=["commits"], help="Inspect git commit history with automated risk scoring and impacted symbols")
+    p_log.add_argument("-n", "--limit", type=int, default=10, help="Maximum commits to analyze (default: 10)")
+    p_log.add_argument("--author", default=None, help="Filter commits by author")
+    p_log.add_argument("--since", default=None, help="Filter commits since date/time (e.g. '2026-01-01' or '2.weeks')")
+    p_log.add_argument("--impact", dest="impact", action="store_true", default=True, help="Enable knowledge graph symbol impact analysis (default: True)")
+    p_log.add_argument("--no-impact", dest="impact", action="store_false", help="Disable knowledge graph symbol impact analysis")
+    p_log.add_argument("-o", "--output", default=None, help="Output markdown file path")
+    p_log.add_argument("--json", action="store_true", help="Output raw JSON format")
     return parser
 
 
@@ -1584,6 +1684,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return cmd_be_flow(args, db)
         elif args.command == "solution":
             return cmd_solution(args, db, root)
+        elif args.command == "diff-impact":
+            return cmd_diff_impact(args, db, root)
+        elif args.command in ("log", "commits"):
+            return cmd_log(args, db, root)
         return 0
     except (LockBusy, RuntimeError) as exc:
         print(f"❌ {args.command} failed: {exc}", file=sys.stderr)

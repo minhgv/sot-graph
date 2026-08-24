@@ -236,6 +236,25 @@ def create_server(service: McpService) -> Any:
             types.Tool(name="sot_solution_bundle", description="Full solution context bundle containing UI forms, DataTable schemas, API specs, and diagrams for downstream agents.", inputSchema={
                 "type": "object", "properties": {"module": {"type": "string"}, "output_file": {"type": "string"}}, "additionalProperties": False,
             }),
+            types.Tool(name="sot_diff_impact", description="Analyze git diff blast radius, upstream inward callers, API contract impacts, and affected tests.", inputSchema={
+                "type": "object", "properties": {
+                    "target": {"type": "string", "description": "Git revision target (e.g. 'HEAD~1', 'main...HEAD', commit hash). Default: 'HEAD~1'"},
+                    "depth": {"type": "integer", "minimum": 1, "maximum": 5, "description": "Reverse call graph traversal depth (default: 2)"},
+                    "staged": {"type": "boolean", "description": "Analyze staged changes (--cached)"},
+                    "working_tree": {"type": "boolean", "description": "Analyze unstaged working tree changes"},
+                    "auto_reconcile": {"type": "boolean", "description": "Reconcile graph before analyzing"},
+                    "format": {"type": "string", "enum": ["markdown", "json"], "description": "Output format (default: markdown)"},
+                }, "additionalProperties": False,
+            }),
+            types.Tool(name="sot_git_history", description="Inspect git commit history with automated risk scoring and impacted symbol detection.", inputSchema={
+                "type": "object", "properties": {
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Maximum commits to evaluate (default: 10)"},
+                    "author": {"type": "string", "description": "Filter by commit author"},
+                    "since": {"type": "string", "description": "Filter commits since date (e.g. '2026-01-01' or '2.weeks')"},
+                    "with_impact": {"type": "boolean", "description": "Cross-reference touched symbols with SOT knowledge graph (default: true)"},
+                    "format": {"type": "string", "enum": ["markdown", "json"], "description": "Output format (default: markdown)"},
+                }, "additionalProperties": False,
+            }),
         ]
 
     @server.call_tool()
@@ -293,6 +312,23 @@ def create_server(service: McpService) -> Any:
                 result = await service.asolution_steps(args.get("method", ""))
             elif name == "sot_solution_bundle":
                 result = await service.asolution_bundle(args.get("module", ""), output_file=args.get("output_file"))
+            elif name == "sot_diff_impact":
+                result = await service.adiff_impact(
+                    target=args.get("target", "HEAD~1"),
+                    depth=args.get("depth", 2),
+                    staged=args.get("staged", False),
+                    working_tree=args.get("working_tree", False),
+                    auto_reconcile=args.get("auto_reconcile", False),
+                    format=args.get("format", "markdown"),
+                )
+            elif name == "sot_git_history":
+                result = await service.agit_history(
+                    limit=args.get("limit", 10),
+                    author=args.get("author"),
+                    since=args.get("since"),
+                    with_impact=args.get("with_impact", True),
+                    format=args.get("format", "markdown"),
+                )
             else:
                 result = {"error": {"code": "unknown_tool", "message": "unknown MCP tool"}}
             content: list[Any] = [types.TextContent(type="text", text=_json(result))]

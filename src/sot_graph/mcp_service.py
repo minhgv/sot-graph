@@ -920,6 +920,86 @@ class McpService:
             })
         return self._run(op)
 
+    def diff_impact(
+        self,
+        target: str = "HEAD~1",
+        depth: int = 2,
+        auto_reconcile: bool = False,
+        format: str = "markdown",
+        staged: bool = False,
+        working_tree: bool = False,
+    ) -> Dict[str, Any]:
+        """Analyze blast radius, upstream inward callers, API contract impacts, and affected tests for git diff."""
+        from sot_graph.diff_impact import (
+            DiffImpactEngine,
+            format_diff_impact_markdown,
+        )
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            view = _ConnView(conn)
+            engine = DiffImpactEngine(cast(Database, view), repo_path=self.project_root)
+            res = engine.analyze_diff_impact(
+                target=target,
+                depth=depth,
+                staged=staged,
+                working_tree=working_tree,
+            )
+            result_dict = res.to_dict()
+            payload: Dict[str, Any] = {
+                "ok": True,
+                "status": "success",
+                "target": target,
+                "depth": depth,
+                "format": format,
+                "providers": self._providers(conn),
+                "summary": result_dict.get("summary", {}),
+                "result": result_dict,
+            }
+            if format.lower() == "markdown":
+                payload["markdown"] = format_diff_impact_markdown(res)
+            return self._fits_response(payload)
+        return self._run(op)
+
+    def git_history(
+        self,
+        limit: int = 10,
+        author: Optional[str] = None,
+        since: Optional[str] = None,
+        with_impact: bool = True,
+        format: str = "markdown",
+    ) -> Dict[str, Any]:
+        """Inspect git commit history with automated risk scoring and impacted symbol detection."""
+        from sot_graph.diff_impact import (
+            CommitHistoryEngine,
+            format_commit_history_markdown,
+        )
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            view = _ConnView(conn)
+            engine = CommitHistoryEngine(repo_path=self.project_root)
+            res = engine.analyze_history(
+                count=limit,
+                author=author,
+                since=since,
+                db=cast(Database, view) if with_impact else None,
+                with_impact=with_impact,
+            )
+            result_dict = res.to_dict()
+            payload: Dict[str, Any] = {
+                "ok": True,
+                "status": "success",
+                "limit": limit,
+                "total_commits": res.total_commits,
+                "risk_breakdown": res.risk_breakdown,
+                "format": format,
+                "providers": self._providers(conn),
+                "result": result_dict,
+            }
+            if format.lower() == "markdown":
+                payload["markdown"] = format_commit_history_markdown(res)
+            return self._fits_response(payload)
+        return self._run(op)
+
     async def _async(
         self,
         method: Any,
@@ -1014,6 +1094,11 @@ class McpService:
 
     async def asolution_bundle(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return await self._async(self.solution_bundle, *args, **kwargs)
+    async def adiff_impact(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.diff_impact, *args, **kwargs)
+
+    async def agit_history(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.git_history, *args, **kwargs)
 
 
 __all__ = ["McpService", "McpServiceError", "ServiceLimits"]
