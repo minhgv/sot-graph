@@ -35,8 +35,41 @@ class PackError(RuntimeError):
         self.candidates = candidates or []
 
 
+def _dominant_candidate(db, row):
+    """Return the single candidate that dominates on inbound references, else None.
+
+    A candidate dominates when it is the only one with inbound edges, or has
+    at least twice the inbound edge count of the runner-up. Keeps ambiguous
+    ``sot pack`` targets resolvable without a FQN when evidence is decisive.
+    """
+    counts = {
+        r[0]: int(
+            db.conn.execute(
+                "SELECT COUNT(*) FROM graph_edges WHERE dst = ? AND relation != 'defines'",
+                (r[0],),
+            ).fetchone()[0]
+        )
+        for r in row
+    }
+    ranked = sorted(row, key=lambda r: counts[r[0]], reverse=True)
+    referenced = [r for r in ranked if counts[r[0]] > 0]
+    if len(referenced) == 1:
+        return referenced[0]
+    if not referenced:
+        return None
+    top, runner_up = referenced[0], referenced[1]
+    if counts[top[0]] >= 2 * counts[runner_up[0]]:
+        return top
+    return None
+
+
 def _find_target(db, target: str) -> Tuple[Dict[str, Any], str]:
-    """Resolve a target by exact FQN, FQN suffix, then bare symbol."""
+    """Resolve a target by exact FQN, FQN suffix, then bare symbol.
+
+    Ambiguous matches are auto-resolved to the dominant candidate by inbound
+    edge count; the node dict carries ``_ambiguous_auto_resolved`` so callers
+    can surface a warning. Raises :class:`PackError` when no candidate wins.
+    """
     row = db.conn.execute(
         "SELECT id,path,kind,symbol,fqn,signature,label,body,"
         "line_start,line_end,col_start,col_end FROM graph_nodes "
@@ -51,24 +84,33 @@ def _find_target(db, target: str) -> Tuple[Dict[str, Any], str]:
             "WHERE (fqn LIKE ? OR fqn LIKE ?) AND kind != 'file' LIMIT 11",
             (f"%.{target}", f"{target}.%"),
         ).fetchall()
+    auto_resolved = False
     if len(row) > 1:
-        raise PackError(
-            "AMBIGUOUS_TARGET",
-            f"target '{target}' matches {len(row)} nodes; qualify with a FQN",
-            candidates=[r[4] for r in row[:10]],
-        )
+        dominant = _dominant_candidate(db, row)
+        if dominant is None:
+            raise PackError(
+                "AMBIGUOUS_TARGET",
+                f"target '{target}' matches {len(row)} nodes; qualify with a FQN",
+                candidates=[r[4] for r in row[:10]],
+            )
+        row = [dominant]
+        auto_resolved = True
     if not row:
         row = db.conn.execute(
             "SELECT id,path,kind,symbol,fqn,signature,label,body,"
             "line_start,line_end,col_start,col_end FROM graph_nodes "
             "WHERE symbol = ? AND kind != 'file' LIMIT 11", (target,)
         ).fetchall()
-    if len(row) > 1:
-        raise PackError(
-            "AMBIGUOUS_TARGET",
-            f"symbol '{target}' is defined in {len(row)} places; use a FQN",
-            candidates=[r[4] for r in row[:10]],
-        )
+        if len(row) > 1:
+            dominant = _dominant_candidate(db, row)
+            if dominant is None:
+                raise PackError(
+                    "AMBIGUOUS_TARGET",
+                    f"symbol '{target}' is defined in {len(row)} places; use a FQN",
+                    candidates=[r[4] for r in row[:10]],
+                )
+            row = [dominant]
+            auto_resolved = True
     if not row:
         raise PackError("TARGET_NOT_FOUND", f"no indexed symbol matches '{target}'")
     r = row[0]
@@ -76,6 +118,7 @@ def _find_target(db, target: str) -> Tuple[Dict[str, Any], str]:
         "id": r[0], "path": r[1], "kind": r[2], "symbol": r[3], "fqn": r[4],
         "signature": r[5], "label": r[6], "body": r[7],
         "line_start": r[8], "line_end": r[9], "col_start": r[10], "col_end": r[11],
+        "_ambiguous_auto_resolved": auto_resolved,
     }
     return node, target
 
@@ -200,6 +243,11 @@ def build_bundle(
         )
 
     full_source, warnings = _slice_source_from_bytes(node, raw_bytes)
+    if node.pop("_ambiguous_auto_resolved", False):
+        warnings.append(
+            f"ambiguous_target_auto_resolved: '{target}' matched multiple nodes; "
+            f"selected dominant candidate {node['fqn']} by inbound reference count"
+        )
     if full_source is not None and len(full_source.encode("utf-8")) > max_bytes:
         raise PackError(
             "TARGET_TOO_LARGE",

@@ -10,6 +10,7 @@ import re
 import shutil
 import sqlite3
 import stat
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
@@ -229,6 +230,16 @@ class VacuumResult:
 
 
 class Database:
+    """SQLite-backed knowledge-graph store.
+
+    Thread model (contract): a ``Database`` instance owns exactly one
+    ``sqlite3.Connection`` and is bound to the thread that created it.
+    NEVER share an instance across threads. For concurrent access, open one
+    ``Database(..., read_only=True)`` per reader thread; writers are
+    serialized process-wide via the advisory ``WriteLock``. The MCP server
+    already follows this model (per-request ephemeral connections).
+    """
+
     def __init__(
         self,
         db_path: str,
@@ -247,10 +258,11 @@ class Database:
                 raise FileNotFoundError(f"read-only database does not exist: {self.db_path}")
             # quote() keeps URI query delimiters unambiguous while permitting slashes.
             uri = "file:" + quote(self.db_path, safe="/") + "?mode=ro"
-            self.conn = sqlite3.connect(uri, uri=True, timeout=self.timeout_ms / 1000.0)
+            self._conn = sqlite3.connect(uri, uri=True, timeout=self.timeout_ms / 1000.0)
         else:
             os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-            self.conn = sqlite3.connect(self.db_path, timeout=self.timeout_ms / 1000.0)
+            self._conn = sqlite3.connect(self.db_path, timeout=self.timeout_ms / 1000.0)
+        self._owner_thread = threading.get_ident()
 
         self.conn.execute(f"PRAGMA busy_timeout = {self.timeout_ms}")
         self.conn.execute("PRAGMA foreign_keys = ON")
@@ -272,8 +284,32 @@ class Database:
             self.conn.execute("PRAGMA synchronous = NORMAL")
             self.conn.execute("PRAGMA cache_size = -8000")   # 8MB page cache
             self.conn.execute("PRAGMA mmap_size = 67108864") # 64MB shared mmap
-            if initialize:
-                self._init_schema()
+        if initialize:
+            self._init_schema()
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        """Underlying connection; enforces the single-thread contract.
+
+        Raises an actionable error instead of sqlite3's cryptic
+        "objects created in a thread" ProgrammingError when accessed from a
+        foreign thread.
+        """
+        if threading.get_ident() != self._owner_thread:
+            raise RuntimeError(
+                "sot_graph.Database is single-thread by design: this instance "
+                f"was created in thread {self._owner_thread} but is being used "
+                f"in thread {threading.get_ident()}. Fix: open one Database per "
+                "thread (use read_only=True for readers); do not share instances."
+            )
+        return self._conn
+
+    @conn.setter
+    def conn(self, value: sqlite3.Connection) -> None:
+        # Test seam: fault-injection scenarios swap the raw connection to
+        # simulate I/O failures. Swapping also re-binds thread ownership.
+        self._conn = value
+        self._owner_thread = threading.get_ident()
 
     def _user_version(self) -> int:
         return int(self.conn.execute("PRAGMA user_version").fetchone()[0])
@@ -832,6 +868,7 @@ class Database:
         ]
 
         module_cache: Dict[str, Set[str]] = {}
+        caller_imports_cache: Dict[str, Set[str]] = {}
 
         def path_module_names(path: str) -> Set[str]:
             names = module_cache.get(path)
@@ -839,6 +876,38 @@ class Database:
                 names = project_module_names([path])
                 module_cache[path] = names
             return names
+
+        def caller_imported_modules(caller_path: str) -> Set[str]:
+            """Project modules imported by a file, from resolved + pending import edges.
+
+            Used to disambiguate legacy pending calls parked without
+            ``import_source`` (e.g. Tree-Sitter languages indexed before
+            import provenance was attached at extraction time).
+            """
+            cached = caller_imports_cache.get(caller_path)
+            if cached is not None:
+                return cached
+            modules: Set[str] = set()
+            for (dst_id,) in self.conn.execute(
+                "SELECT dst FROM graph_edges WHERE relation = 'imports' AND path = ?",
+                (caller_path,),
+            ):
+                dst_row = self.conn.execute(
+                    "SELECT path FROM graph_nodes WHERE id = ?", (dst_id,)
+                ).fetchone()
+                if dst_row:
+                    modules |= path_module_names(dst_row[0])
+            for (mod_src,) in self.conn.execute(
+                "SELECT DISTINCT import_source FROM pending_edges "
+                "WHERE relation = 'imports' AND path = ? AND import_source IS NOT NULL",
+                (caller_path,),
+            ):
+                mod_imp = normalize_import(mod_src)
+                if mod_imp and mod_imp in project_names:
+                    modules.add(mod_imp)
+            caller_imports_cache[caller_path] = modules
+            return modules
+
 
         # 3. Re-export Map (e.g. __init__.py re-exports)
         reexport_map: Dict[Tuple[str, str], Tuple[str, str]] = {}
@@ -906,7 +975,23 @@ class Database:
                     ambiguous_updates.append(rowid)
                     ambiguous += 1
                     continue
-
+            # Priority 3b: Caller-file import fallback for legacy edges parked
+            # without import_source. Filters multiple candidates by the
+            # modules the calling file itself imports; only resolves when the
+            # filter narrows to exactly one candidate.
+            if chosen is None and not imp and len(candidates) > 1:
+                caller_modules = caller_imported_modules(path)
+                if caller_modules:
+                    matched = [
+                        (node_id, node_path) for node_id, node_path in candidates
+                        if any(
+                            m in path_module_names(node_path)
+                            or any(pm.startswith(m) for pm in path_module_names(node_path))
+                            for m in caller_modules
+                        )
+                    ]
+                    if len(matched) == 1:
+                        chosen = matched[0]
             # Priority 4: Unique project symbol (cross-file only; same-file shadowed calls stay unresolved)
             if chosen is None and len(candidates) == 1:
                 if candidates[0][1] != path:

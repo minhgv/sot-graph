@@ -376,12 +376,26 @@ class PackTests(TempProject):
         inbound = [c["fqn"] for c in bundle["inbound_callers"]]
         self.assertIn("svc.api.endpoint", inbound)
 
-    def test_ambiguous_target_fails_closed_with_candidates(self):
-        from sot_graph.pack import PackError
+    def test_ambiguous_target_auto_resolves_to_dominant_candidate(self):
+        # ``svc.store.fetch`` has an inbound caller; the duplicate in dup.py
+        # has none, so packing bare "fetch" resolves to the dominant candidate.
         self.write("src/svc/dup.py", "def fetch(x):\n    return x\n")
         self.reconciler.reconcile(workers=1)
+        bundle = self.pack("fetch")
+        self.assertEqual(bundle["target"]["fqn"], "svc.store.fetch")
+        self.assertTrue(
+            any("ambiguous_target_auto_resolved" in w for w in bundle["limits"]["warnings"])
+        )
+
+    def test_ambiguous_target_fails_closed_on_tie(self):
+        from sot_graph.pack import PackError
+        # Two unreferenced duplicates: no dominance evidence -> fail closed
+        # with the candidate list instead of guessing.
+        self.write("src/svc/store.py", "def orphan(key: str) -> str:\n    return key\n")
+        self.write("src/svc/api.py", "def orphan(key: str) -> str:\n    return key + '!'\n")
+        self.reconciler.reconcile(workers=1)
         with self.assertRaises(PackError) as ctx:
-            self.pack("fetch")
+            self.pack("orphan")
         self.assertEqual(ctx.exception.code, "AMBIGUOUS_TARGET")
         self.assertTrue(ctx.exception.candidates)
 

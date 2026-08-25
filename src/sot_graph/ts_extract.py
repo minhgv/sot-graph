@@ -717,4 +717,31 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
                     "import_source": raw_target,
                 })
                 break
+    # Attach import provenance to call edges so the DB-side resolver can
+    # disambiguate same-named symbols by the calling file's imports
+    # (mirrors the Python extractor's ``import_source`` behavior).
+    import_map: Dict[str, str] = {}
+    for edge_item in edges:
+        if edge_item.get("relation") == "imports" and edge_item.get("import_source"):
+            raw_import = edge_item["import_source"]
+            import_map.setdefault(edge_item["target"], raw_import)
+            # PHP ``use Foo\Bar\Baz`` / Dart ``package:app/src/bloc.dart``:
+            # bind calls by the imported symbol or file basename too.
+            tail = re.split(r"[\\/:]", raw_import)[-1]
+            base = tail.split(".")[0] if "." in tail else tail
+            if tail:
+                import_map.setdefault(tail, raw_import)
+            if base:
+                import_map.setdefault(base, raw_import)
+    for edge_item in edges:
+        if edge_item.get("relation") != "calls":
+            continue
+        bound: Optional[str] = None
+        receiver = edge_item.get("receiver")
+        if receiver and receiver.split(".")[0] in import_map:
+            bound = import_map[receiver.split(".")[0]]
+        elif edge_item["target"] in import_map:
+            bound = import_map[edge_item["target"]]
+        if bound:
+            edge_item["import_source"] = bound
     return {"nodes": nodes, "edges": edges, "error": None}
