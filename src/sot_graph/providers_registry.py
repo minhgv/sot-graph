@@ -21,16 +21,8 @@ from dataclasses import asdict, dataclass
 
 from sot_graph.config import ProviderConfig, SotConfig, load_config
 from sot_graph.proc import run_command
+from sot_graph.providers.codebase_memory import CodebaseMemoryProvider
 
-__all__ = [
-    "ProviderStatus",
-    "VERSION_PROBE_TIMEOUT_SECONDS",
-    "SCIP_ARTIFACTS",
-    "CAPABILITY_PRIORITY",
-    "detect_providers",
-    "resolve_capability",
-    "providers_doctor",
-]
 
 #: Wall-clock budget for one ``<command> --version`` probe.
 VERSION_PROBE_TIMEOUT_SECONDS = 10.0
@@ -66,6 +58,9 @@ class ProviderStatus:
     healthy: bool
     capabilities: list[str]
     detail: str  # why missing/unhealthy, or short ok note
+    #: which engine produced this status: "manual" (<cmd> --version here) or
+    #: "adapter" (the provider's own EvidenceProvider.probe). Additive field.
+    probe_engine: str = "manual"
 
 
 def _package_version() -> str:
@@ -110,6 +105,37 @@ def _probe_scip(pcfg: ProviderConfig, repo_root: str) -> ProviderStatus:
         healthy=False,
         capabilities=list(pcfg.capabilities),
         detail=f"no SCIP artifact found (looked for: {', '.join(SCIP_ARTIFACTS)})",
+    )
+
+
+#: Providers whose probing is delegated to their own adapter instead of the
+#: generic manual ``<cmd> --version`` probe. The adapter applies the provider's
+#: anchored version contract and redaction rules; still strictly read-only.
+ADAPTER_PROBED_PROVIDERS = frozenset({"codebase-memory"})
+
+
+def _probe_via_adapter(pcfg: ProviderConfig, repo_root: str) -> ProviderStatus:
+    command = list(pcfg.command or [pcfg.name])
+    provider = CodebaseMemoryProvider(
+        command=command,
+        query_timeout_seconds=min(pcfg.timeout_seconds, VERSION_PROBE_TIMEOUT_SECONDS)
+        or VERSION_PROBE_TIMEOUT_SECONDS,
+    )
+    st = provider.probe(repo_root)
+    if st.installed and st.healthy:
+        exe = shutil.which(command[0]) or command[0]
+        detail = f"executable at {exe}"
+    else:
+        detail = st.detail or "unhealthy"
+    return ProviderStatus(
+        name=pcfg.name,
+        mode=pcfg.integration,
+        installed=st.installed,
+        version=st.version,
+        healthy=st.healthy,
+        capabilities=list(pcfg.capabilities),
+        detail=detail,
+        probe_engine="adapter",
     )
 
 
@@ -175,6 +201,8 @@ def _status_for(pcfg: ProviderConfig, repo_root: str) -> ProviderStatus:
         )
     elif pcfg.name == "scip":
         status = _probe_scip(pcfg, repo_root)
+    elif pcfg.integration == "cli" and pcfg.name in ADAPTER_PROBED_PROVIDERS:
+        status = _probe_via_adapter(pcfg, repo_root)
     else:
         status = _probe_executable(pcfg, repo_root)
     if pcfg.enabled is False:

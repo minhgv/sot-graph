@@ -17,7 +17,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, 
 from urllib.parse import quote
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS file_journal (
@@ -160,10 +160,26 @@ CREATE TABLE IF NOT EXISTS provider_runs (
     project_root TEXT,
     position_encoding TEXT DEFAULT 'UTF-8',
     arguments_json TEXT,
+    status TEXT,
+    exit_code INTEGER,
+    duration_ms INTEGER,
+    command_digest TEXT,
     created_at INTEGER NOT NULL,
     snapshot_id TEXT REFERENCES snapshots(id)
 );
 CREATE INDEX IF NOT EXISTS idx_provider_runs_prov ON provider_runs(provider_name);
+CREATE TABLE IF NOT EXISTS provider_project_bindings (
+    id TEXT PRIMARY KEY,
+    sot_repo_id TEXT NOT NULL,
+    provider_name TEXT NOT NULL,
+    provider_project_id TEXT NOT NULL,
+    provider_generation INTEGER,
+    head_sha TEXT,
+    branch TEXT,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(sot_repo_id, provider_name)
+);
+CREATE INDEX IF NOT EXISTS idx_ppb_repo ON provider_project_bindings(sot_repo_id);
 CREATE TABLE IF NOT EXISTS provider_evidence (
     id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL,
@@ -184,6 +200,7 @@ CREATE TABLE IF NOT EXISTS provider_evidence (
     documentation TEXT,
     confidence REAL DEFAULT 1.0,
     metadata_json TEXT,
+    snapshot_hash TEXT,
     recorded_at INTEGER,
     created_at INTEGER NOT NULL,
     FOREIGN KEY(run_id) REFERENCES provider_runs(id) ON DELETE CASCADE
@@ -194,6 +211,7 @@ CREATE INDEX IF NOT EXISTS idx_p_evidence_path ON provider_evidence(path);
 CREATE INDEX IF NOT EXISTS idx_p_evidence_src ON provider_evidence(src_symbol);
 CREATE INDEX IF NOT EXISTS idx_p_evidence_dst ON provider_evidence(dst_symbol);
 CREATE INDEX IF NOT EXISTS idx_p_evidence_sym ON provider_evidence(symbol);
+CREATE INDEX IF NOT EXISTS idx_p_evidence_snapshot ON provider_evidence(snapshot_hash);
 """
 # Ordered drop list for the disposable-index migration: the filesystem is the
 # source of truth, so a legacy schema is dropped and rebuilt by the next
@@ -201,6 +219,7 @@ CREATE INDEX IF NOT EXISTS idx_p_evidence_sym ON provider_evidence(symbol);
 _DROP_ON_RESET = (
     "DROP TABLE IF EXISTS provider_evidence",
     "DROP TABLE IF EXISTS provider_runs",
+    "DROP TABLE IF EXISTS provider_project_bindings",
     "DROP TABLE IF EXISTS related_features_index",
     "DROP TABLE IF EXISTS be_execution_steps",
     "DROP TABLE IF EXISTS api_cross_bindings",
@@ -383,11 +402,14 @@ class Database:
                         if bck_conn is not None:
                             bck_conn.close()
 
-                    # Non-destructive upgrades from v4/v5: provider tables were
-                    # added in v5 and snapshot binding in v6; every step is
-                    # purely additive (new tables / nullable columns), so no
-                    # disposable-index reset or data loss occurs.
-                    if version in (4, 5):
+                    # Non-destructive upgrades from v4/v5/v6: provider tables
+                    # were added in v5, snapshot binding in v6, and the v7
+                    # ledger columns + project-binding table in v7; every
+                    # step is purely additive (new tables / nullable
+                    # columns), so no disposable-index reset or data loss
+                    # occurs. All steps are idempotent, so a v6 database
+                    # simply skips the already-applied shapes.
+                    if version in (4, 5, 6):
                         with self.conn:
                             self.conn.execute("""
                                 CREATE TABLE IF NOT EXISTS provider_runs (
@@ -492,6 +514,48 @@ class Database:
                                     "ALTER TABLE provider_runs ADD COLUMN "
                                     "snapshot_id TEXT REFERENCES snapshots(id)"
                                 )
+                            self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                        # v6/v5 -> v7: snapshot-scoped ledger. New nullable
+                        # run columns (status/exit_code/duration_ms/
+                        # command_digest) and evidence column
+                        # (snapshot_hash); plus the provider project
+                        # identity-mapping table. Existing rows keep NULL
+                        # for every new column; nothing is backfilled.
+                        with self.conn:
+                            self._ensure_columns(
+                                "provider_runs",
+                                {
+                                    "status": "TEXT",
+                                    "exit_code": "INTEGER",
+                                    "duration_ms": "INTEGER",
+                                    "command_digest": "TEXT",
+                                },
+                            )
+                            self._ensure_columns(
+                                "provider_evidence",
+                                {"snapshot_hash": "TEXT"},
+                            )
+                            self.conn.execute("""
+                                CREATE TABLE IF NOT EXISTS provider_project_bindings (
+                                    id TEXT PRIMARY KEY,
+                                    sot_repo_id TEXT NOT NULL,
+                                    provider_name TEXT NOT NULL,
+                                    provider_project_id TEXT NOT NULL,
+                                    provider_generation INTEGER,
+                                    head_sha TEXT,
+                                    branch TEXT,
+                                    updated_at INTEGER NOT NULL,
+                                    UNIQUE(sot_repo_id, provider_name)
+                                );
+                            """)
+                            self.conn.execute(
+                                "CREATE INDEX IF NOT EXISTS idx_ppb_repo "
+                                "ON provider_project_bindings(sot_repo_id);"
+                            )
+                            self.conn.execute(
+                                "CREATE INDEX IF NOT EXISTS idx_p_evidence_snapshot "
+                                "ON provider_evidence(snapshot_hash);"
+                            )
                             self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                         return
 
@@ -1748,15 +1812,27 @@ class Database:
         position_encoding: str = "UTF-8",
         arguments_json: Optional[str] = None,
         run_id: Optional[str] = None,
+        status: Optional[str] = None,
+        exit_code: Optional[int] = None,
+        duration_ms: Optional[int] = None,
+        command_digest: Optional[str] = None,
+        snapshot_id: Optional[str] = None,
     ) -> str:
+        """Persist one provider invocation (v7 snapshot-scoped ledger).
+
+        The whole INSERT runs in a single implicit transaction; a failure
+        anywhere before commit leaves ``provider_runs`` untouched.
+        """
         import uuid
         rid = run_id or f"run_{int(time.time())}_{uuid.uuid4().hex[:8]}"
         now = int(time.time())
         with self.conn:
             self.conn.execute(
                 "INSERT OR REPLACE INTO provider_runs "
-                "(id, provider_name, provider_version, capability, snapshot_hash, project_root, position_encoding, arguments_json, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "(id, provider_name, provider_version, capability, snapshot_hash, "
+                "project_root, position_encoding, arguments_json, status, exit_code, "
+                "duration_ms, command_digest, created_at, snapshot_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     rid,
                     provider_name,
@@ -1766,10 +1842,60 @@ class Database:
                     project_root,
                     position_encoding,
                     arguments_json,
+                    status,
+                    exit_code,
+                    duration_ms,
+                    command_digest,
                     now,
+                    snapshot_id,
                 ),
             )
         return rid
+
+    def record_provider_binding(
+        self,
+        sot_repo_id: str,
+        provider_name: str,
+        provider_project_id: str,
+        *,
+        provider_generation: Optional[int] = None,
+        head_sha: Optional[str] = None,
+        branch: Optional[str] = None,
+    ) -> str:
+        """Upsert the identity mapping repo -> provider -> project (v7).
+
+        One row per ``(sot_repo_id, provider_name)``: re-binding the same
+        pair updates head_sha/branch/generation in place instead of
+        duplicating rows. Returns the row id.
+        """
+        import uuid
+        now = int(time.time())
+        with self.conn:
+            existing = self.conn.execute(
+                "SELECT id FROM provider_project_bindings "
+                "WHERE sot_repo_id = ? AND provider_name = ?",
+                (sot_repo_id, provider_name),
+            ).fetchone()
+            if existing is not None:
+                bid = existing[0]
+                self.conn.execute(
+                    "UPDATE provider_project_bindings SET provider_project_id = ?, "
+                    "provider_generation = ?, head_sha = ?, branch = ?, updated_at = ? "
+                    "WHERE id = ?",
+                    (provider_project_id, provider_generation, head_sha, branch,
+                     now, bid),
+                )
+            else:
+                bid = f"bind_{now}_{uuid.uuid4().hex[:8]}"
+                self.conn.execute(
+                    "INSERT INTO provider_project_bindings "
+                    "(id, sot_repo_id, provider_name, provider_project_id, "
+                    "provider_generation, head_sha, branch, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (bid, sot_repo_id, provider_name, provider_project_id,
+                     provider_generation, head_sha, branch, now),
+                )
+        return bid
 
     def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve a single node by its unique id."""
@@ -1819,17 +1945,18 @@ class Database:
             meta = item.get("metadata_json")
             if meta is not None and not isinstance(meta, str):
                 meta = json.dumps(meta)
+            snap = item.get("snapshot_hash")
             rows.append((
                 eid, run_id, prov_name, path, path, src_symbol, src_symbol,
                 dst_symbol, dst_symbol, relation, relation,
                 line_start, line_end, col_start, col_end,
-                syntax_kind, documentation, confidence, meta, now, now
+                syntax_kind, documentation, confidence, meta, snap, now, now
             ))
         with self.conn:
             self.conn.executemany(
                 "INSERT OR REPLACE INTO provider_evidence "
-                "(id, run_id, provider_name, file_path, path, symbol, src_symbol, target_symbol, dst_symbol, role, relation, line_start, line_end, col_start, col_end, syntax_kind, documentation, confidence, metadata_json, recorded_at, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "(id, run_id, provider_name, file_path, path, symbol, src_symbol, target_symbol, dst_symbol, role, relation, line_start, line_end, col_start, col_end, syntax_kind, documentation, confidence, metadata_json, snapshot_hash, recorded_at, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
         return len(rows)
@@ -1840,7 +1967,8 @@ class Database:
         """Retrieve all recorded provider runs."""
         rows = self.conn.execute(
             "SELECT id, provider_name, provider_version, capability, snapshot_hash, "
-            "project_root, position_encoding, arguments_json, created_at "
+            "project_root, position_encoding, arguments_json, status, exit_code, "
+            "duration_ms, command_digest, created_at, snapshot_id "
             "FROM provider_runs ORDER BY created_at DESC"
         ).fetchall()
         return [
@@ -1853,11 +1981,15 @@ class Database:
                 "project_root": r[5],
                 "position_encoding": r[6],
                 "arguments_json": r[7],
-                "created_at": r[8],
+                "status": r[8],
+                "exit_code": r[9],
+                "duration_ms": r[10],
+                "command_digest": r[11],
+                "created_at": r[12],
+                "snapshot_id": r[13],
             }
             for r in rows
         ]
-
     def get_active_providers(self) -> List[Dict[str, str]]:
         """List distinct active providers from provider_runs or default heuristic."""
         try:

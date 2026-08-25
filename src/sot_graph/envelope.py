@@ -106,6 +106,9 @@ def wrap_envelope(
     generation: Optional[int] = None,
     manifest_digest: Optional[str] = None,
     providers: Optional[List[Dict[str, str]]] = None,
+    coverage: Optional[Dict[str, Any]] = None,
+    known_gaps: Optional[List[str]] = None,
+    truncated: bool = False,
 ) -> Dict[str, Any]:
     """Wrap output in the standard North-Star response envelope.
     
@@ -137,6 +140,15 @@ def wrap_envelope(
         "conflicts_detected": conflicts_detected or [],
         "data": data,
     }
+
+    # Federation extras (additive): only present when a caller supplies them,
+    # so legacy builtin responses keep their exact previous shape.
+    if coverage is not None:
+        envelope["coverage"] = coverage
+    if known_gaps is not None:
+        envelope["known_gaps"] = known_gaps
+    if truncated:
+        envelope["truncated"] = True
 
     # Seamless backward compatibility: expose top-level keys if data is a dict
     if isinstance(data, dict):

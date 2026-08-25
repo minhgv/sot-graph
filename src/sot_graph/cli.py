@@ -9,7 +9,7 @@ import json
 import os
 import sys
 import time
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Mapping, Optional, Sequence
 
 import sqlite3
 
@@ -237,7 +237,604 @@ def _resolve_symbol(db: Database, query: str):
     return row
 
 
-def cmd_explore(args: argparse.Namespace, db: Database) -> int:
+# -------------------------------------------------------------------------
+# Federated provider query path (--provider builtin|auto|prefer|require|all)
+# -------------------------------------------------------------------------
+
+#: Providers this CLI can actually query through an adapter (P1: CBM only).
+_QUERYABLE_PROVIDERS = frozenset({"codebase-memory"})
+
+#: METHOD_CAPABILITIES speaks in method-ish capability strings while provider
+#: config advertises guide §11.3 names; alias so negotiation stays table-driven.
+_CAPABILITY_ALIASES: Dict[str, tuple[str, ...]] = {
+    "trace": ("trace", "callgraph"),
+    "impact": ("impact",),
+    "search_symbols": ("symbols",),
+}
+
+#: CLI command -> guide §11.3 capability used for registry ranking.
+_COMMAND_CAPABILITY = {
+    "explore": "callgraph",
+    "usages": "symbols",
+    "diff-impact": "impact",
+}
+
+
+def _parse_provider_spec(value: Optional[str]) -> tuple[str, Optional[str]]:
+    """Validate a ``--provider`` spec; returns ``(mode, name)``.
+
+    Modes: builtin (default), auto, all, prefer:<name>, require:<name>.
+    """
+    if value is None or value == "builtin":
+        return "builtin", None
+    if value in ("auto", "all"):
+        return value, None
+    if ":" in value:
+        mode, _, name = value.partition(":")
+        if mode in ("prefer", "require") and name.strip():
+            return mode, name.strip()
+    raise ValueError(
+        f"invalid --provider value {value!r}; expected "
+        "builtin | auto | prefer:<name> | require:<name> | all"
+    )
+
+
+def _supports_capability(provider: Any, method: str) -> bool:
+    """supports_method negotiation plus §11.3 capability-name aliases."""
+    from sot_graph.providers.base import supports_method
+
+    if supports_method(provider, method):
+        return True
+    caps = tuple(getattr(provider, "capabilities", ()) or ())
+    return any(alias in caps for alias in _CAPABILITY_ALIASES.get(method, ()))
+
+
+def _federation_plan(args: argparse.Namespace, root: str, command_kind: str) -> dict:
+    """Resolve ``--provider`` for one command into an executable plan.
+
+    builtin/absent never spawns anything; every other mode is gated behind
+    ``allow_external`` and probing. ``require:<name>`` fails closed (returns
+    ``fail_message``) when blocked or unhealthy; the other modes degrade to
+    an honest builtin-only fallback with a warning.
+    """
+    from sot_graph.config import load_config
+    from sot_graph.providers.codebase_memory import CodebaseMemoryProvider
+    from sot_graph.providers_registry import resolve_capability
+
+    try:
+        mode, name = _parse_provider_spec(getattr(args, "provider", None))
+    except ValueError as exc:
+        return {"mode": "invalid", "name": None, "warnings": [],
+                "fail_message": str(exc), "provider": None, "status": None}
+    plan: dict = {"mode": mode, "name": name, "warnings": [],
+                  "fail_message": None, "provider": None, "status": None}
+    if mode == "builtin":
+        return plan
+
+    cfg = load_config(root)
+    if not cfg.allow_external:
+        msg = "external providers disabled (allow_external=false)"
+        if mode == "require":
+            plan["fail_message"] = f"{msg}: --provider require:{name} fails closed"
+        else:
+            plan["warnings"].append(f"{msg}; using sot-builtin only")
+        return plan
+
+    if mode in ("prefer", "require"):
+        names = [name]
+    else:  # auto | all: registry-ranked external providers for this command
+        ranked = [
+            st.name for st in resolve_capability(root, _COMMAND_CAPABILITY[command_kind], cfg)
+            if st.name != "sot-builtin"
+        ]
+        names = [n for n in ranked if n in _QUERYABLE_PROVIDERS]
+        if mode == "auto":
+            names = names[:1]
+    if not names:
+        plan["warnings"].append(
+            f"no queryable external provider for '{command_kind}'; using sot-builtin only"
+        )
+        return plan
+
+    target = names[0]
+    pcfg = cfg.providers.get(target)
+    if (
+        pcfg is None or pcfg.enabled is False
+        or pcfg.integration != "cli" or target not in _QUERYABLE_PROVIDERS
+    ):
+        msg = f"provider '{target}' is not queryable through an adapter in P1"
+        if mode == "require":
+            plan["fail_message"] = msg
+        else:
+            plan["warnings"].append(f"{msg}; using sot-builtin only")
+    provider = CodebaseMemoryProvider(config=pcfg)
+    st = provider.probe(root)
+    plan["status"] = {
+        "name": target, "installed": st.installed, "healthy": st.healthy,
+        "version": st.version, "detail": st.detail,
+    }
+    if not (st.installed and st.healthy):
+        msg = f"provider '{target}' unavailable ({st.detail})"
+        if mode == "require":
+            plan["fail_message"] = f"{msg}: failing closed"
+        else:
+            plan["warnings"].append(f"{msg}; using sot-builtin only")
+        return plan
+    plan["provider"] = provider
+    return plan
+
+
+def _run_federated_query(plan: dict, root: str, command_kind: str, symbol: str):
+    """Invoke the negotiated CBM method; returns ``(outcome, method)``."""
+    from sot_graph.providers.base import ImpactRequest, SymbolRequest, TraceRequest
+
+    provider = plan["provider"]
+    if command_kind == "diff-impact":
+        method = "impact" if _supports_capability(provider, "impact") else None
+    elif _supports_capability(provider, "trace"):
+        method = "trace"
+    elif _supports_capability(provider, "search_symbols"):
+        method = "search_symbols"
+    else:
+        method = None
+    if method is None:
+        return None, None
+    if method == "impact":
+        outcome = provider.impact(ImpactRequest(repo_root=root, path=root))
+    elif method == "trace":
+        outcome = provider.trace(TraceRequest(repo_root=root, symbol=symbol))
+    else:
+        outcome = provider.search_symbols(
+            SymbolRequest(repo_root=root, query=symbol)
+        )
+    return outcome, method
+
+
+_SEARCH_ROW_LINES = __import__("re").compile(r"^\d+-\d+$")
+
+
+def _parse_cbm_search_report(text: str) -> tuple[list, bool]:
+    """Parse a search_graph text report; returns (rows, has_more)."""
+    rows: list = []
+    has_more = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.lower().startswith("has_more:"):
+            has_more = line.split(":", 1)[1].strip().lower() == "true"
+            continue
+        tokens = line.split()
+        if len(tokens) < 5 or not _SEARCH_ROW_LINES.match(tokens[-2]):
+            continue
+        rank = tokens[-1]
+        try:
+            float(rank)
+        except ValueError:
+            continue
+        start_s, _, end_s = tokens[-2].partition("-")
+        rows.append({
+            "qualified_name": " ".join(tokens[:-4]),
+            "kind": tokens[-4],
+            "path": tokens[-3],
+            "start_line": int(start_s),
+            "end_line": int(end_s),
+        })
+    return rows, has_more
+
+
+def _parse_cbm_trace_report(text: str) -> list:
+    """Parse a trace_path text report; returns rows of group/name/hop/direction."""
+    section = None
+    group = None
+    rows: list = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        low = line.lower()
+        if low.startswith(("callees_total:", "callers_total:")):
+            section = "callees" if low.startswith("callees_total:") else "callers"
+            group = None
+            continue
+        if low.startswith(("function:", "direction:", "callees:", "callers:")):
+            continue
+        if line.endswith(":"):
+            group = line[:-1].strip()
+            continue
+        parts = line.split()
+        if group and section and len(parts) == 2 and parts[1].isdigit():
+            rows.append({
+                "group_qn": group, "name": parts[0],
+                "hop": int(parts[1]), "direction": section,
+            })
+    return rows
+
+
+def _candidate_entry(assertion, provider_name: str) -> dict:
+    subj = assertion.subject
+    resolution = getattr(assertion.resolution, "value", assertion.resolution)
+    return {
+        "provider": provider_name,
+        "relation": assertion.relation,
+        "verdict": assertion.verdict,
+        "resolution": str(resolution),
+        "subject": {
+            "qualified_name": getattr(subj, "qualified_name", None),
+            "kind": getattr(subj, "kind", None),
+            "path": getattr(subj, "path", None),
+            "start_line": getattr(subj, "start_line", None),
+            "end_line": getattr(subj, "end_line", None),
+        },
+        "targets": list(assertion.targets),
+        "problems": list(assertion.problems),
+    }
+
+
+def _snapshot_match_of(outcome):
+    """Read the snapshot-binding report off a CBM outcome, tolerantly.
+
+    Preferred shape: duck-typed ``outcome.snapshot_match`` with
+    ``{bound, fresh, detail}``. The P2 adapter instead travels the verdict
+    in ``metadata`` (``freshness`` FRESH/STALE/UNKNOWN/UNBOUND +
+    ``snapshot_bound``); derive the same shape from it so a bound+fresh
+    adapter outcome is never silently capped at UNVERIFIABLE. Returns
+    ``None`` when neither shape is present (treated as unbound).
+    """
+    match = getattr(outcome, "snapshot_match", None)
+    if match is not None:
+        return match
+    metadata = getattr(outcome, "metadata", None) or {}
+    if not isinstance(metadata, Mapping):
+        return None
+    if "freshness" not in metadata and "snapshot_bound" not in metadata:
+        return None
+    freshness = str(metadata.get("freshness") or "")
+    return {
+        "bound": bool(metadata.get("snapshot_bound")),
+        "fresh": freshness == "FRESH",
+        "detail": f"adapter freshness marker: {freshness or 'absent'}",
+    }
+
+
+def _cbm_candidates_from_outcome(outcome, method: str, provider_name: str,
+                                 repo_root: str | None = None):
+    """Normalize a CBM QueryOutcome into candidate entries.
+
+    Returns ``(candidates, truncated, gap_note)``. When the outcome carries
+    a snapshot binding report (see :func:`_snapshot_match_of`) and
+    ``repo_root`` is given, each candidate's subject span is re-verified
+    against current source via :func:`verify_subject`; only VERIFIED +
+    bound+fresh candidates may reach SUPPORTED. Candidates gain ``verified``
+    and ``detail`` fields describing the on-disk verification result.
+    """
+    from sot_graph.providers.normalization import normalize_assertion, trust_ceiling
+    from sot_graph.providers.verification import verify_subject
+
+    snapshot_match = _snapshot_match_of(outcome)
+
+    def _finish(assertion):
+        cand = _candidate_entry(assertion, provider_name)
+        if repo_root is None:
+            return cand
+        subject = assertion.subject
+        verification = (
+            verify_subject(subject, repo_root)
+            if getattr(subject, "path", None)
+            else None
+        )
+        has_span = getattr(subject, "start_line", None) is not None
+        verdict, resolution = trust_ceiling(
+            snapshot_bound=(
+                bool(snapshot_match.get("bound"))
+                if isinstance(snapshot_match, Mapping)
+                else bool(getattr(snapshot_match, "bound", False))
+            ),
+            has_span=has_span,
+            unique_target=len(assertion.targets) == 1,
+            verification=verification,
+            snapshot_match=snapshot_match,
+        )
+        cand["verdict"] = verdict
+        cand["resolution"] = str(getattr(resolution, "value", resolution))
+        cand["verified"] = (
+            getattr(verification, "status", None) if verification else None
+        )
+        cand["detail"] = getattr(verification, "detail", "") if verification else ""
+        return cand
+
+    candidates: list = []
+    truncated = bool((outcome.metadata or {}).get("wire_status") == "truncated")
+    payload = outcome.payload
+
+    if method == "impact":
+        # detect_changes carries no mappable relation; record each impacted
+        # path as an explicitly UNMAPPED advisory candidate.
+        paths = payload.get("impacted") if isinstance(payload, dict) else None
+        paths = paths if isinstance(paths, list) else []
+        for entry in paths:
+            path = entry.get("path") if isinstance(entry, dict) else entry
+            if not isinstance(path, str):
+                continue
+            assertion = normalize_assertion(
+                raw_subject={"path": path},
+                provider_relation="detect_changes",
+                targets=(path,),
+                snapshot_bound=False,
+            )
+            candidates.append(_finish(assertion))
+        return candidates, truncated, None
+
+    if not isinstance(payload, str):
+        return candidates, truncated, "unexpected CBM payload type; ignored"
+
+    if method == "trace":
+        for row in _parse_cbm_trace_report(payload):
+            qn = f"{row['group_qn']}.{row['name']}"
+            assertion = normalize_assertion(
+                raw_subject={"qualified_name": qn, "kind": "unknown"},
+                provider_relation="call",
+                targets=(qn,),
+                snapshot_bound=False,
+            )
+            candidates.append(_finish(assertion))
+        return candidates, truncated, None
+
+    rows, has_more = _parse_cbm_search_report(payload)
+    for row in rows:
+        assertion = normalize_assertion(
+            raw_subject={
+                "qualified_name": row["qualified_name"], "kind": row["kind"],
+                "path": row["path"],
+                "span": {"start_line": row["start_line"], "end_line": row["end_line"]},
+            },
+            provider_relation="define",
+            targets=(row["qualified_name"],),
+            snapshot_bound=False,
+        )
+        candidates.append(_finish(assertion))
+    return candidates, (truncated or has_more), None
+
+def _target_conflicts(builtin_target, candidates: list,
+                      repo_root: str | None = None) -> list:
+    """Record builtin vs CBM target disagreements.
+
+    ``builtin_target`` is ``(label, path, line)`` from the local graph, or
+    None. A conflict is recorded when a CBM candidate claiming the same
+    symbol name lands on a different file/span.
+
+    When ``repo_root`` is given, both sides are checked against current
+    source: if exactly ONE side's span verifies (status VERIFIED), that side
+    becomes the recorded resolution (``resolution="source_verified"``) and
+    the other is marked contradicted. The conflict is still listed — never
+    silently dropped. Without a decisive verification the conflict stays
+    ``recorded-not-resolved``.
+    """
+    from sot_graph.providers.verification import VERIFIED, verify_subject
+
+    conflicts: list = []
+    if not builtin_target:
+        return conflicts
+    label, bpath, bline = builtin_target
+    for cand in candidates:
+        subj = cand["subject"]
+        qn = subj.get("qualified_name") or ""
+        if label and qn.rsplit(".", 1)[-1] != label:
+            continue
+        cpath, cline = subj.get("path"), subj.get("start_line")
+        if not cpath:
+            continue
+        differs = os.path.normpath(cpath) != os.path.normpath(bpath or "")
+        span_differs = (
+            not differs and bline is not None and cline is not None
+            and int(cline) != int(bline)
+        )
+        if not (differs or span_differs):
+            continue
+
+        conflict = {
+            "kind": "target_mismatch",
+            "symbol": label,
+            "builtin": {"path": bpath, "line": bline},
+            "external": {
+                "provider": cand["provider"],
+                "qualified_name": qn, "path": cpath, "line": cline,
+            },
+            "policy": "recorded-not-resolved",
+            "resolution": "recorded-not-resolved",
+        }
+
+        if repo_root:
+            cbm_status = cand.get("verified")
+            if cbm_status is None and subj.get("path"):
+                cbm_status = verify_subject(subj, repo_root).status
+            builtin_status = None
+            if bpath:
+                builtin_subject = {
+                    "qualified_name": label, "kind": "unknown",
+                    "path": bpath, "start_line": bline,
+                }
+                builtin_status = verify_subject(builtin_subject, repo_root).status
+
+            external_side = dict(conflict["external"])
+            builtin_side = dict(conflict["builtin"])
+            if cbm_status == VERIFIED and builtin_status != VERIFIED:
+                conflict["resolution"] = "source_verified"
+                conflict["resolved"] = external_side | {"verified": cbm_status}
+                conflict["contradicted"] = builtin_side | {"verified": builtin_status}
+            elif builtin_status == VERIFIED and cbm_status != VERIFIED:
+                conflict["resolution"] = "source_verified"
+                conflict["resolved"] = builtin_side | {"verified": builtin_status}
+                conflict["contradicted"] = external_side | {"verified": cbm_status}
+
+        conflicts.append(conflict)
+    return conflicts
+
+
+def federated_extras(
+    args: argparse.Namespace,
+    root: str,
+    command_kind: str,
+    symbol: str,
+    builtin_target=None,
+) -> Optional[dict]:
+    """Run the optional external-provider evidence path for one command.
+
+    Returns ``None`` when --provider is absent/builtin so the caller proceeds
+    completely untouched; otherwise a dict with warnings, fail_message,
+    candidates, conflicts, providers_extra, coverage, known_gaps, truncated.
+    """
+    plan = _federation_plan(args, root, command_kind)
+    result = {
+        "warnings": list(plan["warnings"]), "fail_message": plan["fail_message"],
+        "candidates": [], "conflicts": [], "providers_extra": [],
+        "coverage": None, "known_gaps": None, "truncated": False,
+    }
+    if plan["mode"] == "builtin":
+        return None
+    if plan["fail_message"]:
+        return result
+
+    status = plan["status"] or {}
+    pname = status.get("name", plan["name"] or "codebase-memory")
+    result["providers_extra"] = [{
+        "name": pname, "version": status.get("version"),
+        "role": "candidate-evidence",
+    }] if status else []
+    gaps: list = []
+    # The snapshot-binding gap is only reported when a query actually ran
+    # and the outcome still lacks a bound+fresh snapshot_match report.
+    result["coverage"] = {pname: {"queried": False}}
+
+    provider = plan["provider"]
+    if provider is None:
+        result["known_gaps"] = gaps
+        return result
+
+    outcome, method = _run_federated_query(plan, root, command_kind, symbol)
+    cov = {"queried": bool(outcome is not None and outcome.ok), "method": method}
+    if outcome is None:
+        gaps.append("capability negotiation found no invocable CBM method")
+        cov["error"] = "no invocable method"
+    elif not outcome.ok:
+        cov["error"] = outcome.error
+        if outcome.next_action:
+            gaps.append(f"{pname}: {outcome.next_action}")
+        if plan["mode"] == "require":
+            plan["fail_message"] = result["fail_message"] = (
+                f"--provider require:{pname}: query failed ({outcome.error}); "
+                "failing closed"
+            )
+            result["coverage"] = {pname: cov}
+            result["known_gaps"] = gaps
+            return result
+        result["warnings"].append(
+            f"{pname} query failed ({outcome.error}); using sot-builtin only"
+        )
+    else:
+        sm = _snapshot_match_of(outcome)
+        sm_bound = (
+            bool(sm.get("bound")) if isinstance(sm, dict)
+            else bool(getattr(sm, "bound", False))
+        )
+        if not sm_bound:
+            gaps.append(
+                "snapshot binding unproven: "
+                f"{pname} candidates are capped at UNVERIFIABLE"
+            )
+        candidates, truncated, gap_note = _cbm_candidates_from_outcome(
+            outcome, method, pname, repo_root=root
+        )
+        result["candidates"] = candidates
+        result["truncated"] = truncated
+        if gap_note:
+            gaps.append(gap_note)
+        for cand in candidates:
+            verified = cand.get("verified")
+            detail = cand.get("detail") or ""
+            if verified is not None and verified != "VERIFIED":
+                qn = cand["subject"].get("qualified_name") or "<unknown>"
+                gaps.append(
+                    f"{pname}: {qn}: source verification {verified}"
+                    + (f" ({detail})" if detail else "")
+                )
+        result["conflicts"] = _target_conflicts(
+            builtin_target, candidates, repo_root=root
+        )
+    result["coverage"] = {pname: cov}
+    result["known_gaps"] = gaps
+    return result
+
+
+def _print_fed_warnings(fed: Optional[dict]) -> None:
+    """Emit federation fallback warnings on stderr (both output modes)."""
+    if fed is None:
+        return
+    for warning in fed["warnings"]:
+        print(f"⚠️  {warning}", file=sys.stderr)
+
+
+def _print_federation_notes(fed: Optional[dict]) -> None:
+    """Emit federation warnings/notes for non-JSON output modes."""
+    _print_fed_warnings(fed)
+    if fed is None:
+        return
+    if fed["candidates"]:
+        conflicts = len(fed["conflicts"])
+        verdicts = {cand["verdict"] for cand in fed["candidates"]}
+        cap = "SUPPORTED" if "SUPPORTED" in verdicts else (
+            "/".join(sorted(verdicts)) if verdicts else "UNVERIFIABLE"
+        )
+        print(
+            f"\n🔗 Federation: {len(fed['candidates'])} external candidate(s) "
+            f"(max {cap}), {conflicts} conflict(s) recorded"
+        )
+        for cand in fed["candidates"][:10]:
+            subj = cand["subject"]
+            loc = f"{subj.get('path') or ''}:{subj.get('start_line') or '?'}"
+            print(f"    └── [{cand['verdict']}] {subj.get('qualified_name')} @ {loc}")
+
+
+def _envelope_fed_kwargs(db: Database, fed: dict) -> dict:
+    """Keyword additions for wrap_envelope reflecting one federation run."""
+    from sot_graph.envelope import get_active_providers
+
+    providers = get_active_providers(db) + fed["providers_extra"]
+    return {
+        "providers": providers,
+        "coverage": fed["coverage"],
+        "known_gaps": fed["known_gaps"],
+        "truncated": fed["truncated"],
+        "conflicts_detected": fed["conflicts"],
+    }
+
+
+def cmd_providers_sync(args: argparse.Namespace, root: str) -> int:
+    """Explicit-only index sync: P1 abstains, printing the honest next action."""
+    from dataclasses import asdict
+
+    from sot_graph.config import load_config
+    from sot_graph.providers.base import IndexRequest
+    from sot_graph.providers.codebase_memory import CodebaseMemoryProvider
+    from sot_graph.providers_registry import ADAPTER_PROBED_PROVIDERS
+
+    name = getattr(args, "provider_name", "")
+    pcfg = load_config(root).providers.get(name)
+    if pcfg is None or pcfg.name not in ADAPTER_PROBED_PROVIDERS:
+        print(
+            f"❌ sync is not available for provider '{name}'; "
+            f"supported: {', '.join(sorted(ADAPTER_PROBED_PROVIDERS))}"
+        )
+        return 1
+    provider = CodebaseMemoryProvider(config=pcfg)
+    record = provider.ensure_index(IndexRequest(repo_root=root))
+    print(f"🔁 sot providers sync {name}: {record.status} "
+          f"(P1 never triggers indexing implicitly)")
+    print(f"   detail      : {record.detail}")
+    print(f"   next_action : install/index explicitly via "
+          f"codebase-memory-mcp cli index_repository, then re-run "
+          f"sot providers sync {name}")
+    print("   run_record  : " + json.dumps(asdict(record), indent=2))
+    return 0
+
+
+def cmd_explore(args: argparse.Namespace, db: Database, root: str = ".") -> int:
     query = args.target.strip()
     row = _resolve_symbol(db, query)
     if not row:
@@ -245,6 +842,12 @@ def cmd_explore(args: argparse.Namespace, db: Database) -> int:
         return 1
 
     node_id, label, kind, path, line, _symbol = row
+    fed = federated_extras(
+        args, root, "explore", query, builtin_target=(_symbol, path, line),
+    )
+    if fed is not None and fed["fail_message"]:
+        print(f"❌ {fed['fail_message']}", file=sys.stderr)
+        return 2
     relations = db.explore_node(node_id, depth=args.depth)
 
     if getattr(args, "json", False):
@@ -266,7 +869,12 @@ def cmd_explore(args: argparse.Namespace, db: Database) -> int:
             "hop_summary": hop_summary,
             "relations": relations,
         }
-        envelope = wrap_envelope(payload, db=db)
+        if fed is not None:
+            _print_fed_warnings(fed)
+            payload["external_candidates"] = fed["candidates"]
+            envelope = wrap_envelope(payload, db=db, **_envelope_fed_kwargs(db, fed))
+        else:
+            envelope = wrap_envelope(payload, db=db)
         print(json.dumps(envelope, indent=2))
         return 0
 
@@ -304,6 +912,7 @@ def cmd_explore(args: argparse.Namespace, db: Database) -> int:
     _render_section("◀ 1-Hop Direct Inward References (Used by)", inward_direct, is_transitive=False)
     _render_section("◀ 2-Hop Transitive Inward References", inward_trans, is_transitive=True)
 
+    _print_federation_notes(fed)
     print()
     return 0
 
@@ -318,20 +927,31 @@ def _print_usages_risk(risk: list, symbol: str) -> None:
               f" ({item['relation']}) @ {item['path']}:{item['line'] or 1}")
 
 
-def cmd_usages(args: argparse.Namespace, db: Database) -> int:
+def cmd_usages(args: argparse.Namespace, db: Database, root: str = ".") -> int:
     query = args.target.strip()
     row = _resolve_symbol(db, query)
     if not row:
         print(f"❌ No symbol or node matching '{query}' found in graph.")
         return 1
     node_id, label, kind, path, line, symbol = row
+    fed = federated_extras(
+        args, root, "usages", query, builtin_target=(symbol, path, line),
+    )
+    if fed is not None and fed["fail_message"]:
+        print(f"❌ {fed['fail_message']}", file=sys.stderr)
+        return 2
 
     data = db.usages(node_id, symbol)
     total = sum(len(c["sites"]) for c in data["callers"])
     unresolved_count = data.get("unresolved_count", len(data.get("risk", [])))
 
     if getattr(args, "json", False):
-        envelope = wrap_envelope(data, db=db)
+        if fed is not None:
+            _print_fed_warnings(fed)
+            data["external_candidates"] = fed["candidates"]
+            envelope = wrap_envelope(data, db=db, **_envelope_fed_kwargs(db, fed))
+        else:
+            envelope = wrap_envelope(data, db=db)
         print(json.dumps(envelope, indent=2))
         return 0
 
@@ -352,6 +972,7 @@ def cmd_usages(args: argparse.Namespace, db: Database) -> int:
         print("\n  👉 Next Steps:")
         for step in data["next_steps"]:
             print(f"     • {step}")
+    _print_federation_notes(fed)
     print()
     return 0
 
@@ -875,6 +1496,9 @@ def cmd_providers(args: argparse.Namespace, root: str) -> int:
     fmt = getattr(args, "format", "text")
     sub = args.providers_subcommand
 
+    if sub == "sync":
+        return cmd_providers_sync(args, root)
+
     if sub == "detect":
         rows = [asdict(st) for st in detect_providers(root)]
         if fmt == "json":
@@ -1107,7 +1731,20 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
         working_tree=working_tree,
     )
 
+    fed = federated_extras(args, root, "diff-impact", target)
+    if fed is not None and fed["fail_message"]:
+        print(f"❌ {fed['fail_message']}", file=sys.stderr)
+        return 2
+
     if getattr(args, "json", False):
+        if fed is not None:
+            _print_fed_warnings(fed)
+            payload = res.to_dict()
+            payload["external_candidates"] = fed["candidates"]
+            envelope = wrap_envelope(payload, db=db, **_envelope_fed_kwargs(db, fed))
+            print(json.dumps(envelope, indent=2))
+            _print_federation_notes(fed)
+            return 0
         print(format_diff_impact_json(res))
         return 0
 
@@ -1120,6 +1757,7 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
         print(f"📊 Diff impact report written to: {out_path}")
     else:
         print(md)
+    _print_federation_notes(fed)
     return 0
 
 
@@ -1468,10 +2106,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_exp.add_argument("--depth", type=int, default=2, help="Graph walk depth (default: 2)")
     p_exp.add_argument("--all", dest="show_all", action="store_true", help="Show all references without collapsing large hubs (default: collapse if > 15 items)")
     p_exp.add_argument("--json", action="store_true", help="Output explore graph in JSON format")
+    p_exp.add_argument("--provider", default="builtin",
+                       help="External evidence providers: builtin | auto | prefer:<name> | require:<name> | all (default: builtin)")
     # usages
     p_usg = subparsers.add_parser("usages", help="List every reference site of a symbol, grouped by caller")
     p_usg.add_argument("target", help="Symbol, function name, or class to inspect")
+    p_usg.add_argument("--json", action="store_true", help="Output raw JSON format")
 
+    p_usg.add_argument("--provider", default="builtin",
+                       help="External evidence providers: builtin | auto | prefer:<name> | require:<name> | all (default: builtin)")
     # implementations
     p_imp = subparsers.add_parser("implementations", help="Show extends/implements relationships of a symbol")
     p_imp.add_argument("target", help="Base class/interface or derived type to inspect")
@@ -1684,6 +2327,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_prov_res.add_argument("--capability", required=True, help="Capability to resolve (e.g. impact, symbols, callgraph)")
     p_prov_res.add_argument("--format", default="text", choices=["text", "json"], help="Output format (default: text)")
 
+    p_prov_sync = prov_subs.add_parser("sync", help="Explicit index sync for one provider (P1: abstains, prints next action)")
+    p_prov_sync.add_argument("provider_name", help="Provider name (e.g. codebase-memory)")
+
     # diff-impact
     p_diff = subparsers.add_parser("diff-impact", help="Git diff blast radius, upstream caller traversal, and API impact analysis")
     p_diff.add_argument("target", nargs="?", default="HEAD~1", help="Git revision target (e.g. 'HEAD~1', 'main...HEAD', commit hash; default: HEAD~1)")
@@ -1693,6 +2339,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_diff.add_argument("--auto-reconcile", action="store_true", help="Reconcile knowledge graph before analyzing impact")
     p_diff.add_argument("-o", "--output", default=None, help="Output markdown file path")
     p_diff.add_argument("--json", action="store_true", help="Output raw JSON format")
+    p_diff.add_argument("--provider", default="builtin",
+                        help="External evidence providers: builtin | auto | prefer:<name> | require:<name> | all (default: builtin)")
 
     # log / commits
     p_log = subparsers.add_parser("log", aliases=["commits"], help="Inspect git commit history with automated risk scoring and impacted symbols")
@@ -1754,9 +2402,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.command == "search":
             return cmd_search(args, db, root)
         elif args.command == "explore":
-            return cmd_explore(args, db)
+            return cmd_explore(args, db, root)
         elif args.command == "usages":
-            return cmd_usages(args, db)
+            return cmd_usages(args, db, root)
         elif args.command == "implementations":
             return cmd_implementations(args, db)
         elif args.command == "rename":
