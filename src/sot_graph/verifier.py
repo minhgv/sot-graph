@@ -158,20 +158,58 @@ class TrustVerifier:
             except SyntaxError:
                 pass  # Fall through to regex/lexical
 
+        # Strip comments and string literals to prevent commented-out code or string literals
+        # from claiming EXACT_SPAN or EXACT_SYMBOL
+        stripped_content = text_content
+        if ext in (".js", ".ts", ".tsx", ".jsx", ".java", ".c", ".cpp", ".cs", ".go", ".rs", ".php", ".swift", ".kt"):
+            pattern = re.compile(
+                r'(/\*[\s\S]*?\*/)'          # block comment
+                r'|(//[^\n]*)'               # line comment
+                r'|("(?:\\.|[^"\\])*")'      # double-quoted string
+                r"|('(?:\\.|[^'\\])*')"      # single-quoted string
+                r'|(`(?:\\.|[^`\\])*`)',     # template string
+                re.MULTILINE
+            )
+            def replacer(match):
+                s = match.group(0)
+                if s.startswith("/*"):
+                    return "\n" * s.count("\n")
+                elif s.startswith("//"):
+                    return ""
+                else:
+                    return '"' + ("\n" * s.count("\n")) + '"'
+            stripped_content = pattern.sub(replacer, text_content)
+        elif ext in (".py", ".sh", ".rb"):
+            pattern = re.compile(
+                r'(#[^\n]*)'
+                r'|("""[\s\S]*?""")'
+                r"|('''[\s\S]*?''')"
+                r'|("(?:\\.|[^"\\])*")'
+                r"|('(?:\\.|[^'\\])*')",
+                re.MULTILINE
+            )
+            def replacer(match):
+                s = match.group(0)
+                if s.startswith("#"):
+                    return ""
+                else:
+                    return '"' + ("\n" * s.count("\n")) + '"'
+            stripped_content = pattern.sub(replacer, text_content)
+
         # Generic regex declaration check for other languages / fallback
         decl_pat = re.compile(
             rf"(?:function|class|def|interface|type|const|let|var|func|fn|struct|enum|trait)\s+{re.escape(symbol_needle)}\b",
             re.MULTILINE,
         )
-        if decl_pat.search(text_content):
+        if decl_pat.search(stripped_content):
             if cand_line and cand_line > 0:
-                lines = text_content.splitlines()
+                lines = stripped_content.splitlines()
                 start_idx = max(0, cand_line - 5)
                 end_idx = min(len(lines), cand_line + 5)
                 span_text = "\n".join(lines[start_idx:end_idx])
                 if decl_pat.search(span_text):
                     return RelevanceType.EXACT_SPAN, "regex_decl:exact_span"
-                if symbol_needle in span_text and not span_text.strip().startswith(("#", "//", "/*", "*")):
+                if symbol_needle in span_text:
                     return RelevanceType.EXACT_SYMBOL, "regex_decl:structural_candidate"
             return RelevanceType.EXACT_SYMBOL, "regex_decl:exact_symbol"
         if symbol_needle in text_content:
@@ -179,7 +217,6 @@ class TrustVerifier:
         if cov and cov >= threshold:
             return RelevanceType.FILE_TOKEN, "lexical:file_token"
         return RelevanceType.NAME_ONLY, "lexical:name_only"
-
     @staticmethod
     def _rehomable(new_path: str, candidate: Dict[str, Any]) -> bool:
         """Guard against basename collisions re-homing nodes onto the wrong file."""
@@ -211,7 +248,7 @@ class TrustVerifier:
         """
         path = candidate.get("path")
         node_id = candidate.get("id", "")
-        root = os.path.realpath(os.path.abspath(project_root))
+        root = os.path.abspath(project_root)
 
         if not path or not str(path).strip():
             return TrustEvidence(
@@ -230,13 +267,12 @@ class TrustVerifier:
 
         def _inside_root(value: str) -> bool:
             try:
-                return os.path.commonpath([root, os.path.realpath(value)]) == root
+                return os.path.commonpath([os.path.realpath(root), os.path.realpath(value)]) == os.path.realpath(root)
             except (OSError, ValueError):
                 return False
 
         if not os.path.isabs(str(path)):
             requested = os.path.abspath(os.path.join(root, str(path)))
-
         if not _inside_root(requested):
             return TrustEvidence(
                 freshness=FreshnessStatus.STALE,
@@ -304,7 +340,6 @@ class TrustVerifier:
 
             # Check freshness strictly against file_journal in DB
             rel_path = os.path.relpath(requested, root).replace(os.sep, "/")
-            freshness = FreshnessStatus.FRESH
             is_stale = False
             journal_sha256 = None
             if db is not None:
@@ -337,6 +372,23 @@ class TrustVerifier:
                                 rec.reconcile(paths=[requested], workers=1)
                                 freshness = FreshnessStatus.FRESH
                                 is_stale = False
+                                # Post-reconcile check: verify if the candidate node still physically exists in DB
+                                cand_id = candidate.get("id")
+                                if cand_id and hasattr(db, "get_node"):
+                                    post_node = db.get_node(cand_id)
+                                    if post_node is None:
+                                        # Node was purged during reconciliation -> mark REMOVED
+                                        return TrustEvidence(
+                                            freshness=FreshnessStatus.FRESH,
+                                            relevance=RelevanceType.NAME_ONLY,
+                                            resolution=ResolutionStatus.UNRESOLVED,
+                                            completeness=CompletenessStatus.NOT_APPLICABLE,
+                                            confidence=0.0,
+                                            provenance="jit_reconcile:purged",
+                                            file_path=requested,
+                                            file_hash=file_hash,
+                                            details={"removed": True, "stale": False},
+                                        )
                             except Exception:
                                 freshness = FreshnessStatus.STALE
                         else:
@@ -345,7 +397,6 @@ class TrustVerifier:
                         freshness = FreshnessStatus.FRESH
             else:
                 freshness = FreshnessStatus.UNKNOWN
-
             # Relevance detection via AST declaration verification
             cand_symbol = candidate.get("symbol")
             cand_line = candidate.get("line_start") or candidate.get("line")

@@ -657,6 +657,28 @@ class ScipImporter:
             doc_pos_enc = doc.get("position_encoding")
             doc_encoding = doc_pos_enc if doc_pos_enc is not None else text_encoding
 
+            # Pre-pass: collect all definition spans in this document to attribute enclosing caller symbols
+            def_spans: List[Dict[str, Any]] = []
+            for occ in doc.get("occurrences", []):
+                roles = occ.get("symbol_roles", 0)
+                if roles & ROLE_DEFINITION:
+                    symbol_raw = occ.get("symbol", "")
+                    if symbol_raw:
+                        sym_info = parse_scip_symbol(symbol_raw)
+                        range_ints = occ.get("range", [])
+                        sp = translate_scip_range(range_ints, encoding=doc_encoding, source_text=doc_text)
+                        def_spans.append({
+                            "symbol_raw": symbol_raw,
+                            "bare_name": sym_info["bare_name"],
+                            "line_start": sp["line_start"],
+                            "line_end": sp["line_end"],
+                            "col_start": sp["col_start"],
+                            "col_end": sp["col_end"],
+                        })
+
+            # Sort def_spans by line_start
+            def_spans.sort(key=lambda x: (x["line_start"] or 0, x["col_start"] or 0))
+
             # 1. Process Occurrences
             for occ in doc.get("occurrences", []):
                 occurrences_count += 1
@@ -684,7 +706,18 @@ class ScipImporter:
                 else:
                     references_count += 1
                     relation = "references"
-                    src_sym = norm_path
+                    # Determine enclosing symbol if the reference occurs within a definition span
+                    enclosing_sym = norm_path
+                    occ_line = spans["line_start"]
+                    if occ_line:
+                        # Find the closest preceding definition (or exact range enclosing if line_end is set)
+                        candidates = [
+                            d for d in def_spans
+                            if d["line_start"] and d["line_start"] <= occ_line and (d["line_end"] is None or d["line_end"] >= occ_line or d["line_end"] == d["line_start"])
+                        ]
+                        if candidates:
+                            enclosing_sym = candidates[-1]["bare_name"]
+                    src_sym = enclosing_sym
                     dst_sym = bare_symbol
 
                 override_doc = occ.get("override_documentation")
@@ -710,8 +743,6 @@ class ScipImporter:
                         "fqn": sym_info.get("fqn"),
                     },
                 })
-
-            # 2. Process Symbol Information & Relationships
             for sym in doc.get("symbols", []):
                 sym_raw = sym.get("symbol", "")
                 if not sym_raw:
@@ -755,12 +786,21 @@ class ScipImporter:
                         },
                     })
         # Batch insert provider run and evidence under write lock
+        # Compute manifest digest / snapshot_hash from file_journal if available
+        snapshot_hash = None
+        try:
+            row = self.db.conn.execute("SELECT MAX(generation) FROM file_journal").fetchone()
+            if row and row[0]:
+                snapshot_hash = f"gen_{row[0]}"
+        except Exception:
+            snapshot_hash = None
+
         with self.db.write_lock():
             rid = self.db.record_provider_run(
                 provider_name=prov_name,
                 provider_version=prov_ver,
                 capability="COMPILER_INDEXED_SYMBOLS",
-                snapshot_hash=None,
+                snapshot_hash=snapshot_hash,
                 project_root=proj_root,
                 position_encoding=encoding_str,
                 arguments_json=json.dumps(tool_info.get("arguments", [])),

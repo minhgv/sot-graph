@@ -122,8 +122,8 @@ def _classify_call(
     func = call.func
     if isinstance(func, ast.Name):
         name = func.id
-        import_source = import_map.get(name)
-        is_shadowed = bool(name in bound and not import_source)
+        is_shadowed = bool(name in bound)
+        import_source = None if is_shadowed else import_map.get(name)
         builtin = (
             not import_source
             and not is_shadowed
@@ -331,7 +331,10 @@ def extract_python(path: Path) -> Dict[str, Any]:
                 if isinstance(child.func, ast.Name):
                     if child.func.id == node.name:
                         continue
-                    callee = alias_symbol_map.get(child.func.id, child.func.id)
+                    if child.func.id in bound:
+                        callee = child.func.id
+                    else:
+                        callee = alias_symbol_map.get(child.func.id, child.func.id)
                 elif isinstance(child.func, ast.Attribute):
                     attr_recv = child.func.value
                     # super().x() dispatches to parent class method
