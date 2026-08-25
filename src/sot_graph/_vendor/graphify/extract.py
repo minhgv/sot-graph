@@ -566,21 +566,22 @@ def extract_rust(path: Path) -> Dict[str, Any]:
 
 
 def extract_c(path: Path) -> Dict[str, Any]:
+    """C language extractor (tree-sitter when available, regex fallback)."""
     patterns = [
         {"regex": r"(?:struct|enum|union)\s+([a-zA-Z0-9_]+)\s*\{?", "kind": "struct", "prefix": "struct"},
         {"regex": r"^[a-zA-Z0-9_*]+\s+([a-zA-Z0-9_]+)\s*\([^)]*\)\s*\{?", "kind": "function", "prefix": "c_func"},
     ]
-    return _extract_regex_patterns(path, patterns)
+    return _ts_or_regex(path, "c", patterns)
 
 
 def extract_cpp(path: Path) -> Dict[str, Any]:
+    """C++ language extractor (tree-sitter when available, regex fallback)."""
     patterns = [
         {"regex": r"class\s+([a-zA-Z0-9_]+)", "kind": "class", "prefix": "class"},
         {"regex": r"struct\s+([a-zA-Z0-9_]+)", "kind": "struct", "prefix": "struct"},
         {"regex": r"(?:[a-zA-Z0-9_:<>]+\s+)+([a-zA-Z0-9_]+)\s*\([^)]*\)\s*(?:const)?\s*\{?", "kind": "function", "prefix": "cpp_func"},
     ]
-    return _extract_regex_patterns(path, patterns)
-
+    return _ts_or_regex(path, "cpp", patterns)
 
 JAVA_TYPE_HEADER_PAT = re.compile(
     r"\b(?:class|interface|enum|record)\s+([A-Za-z_][A-Za-z0-9_]*)"

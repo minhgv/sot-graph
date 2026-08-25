@@ -191,14 +191,44 @@ CONFIGS: Dict[str, Dict[str, Any]] = {
             "extends_child_types": ("base_list",),
         },
     },
+    "c": {
+        "module": "tree_sitter_c",
+        "loader": "language",
+        "defs": {
+            "function_definition": ("declarator", "function"),
+            "struct_specifier": ("name", "class"),
+            "enum_specifier": ("name", "class"),
+            "union_specifier": ("name", "class"),
+            "type_definition": ("declarator", "class"),
+        },
+        "calls": [{"type": "call_expression", "field": "function"}],
+        "imports": [r'#include\s*[<"]([^>"]+)[>"]'],
+    },
+    "cpp": {
+        "module": "tree_sitter_cpp",
+        "loader": "language",
+        "defs": {
+            "class_specifier": ("name", "class"),
+            "struct_specifier": ("name", "class"),
+            "enum_specifier": ("name", "class"),
+            "union_specifier": ("name", "class"),
+            "namespace_definition": ("name", "class"),
+            "function_definition": ("declarator", "function"),
+        },
+        "calls": [{"type": "call_expression", "field": "function"}],
+        "imports": [r'#include\s*[<"]([^>"]+)[>"]'],
+        "inheritance": {
+            "types": {"class_specifier", "struct_specifier"},
+            "extends_child_types": ("base_class_clause",),
+        },
+    },
 }
 
 _NAME_CHILD_TYPES = (
     "simple_identifier", "identifier", "type_identifier", "name",
-    "field_identifier", "property_identifier"
+    "namespace_identifier", "field_identifier", "property_identifier", "destructor_name"
 )
-_CALLEE_RE = re.compile(r"\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\(")
-
+_CALLEE_RE = re.compile(r"\s*([A-Za-z_~][A-Za-z0-9_.]*)\s*\(")
 
 def available_languages() -> Dict[str, bool]:
     """Which configured languages have importable grammar wheels."""
@@ -247,20 +277,52 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
     def line(node: Any) -> int:
         return node.start_point[0] + 1
 
+    def _unwrap_declarator(d_node: Any) -> Optional[str]:
+        if d_node is None:
+            return None
+        if d_node.type in _NAME_CHILD_TYPES:
+            raw_n = text(d_node).strip()
+            match = re.match(r"[~]?[A-Za-z_][A-Za-z0-9_]*", raw_n)
+            return match.group(0) if match else None
+        if d_node.type == "qualified_identifier":
+            name_child = d_node.child_by_field_name("name")
+            res = _unwrap_declarator(name_child)
+            if res:
+                return res
+            raw_q = text(d_node).strip().split("::")[-1]
+            match = re.match(r"[~]?[A-Za-z_][A-Za-z0-9_]*", raw_q)
+            return match.group(0) if match else None
+        if d_node.type == "function_declarator":
+            inner = d_node.child_by_field_name("declarator") or (d_node.children[0] if d_node.children else None)
+            return _unwrap_declarator(inner)
+        if d_node.type in ("pointer_declarator", "reference_declarator", "parenthesized_declarator"):
+            inner = d_node.child_by_field_name("declarator") or (d_node.children[-1] if d_node.children else None)
+            return _unwrap_declarator(inner)
+        if d_node.type == "template_function":
+            inner = d_node.child_by_field_name("name") or (d_node.children[0] if d_node.children else None)
+            return _unwrap_declarator(inner)
+        if d_node.type in ("class_specifier", "struct_specifier", "function_definition"):
+            name_field = d_node.child_by_field_name("name") or d_node.child_by_field_name("declarator")
+            return _unwrap_declarator(name_field)
+        for cand in d_node.children:
+            res = _unwrap_declarator(cand)
+            if res:
+                return res
+        return None
+
     def name_of(node: Any, field: Optional[str]) -> Optional[str]:
         child = node.child_by_field_name(field) if field else None
         if child is None and node.type == "type_alias_statement" and len(node.children) >= 2:
             child = node.children[1]
-        if child is None:
-            for candidate in node.children:
-                if candidate.type in _NAME_CHILD_TYPES:
-                    child = candidate
-                    break
-        if child is None:
-            return None
-        match = re.match(r"[A-Za-z_][A-Za-z0-9_]*", text(child).strip())
-        return match.group(0) if match else None
-
+        if child is not None:
+            unwrapped = _unwrap_declarator(child)
+            if unwrapped:
+                return unwrapped
+        for candidate in node.children:
+            unwrapped = _unwrap_declarator(candidate)
+            if unwrapped:
+                return unwrapped
+        return None
     def collect_bases(node: Any) -> List[str]:
         # Flatten superclass/interfaces/bases clauses into clean type names
         if node.type in ("type_identifier", "identifier", "name", "qualified_name", "namespace_name"):
@@ -412,7 +474,6 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
                 for child in node.children:
                     walk(child, next_containers, raw_id if kind != "class" else current_def)
                 return
-
         # Check calls against configured call patterns
         for call_spec in calls_cfg_list:
             if node_type == call_spec["type"]:
@@ -452,13 +513,13 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
             match = re.search(pattern, source_line)
             if match:
                 raw_target = match.group(1).strip()
-                # Normalize target name
-                clean_target = raw_target.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].rsplit(".", 1)[-1]
+                target_clean = raw_target.split("/")[-1].split(".")[0] if ("/" in raw_target or "." in raw_target) else raw_target
                 edges.append({
                     "source": path.name,
-                    "target": clean_target,
+                    "target": target_clean or raw_target,
                     "relation": "imports",
                     "source_location": f"L{i}",
+                    "import_source": raw_target,
                 })
-
+                break
     return {"nodes": nodes, "edges": edges, "error": None}

@@ -1,0 +1,18 @@
+{
+  "corpus_hash": "fc97a1bc52cc530479816b802322526e48b2e568e8ed8a1fa8193bb52802c2da",
+  "manifest_hash": "22b85072ab3d17d924b1366019b70ad4a62ccb4c2d0c3163532771172ea7aecd",
+  "commit_sha": "HEAD",
+  "total_expected_edges": 12,
+  "total_predicted_edges": 12,
+  "true_positives": 12,
+  "false_positives": 0,
+  "false_negatives": 0,
+  "strict_edge_precision": 1.0,
+  "strict_edge_recall": 1.0,
+  "strict_edge_f1": 1.0,
+  "forbidden_edge_rejection_rate": 1.0,
+  "false_exact_span_count": 0,
+  "false_exact_span_rate": 0.0,
+  "passed": true,
+  "failures": []
+}

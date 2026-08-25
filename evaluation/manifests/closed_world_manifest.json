@@ -1,0 +1,175 @@
+{
+  "manifest_version": "1.0.0",
+  "corpus_id": "sot-graph-evaluation-corpus-v1",
+  "expected_nodes": [
+    { "id": "evaluation/fixtures/python/core/math_ops.py:add", "kind": "function", "label": "def add" },
+    { "id": "evaluation/fixtures/python/core/math_ops.py:multiply", "kind": "function", "label": "def multiply" },
+    { "id": "evaluation/fixtures/python/core/math_ops.py:compute_tax", "kind": "function", "label": "def compute_tax" },
+    { "id": "evaluation/fixtures/python/core/math_ops.py:discount", "kind": "function", "label": "def discount" },
+    { "id": "evaluation/fixtures/python/services/calculator.py:global_calculate", "kind": "function", "label": "def global_calculate" },
+    { "id": "evaluation/fixtures/python/services/calculator.py:process_with_comprehension", "kind": "function", "label": "def process_with_comprehension" },
+    { "id": "evaluation/fixtures/python/services/calculator.py:process_with_local_import", "kind": "function", "label": "def process_with_local_import" },
+    { "id": "evaluation/fixtures/python/services/calculator.py:Worker.method_normal", "kind": "function", "label": "def method_normal" }
+  ],
+  "expected_confirmed_edges": [
+    {
+      "source_file": "evaluation/fixtures/python/core/math_ops.py",
+      "source_symbol": "compute_tax",
+      "target_file": "evaluation/fixtures/python/core/math_ops.py",
+      "target_symbol": "multiply",
+      "relation": "calls"
+    },
+    {
+      "source_file": "evaluation/fixtures/python/core/math_ops.py",
+      "source_symbol": "discount",
+      "target_file": "evaluation/fixtures/python/core/math_ops.py",
+      "target_symbol": "compute_tax",
+      "relation": "calls"
+    },
+    {
+      "source_file": "evaluation/fixtures/python/services/calculator.py",
+      "source_symbol": "global_calculate",
+      "target_file": "evaluation/fixtures/python/core/math_ops.py",
+      "target_symbol": "add",
+      "relation": "calls"
+    },
+    {
+      "source_file": "evaluation/fixtures/python/services/calculator.py",
+      "source_symbol": "process_with_comprehension",
+      "target_file": "evaluation/fixtures/python/core/math_ops.py",
+      "target_symbol": "add",
+      "relation": "calls"
+    },
+    {
+      "source_file": "evaluation/fixtures/python/services/calculator.py",
+      "source_symbol": "process_with_local_import",
+      "target_file": "evaluation/fixtures/python/core/math_ops.py",
+      "target_symbol": "discount",
+      "relation": "calls"
+    },
+    {
+      "source_file": "evaluation/fixtures/python/services/calculator.py",
+      "source_symbol": "method_normal",
+      "target_file": "evaluation/fixtures/python/core/math_ops.py",
+      "target_symbol": "multiply",
+      "relation": "calls"
+    },
+    {
+      "source_file": "evaluation/fixtures/typescript/controllers/order_controller.ts",
+      "source_symbol": "handleOrder",
+      "target_file": "evaluation/fixtures/typescript/models/order.ts",
+      "target_symbol": "validateOrder",
+      "relation": "calls"
+    },
+    {
+      "source_file": "evaluation/fixtures/rust/lib.rs",
+      "source_symbol": "execute_operation",
+      "target_file": "evaluation/fixtures/rust/lib.rs",
+      "target_symbol": "compute",
+      "relation": "calls"
+    },
+    {
+      "source_file": "evaluation/fixtures/go/service.go",
+      "source_symbol": "ExecuteTask",
+      "target_file": "evaluation/fixtures/go/service.go",
+      "target_symbol": "ProcessData",
+      "relation": "calls"
+    },
+    {
+      "source_file": "evaluation/fixtures/java/PaymentService.java",
+      "source_symbol": "process",
+      "target_file": "evaluation/fixtures/java/PaymentService.java",
+      "target_symbol": "validateCard",
+      "relation": "calls"
+    },
+    {
+      "source_file": "evaluation/fixtures/c/crypto.c",
+      "source_symbol": "c_compute",
+      "target_file": "evaluation/fixtures/c/crypto.c",
+      "target_symbol": "c_multiply",
+      "relation": "calls"
+    },
+    {
+      "source_file": "evaluation/fixtures/cpp/engine.cpp",
+      "source_symbol": "run",
+      "target_file": "evaluation/fixtures/cpp/engine.cpp",
+      "target_symbol": "step",
+      "relation": "calls"
+    }
+  ],
+  "forbidden_edges": [
+    {
+      "source_file": "evaluation/fixtures/python/services/calculator.py",
+      "source_symbol": "process_with_param_shadow",
+      "target_file": "evaluation/fixtures/python/core/math_ops.py",
+      "target_symbol": "add",
+      "relation": "calls",
+      "is_forbidden": true,
+      "reason": "Parameter 'add' shadows module import 'add'"
+    },
+    {
+      "source_file": "evaluation/fixtures/python/services/calculator.py",
+      "source_symbol": "process_with_local_assign",
+      "target_file": "evaluation/fixtures/python/core/math_ops.py",
+      "target_symbol": "multiply",
+      "relation": "calls",
+      "is_forbidden": true,
+      "reason": "Local assignment 'multiply' shadows module import 'multiply'"
+    },
+    {
+      "source_file": "evaluation/fixtures/python/services/calculator.py",
+      "source_symbol": "method_with_param_shadow",
+      "target_file": "evaluation/fixtures/python/core/math_ops.py",
+      "target_symbol": "add",
+      "relation": "calls",
+      "is_forbidden": true,
+      "reason": "Method parameter 'add' shadows module import 'add'"
+    }
+  ],
+  "exact_span_expectations": [
+    {
+      "file_path": "evaluation/fixtures/typescript/controllers/order_controller.ts",
+      "symbol": "target",
+      "query_line": 4,
+      "expected_exact_span": false,
+      "description": "Comment line '// function target() {}' must not be granted EXACT_SPAN"
+    },
+    {
+      "file_path": "evaluation/fixtures/typescript/controllers/order_controller.ts",
+      "symbol": "validateOrder",
+      "query_line": 5,
+      "expected_exact_span": false,
+      "description": "Regex literal '/function validateOrder/' must not be granted EXACT_SPAN"
+    },
+    {
+      "file_path": "evaluation/fixtures/typescript/controllers/order_controller.ts",
+      "symbol": "validateOrder",
+      "query_line": 6,
+      "expected_exact_span": false,
+      "description": "String literal 'function validateOrder() {}' must not be granted EXACT_SPAN"
+    },
+    {
+      "file_path": "evaluation/fixtures/rust/lib.rs",
+      "symbol": "target",
+      "query_line": 1,
+      "expected_exact_span": false,
+      "description": "Nested block comment '/* outer /* nested */ fn target() {} */' must not be granted EXACT_SPAN"
+    },
+    {
+      "file_path": "evaluation/fixtures/rust/lib.rs",
+      "symbol": "target",
+      "query_line": 2,
+      "expected_exact_span": false,
+      "description": "Raw string literal 'r#\"fn target() {}\"#' must not be granted EXACT_SPAN"
+    },
+    {
+      "file_path": "evaluation/fixtures/java/PaymentService.java",
+      "symbol": "processPayment",
+      "query_line": 6,
+      "expected_exact_span": false,
+      "description": "Java text block containing method stub must not be granted EXACT_SPAN"
+    }
+  ],
+  "scip_expectations": [],
+  "diff_expectations": []
+}
