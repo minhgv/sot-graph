@@ -57,13 +57,12 @@ def _extract_type_name(node: Optional[ast.AST]) -> Optional[str]:
     return None
 
 def _iter_scope_nodes(node: ast.AST):
-    """Yield all AST nodes within the current definition scope without entering nested function/class definitions."""
+    """Yield all AST nodes within the current definition scope without entering nested function/class/lambda definitions or list/dict/set/generator comprehensions."""
     for child in ast.iter_child_nodes(node):
-        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
             continue
         yield child
         yield from _iter_scope_nodes(child)
-
 
 def _collect_bound_names(func: ast.AST) -> set:
     """Names bound directly inside this function scope (params, assignments,
@@ -78,21 +77,15 @@ def _collect_bound_names(func: ast.AST) -> set:
             bound.add(func.args.vararg.arg)
         if func.args.kwarg:
             bound.add(func.args.kwarg.arg)
-
     for node in _iter_scope_nodes(func):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             bound.add(node.id)
+        elif isinstance(node, ast.Nonlocal):
+            for name in node.names:
+                bound.add(name)
         elif isinstance(node, ast.ExceptHandler) and node.name:
             bound.add(node.name)
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            for alias in node.names:
-                if alias.asname:
-                    bound.add(alias.asname)
-                elif alias.name != "*":
-                    bound.add(alias.name.split(".")[0])
     return bound
-
-
 def _dotted_expr(node: ast.AST) -> Optional[str]:
     """Render a Name/Attribute chain ('self.db'), or None for complex exprs."""
     parts: List[str] = []
@@ -135,6 +128,7 @@ def _classify_call(
             "import_source": import_source,
             "builtin": builtin,
             "is_shadowed": is_shadowed,
+            "is_local_var": is_shadowed and name not in BUILTIN_NAMES,
         }
     if isinstance(func, ast.Attribute):
         receiver = _dotted_expr(func.value)
@@ -219,6 +213,7 @@ def extract_python(path: Path) -> Dict[str, Any]:
     class PythonVisitor(ast.NodeVisitor):
         def __init__(self):
             self.scope_stack = [path.name]
+            self.bound_stack: List[set] = [set()]
 
         def visit_ClassDef(self, node: ast.ClassDef):
             class_id = node.name
@@ -255,17 +250,16 @@ def extract_python(path: Path) -> Dict[str, Any]:
                         "relation": "extends",
                         "source_location": f"L{node.lineno}",
                     })
-
             self.scope_stack.append(class_id)
+            self.bound_stack.append(set())
             self.generic_visit(node)
+            self.bound_stack.pop()
             self.scope_stack.pop()
-
         def visit_FunctionDef(self, node: ast.FunctionDef):
             self._handle_func(node, is_async=False)
 
         def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
             self._handle_func(node, is_async=True)
-
         def _handle_func(self, node: Any, is_async: bool):
             parent = self.scope_stack[-1]
             kind = "method" if len(self.scope_stack) > 1 and parent != path.name else "function"
@@ -322,8 +316,24 @@ def extract_python(path: Path) -> Dict[str, Any]:
                                 local_types[f"self.{tgt.attr}"] = val_type
                                 local_types[tgt.attr] = val_type
 
-            # Detect call expressions inside function with binding context
+            # Detect local imports inside this function scope
+            local_import_map = dict(import_map)
+            local_alias_map = dict(alias_symbol_map)
+            for child in _iter_scope_nodes(node):
+                if isinstance(child, ast.Import):
+                    for alias in child.names:
+                        local_import_map[alias.asname or alias.name.split(".")[0]] = alias.name
+                elif isinstance(child, ast.ImportFrom):
+                    mod = child.module or ""
+                    for alias in child.names:
+                        asname = alias.asname or alias.name
+                        local_import_map[asname] = ("." * child.level) + mod
+                        local_alias_map[asname] = alias.name
+
+            # Detect call expressions inside function with cumulative lexical binding context
             bound = _collect_bound_names(node)
+            for b in self.bound_stack:
+                bound.update(b)
             for child in _iter_scope_nodes(node):
                 if not isinstance(child, ast.Call):
                     continue
@@ -331,10 +341,7 @@ def extract_python(path: Path) -> Dict[str, Any]:
                 if isinstance(child.func, ast.Name):
                     if child.func.id == node.name:
                         continue
-                    if child.func.id in bound:
-                        callee = child.func.id
-                    else:
-                        callee = alias_symbol_map.get(child.func.id, child.func.id)
+                    callee = local_alias_map.get(child.func.id, child.func.id)
                 elif isinstance(child.func, ast.Attribute):
                     attr_recv = child.func.value
                     # super().x() dispatches to parent class method
@@ -350,7 +357,7 @@ def extract_python(path: Path) -> Dict[str, Any]:
                 if callee is None:
                     continue
                 context = _classify_call(
-                    child, bound, import_map, alias_symbol_map, local_types, enclosing_class
+                    child, bound, local_import_map, local_alias_map, local_types, enclosing_class
                 ) or {}
                 edges.append({
                     "source": func_id,
@@ -360,9 +367,10 @@ def extract_python(path: Path) -> Dict[str, Any]:
                     **context,
                 })
             self.scope_stack.append(func_id)
+            self.bound_stack.append(bound)
             self.generic_visit(node)
+            self.bound_stack.pop()
             self.scope_stack.pop()
-
         def visit_Import(self, node: ast.Import):
             for alias in node.names:
                 edges.append({

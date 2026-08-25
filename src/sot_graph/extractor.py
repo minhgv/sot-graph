@@ -303,10 +303,8 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
         # Cross-file pending edge (target symbol lives in another file)
         if rel == "calls":
             call_kind = re_edge.get("call_kind") or "UNKNOWN"
-            # Audit contract: only unshadowed BARE builtins may be pruned.
-            # Attribute/qualified calls (requests.get, db.execute) always
-            # survive with their receiver context for the resolver.
-            if call_kind == "BARE" and re_edge.get("builtin"):
+            # Local variable calls and unshadowed bare builtins must not create pending external edges
+            if re_edge.get("is_local_var") or (call_kind == "BARE" and re_edge.get("builtin")):
                 continue
             pending.append({
                 "src": src_id,
