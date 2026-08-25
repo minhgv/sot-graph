@@ -31,7 +31,9 @@ def workspace():
 
 
 def test_comment_and_string_exact_span_prevention(workspace: Path):
-    """Metamorphic test: changing code to comment or string literal MUST downgrade EXACT_SPAN."""
+    """Metamorphic test: comment/string transforms must strip even heuristic
+    declaration evidence; real code without a real parser stays heuristic
+    (regex_decl:*) and can never be EXACT_SPAN (truthfulness contract)."""
     code_real = '''
 function processPayment(amount) {
     return amount * 1.1;
@@ -58,17 +60,27 @@ function helper() {}
     assert node is not None
     cand = {"id": node[0], "path": str(p1), "symbol": node[2], "line_start": node[3]}
     ev_real = TrustVerifier.verify_hit(db, cand, {"processPayment"}, str(workspace)).evidence
-    assert ev_real.relevance == RelevanceType.EXACT_SPAN
+    # No JS parser in the verifier: even the intact function is only a
+    # regex-declaration heuristic — confirmed=False, verdict WEAK.
+    assert ev_real.relevance != RelevanceType.EXACT_SPAN
+    assert ev_real.provenance.startswith("regex_decl:")
+    assert ev_real.details["confirmed"] is False
+    assert ev_real.confidence < 0.5
+    assert ev_real.to_legacy_verdict() != "STRONG"
 
     # Metamorphic transform 1: comment out function
     p1.write_text(code_commented, encoding="utf-8")
     ev_comment = TrustVerifier.verify_hit(db, cand, {"processPayment"}, str(workspace), jit_reconcile=False).evidence
     assert ev_comment.relevance != RelevanceType.EXACT_SPAN
+    assert not ev_comment.provenance.startswith("regex_decl:")
+    assert ev_real.confidence > ev_comment.confidence
 
     # Metamorphic transform 2: place into string literal
     p1.write_text(code_string, encoding="utf-8")
     ev_str = TrustVerifier.verify_hit(db, cand, {"processPayment"}, str(workspace), jit_reconcile=False).evidence
     assert ev_str.relevance != RelevanceType.EXACT_SPAN
+    assert not ev_str.provenance.startswith("regex_decl:")
+    assert ev_real.confidence > ev_str.confidence
 
 def test_python_parameter_shadowing_metamorphic(workspace: Path):
     """Metamorphic test: adding local param shadowing imported alias removes false intra-file edge."""

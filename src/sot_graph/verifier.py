@@ -22,6 +22,7 @@ from sot_graph.evidence import (
     TrustEvidence,
 )
 from sot_graph.ignore import DEFAULT_IGNORED_DIRS
+from sot_graph.parser_outcome import ParserOutcome
 
 # Stop words ignored during lexical coverage calculation
 STOP_WORDS: Set[str] = {
@@ -107,23 +108,37 @@ class TrustVerifier:
         text_content: str,
         cov: Optional[float],
         threshold: float,
-    ) -> Tuple[RelevanceType, str]:
+    ) -> Tuple[RelevanceType, str, bool, Optional[str]]:
         """
-        Verifies whether cand_symbol genuinely exists as an AST declaration at cand_line,
-        distinguishing true code constructs from comments or stray string literals.
+        Verifies whether cand_symbol genuinely exists as an AST declaration at cand_line.
+
+        Returns (relevance, provenance, ast_verified, parser_outcome):
+        - ast_verified is True ONLY when a real parser (Python ``ast`` module)
+          confirmed the declaration/span. Regex token coverage over
+          comment-stripped text can NEVER confirm — it yields heuristic-level
+          evidence only (FILE_TOKEN relevance with a regex_decl:* provenance).
+        - parser_outcome mirrors sot_graph.parser_outcome.ParserOutcome for
+          the verification pass itself.
         """
         if not cand_symbol or not isinstance(cand_symbol, str):
             if cov is not None and cov >= threshold:
-                return RelevanceType.FILE_TOKEN, "lexical:file_token"
-            return RelevanceType.UNKNOWN, "lexical:unknown"
+                return RelevanceType.FILE_TOKEN, "lexical:file_token", False, None
+            return RelevanceType.UNKNOWN, "lexical:unknown", False, None
 
         symbol_needle = cand_symbol.rsplit(".", 1)[-1]
         ext = os.path.splitext(file_path)[1].lower()
 
-        # Python AST analysis
+        # Python AST analysis — the only path allowed to claim EXACT_*
+        parse_outcome: Optional[str] = None
         if ext == ".py":
             try:
                 tree = ast.parse(text_content, filename=file_path)
+            except SyntaxError:
+                # Real parser ran and failed: honest PARSE_ERROR, then fall
+                # through to regex/lexical heuristics.
+                parse_outcome = ParserOutcome.PARSE_ERROR.value
+            else:
+                parse_outcome = ParserOutcome.COMPLETE.value
                 exact_span_found = False
                 exact_symbol_found = False
                 for node in ast.walk(tree):
@@ -148,18 +163,27 @@ class TrustVerifier:
                                 break
 
                 if exact_span_found:
-                    return RelevanceType.EXACT_SPAN, "ast_visitor:exact_span"
+                    return RelevanceType.EXACT_SPAN, "ast_visitor:exact_span", True, parse_outcome
                 if exact_symbol_found:
-                    return RelevanceType.EXACT_SYMBOL, "ast_visitor:exact_symbol"
+                    return RelevanceType.EXACT_SYMBOL, "ast_visitor:exact_symbol", True, parse_outcome
                 # If not found in AST, check if it's merely a comment or string
                 if symbol_needle in text_content:
-                    return RelevanceType.FILE_TOKEN, "lexical:comment_or_literal"
-                return RelevanceType.NAME_ONLY, "ast_visitor:not_found"
-            except SyntaxError:
-                pass  # Fall through to regex/lexical
+                    return (
+                        RelevanceType.FILE_TOKEN,
+                        "lexical:comment_or_literal",
+                        False,
+                        parse_outcome,
+                    )
+                return RelevanceType.NAME_ONLY, "ast_visitor:not_found", False, parse_outcome
 
-        # Strip comments and string literals to prevent commented-out code or string literals
-        # from claiming EXACT_SPAN or EXACT_SYMBOL
+        if parse_outcome is None:
+            # No real parser for this extension in the verifier: everything
+            # below is heuristic-only evidence.
+            parse_outcome = ParserOutcome.PARTIAL_AST.value
+
+        # Strip comments and string literals so commented-out code or string
+        # literals cannot even reach heuristic level. NOTE: a match after this
+        # strip is STILL only regex evidence and must never be confirmed.
         stripped_content = text_content
         if ext in (".js", ".ts", ".tsx", ".jsx", ".java", ".c", ".cpp", ".cs", ".go", ".rs", ".php", ".swift", ".kt"):
             pattern = re.compile(
@@ -196,7 +220,10 @@ class TrustVerifier:
                     return '"' + ("\n" * s.count("\n")) + '"'
             stripped_content = pattern.sub(replacer, text_content)
 
-        # Generic regex declaration check for other languages / fallback
+        # Generic regex declaration check for other languages / fallback.
+        # Truthfulness contract: regex-declaration matches are HEURISTIC
+        # evidence (FILE_TOKEN relevance, low confidence ceiling), never
+        # EXACT_SPAN / EXACT_SYMBOL, regardless of coverage.
         decl_pat = re.compile(
             rf"(?:function|class|def|interface|type|const|let|var|func|fn|struct|enum|trait)\s+{re.escape(symbol_needle)}\b",
             re.MULTILINE,
@@ -208,15 +235,15 @@ class TrustVerifier:
                 end_idx = min(len(lines), cand_line + 5)
                 span_text = "\n".join(lines[start_idx:end_idx])
                 if decl_pat.search(span_text):
-                    return RelevanceType.EXACT_SPAN, "regex_decl:exact_span"
+                    return RelevanceType.FILE_TOKEN, "regex_decl:heuristic_span", False, parse_outcome
                 if symbol_needle in span_text:
-                    return RelevanceType.EXACT_SYMBOL, "regex_decl:structural_candidate"
-            return RelevanceType.EXACT_SYMBOL, "regex_decl:exact_symbol"
+                    return RelevanceType.FILE_TOKEN, "regex_decl:heuristic_candidate", False, parse_outcome
+            return RelevanceType.FILE_TOKEN, "regex_decl:heuristic", False, parse_outcome
         if symbol_needle in text_content:
-            return RelevanceType.FILE_TOKEN, "lexical:file_token"
+            return RelevanceType.FILE_TOKEN, "lexical:file_token", False, parse_outcome
         if cov and cov >= threshold:
-            return RelevanceType.FILE_TOKEN, "lexical:file_token"
-        return RelevanceType.NAME_ONLY, "lexical:name_only"
+            return RelevanceType.FILE_TOKEN, "lexical:file_token", False, parse_outcome
+        return RelevanceType.NAME_ONLY, "lexical:name_only", False, parse_outcome
     @staticmethod
     def _rehomable(new_path: str, candidate: Dict[str, Any]) -> bool:
         """Guard against basename collisions re-homing nodes onto the wrong file."""
@@ -400,11 +427,13 @@ class TrustVerifier:
             # Relevance detection via AST declaration verification
             cand_symbol = candidate.get("symbol")
             cand_line = candidate.get("line_start") or candidate.get("line")
+            ast_verified: Optional[bool] = None
+            v_parser_outcome: Optional[str] = None
             if candidate.get("kind") == "file":
                 relevance = RelevanceType.EXACT_SYMBOL if cov is None or cov >= threshold else RelevanceType.FILE_TOKEN
                 prov = "file_node"
             else:
-                relevance, prov = cls._verify_ast_declaration(
+                relevance, prov, ast_verified, v_parser_outcome = cls._verify_ast_declaration(
                     requested, cand_symbol, cand_line, text_content, cov, threshold
                 )
 
@@ -413,14 +442,27 @@ class TrustVerifier:
                 if relevance == RelevanceType.EXACT_SPAN:
                     relevance = RelevanceType.FILE_TOKEN
 
+            # Truthfulness flags: only a real AST verification on a fresh
+            # file counts as confirmed. File-kind nodes are confirmed by
+            # physical existence + hash match, not span parsing.
+            if ast_verified is None:
+                confirmed = freshness == FreshnessStatus.FRESH
+            else:
+                confirmed = freshness == FreshnessStatus.FRESH and ast_verified
+
             # Confidence calculation
             if freshness == FreshnessStatus.FRESH:
                 if relevance == RelevanceType.EXACT_SPAN:
                     confidence = max(0.95, cov or 0.95)
                 elif relevance == RelevanceType.EXACT_SYMBOL:
                     confidence = max(0.85, cov or 0.85)
+                elif prov.startswith("regex_decl:"):
+                    # Regex-only declaration match: heuristic ceiling, never
+                    # strong enough to look confirmed.
+                    confidence = max(0.30, min(0.45, cov if cov is not None else 0.45))
                 elif relevance == RelevanceType.FILE_TOKEN:
-                    confidence = min(0.65, cov or 0.6)
+                    # Token coverage alone is heuristic evidence.
+                    confidence = min(0.35, cov or 0.3)
                 elif candidate.get("kind") == "file":
                     confidence = 0.9 if cov is None or cov >= threshold else max(0.6, cov)
                 else:
@@ -446,6 +488,9 @@ class TrustVerifier:
                     "stale": is_stale,
                     "indexed_sha": journal_sha256,
                     "current_sha": file_hash,
+                    "source_span_verified": ast_verified,
+                    "confirmed": confirmed,
+                    "parser_outcome": v_parser_outcome,
                 },
             )
         # 2. File is MISSING on disk

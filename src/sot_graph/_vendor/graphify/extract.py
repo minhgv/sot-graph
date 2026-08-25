@@ -513,22 +513,43 @@ def _ts_or_regex(
     regex_postprocess=None,
     regex_fallback_fn=None,
 ) -> Dict[str, Any]:
-    """Prefer the optional tree-sitter AST extractor; fall back to regex."""
+    """Prefer the optional tree-sitter AST extractor; fall back to regex.
+
+    The returned dict is annotated with truthful parser provenance:
+    ``parser_outcome`` is COMPLETE when tree-sitter produced the results and
+    PARTIAL_AST when only the regex fallback ran, with ``fallback_reason``
+    explaining why tree-sitter was not used.
+    """
+    from sot_graph.parser_outcome import ParserOutcome
+
+    ts_fallback_reason: Optional[str] = None
     try:
         from sot_graph.ts_extract import extract_ts
 
         res = extract_ts(path, language)
         if not res.get("error") and (res.get("nodes") or res.get("edges")):
+            res.setdefault("extractor", "tree-sitter-ast")
+            res.setdefault("fallback_reason", None)
+            if not res.get("parser_outcome"):
+                res["parser_outcome"] = ParserOutcome.COMPLETE.value
             return res
-    except Exception:
-        pass
+        ts_fallback_reason = (
+            res.get("fallback_reason")
+            or res.get("error")
+            or f"tree-sitter produced no symbols (outcome: {res.get('parser_outcome') or 'unknown'})"
+        )
+    except Exception as exc:
+        ts_fallback_reason = f"tree-sitter unavailable: {exc}"
 
     if regex_fallback_fn is not None:
-        return regex_fallback_fn(path)
-
-    result = _extract_regex_patterns(path, patterns or [])
-    if regex_postprocess is not None:
-        regex_postprocess(path, result)
+        result = regex_fallback_fn(path)
+    else:
+        result = _extract_regex_patterns(path, patterns or [])
+        if regex_postprocess is not None:
+            regex_postprocess(path, result)
+    result["parser_outcome"] = ParserOutcome.PARTIAL_AST.value
+    result["fallback_reason"] = ts_fallback_reason
+    result["extractor"] = "core-ast"
     return result
 
 

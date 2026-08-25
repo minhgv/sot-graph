@@ -843,6 +843,102 @@ def cmd_doctor(args: argparse.Namespace, db: Database) -> int:
 
     print("=" * 55)
     return 0
+
+def _print_provider_rows(rows: list[dict], title: str) -> None:
+    """Render provider rows as a short aligned text table."""
+    print(f"\n🧩 {title}")
+    header = f"  {'NAME':<18} {'MODE':<10} {'STATUS':<14} {'VERSION':<16} DETAIL"
+    print(header)
+    print("  " + "-" * (len(header) - 2))
+    for row in rows:
+        if not row["installed"]:
+            icon = "❌ missing "
+        elif not row["healthy"]:
+            icon = "⚠️  unhealthy"
+        else:
+            icon = "✅ healthy "
+        version = row.get("version") or "-"
+        print(f"  {row['name']:<18} {row['mode']:<10} {icon:<14} {version:<16} {row['detail']}")
+
+
+def cmd_providers(args: argparse.Namespace, root: str) -> int:
+    """Read-only provider registry commands: detect, list, doctor, resolve."""
+    from dataclasses import asdict
+
+    from sot_graph.config import load_config
+    from sot_graph.providers_registry import (
+        detect_providers,
+        providers_doctor,
+        resolve_capability,
+    )
+
+    fmt = getattr(args, "format", "text")
+    sub = args.providers_subcommand
+
+    if sub == "detect":
+        rows = [asdict(st) for st in detect_providers(root)]
+        if fmt == "json":
+            print(json.dumps(rows, indent=2))
+        else:
+            _print_provider_rows(rows, f"Providers detected under {root}")
+        return 0
+
+    if sub == "list":
+        cfg = load_config(root)
+        rows = [
+            {
+                "name": pcfg.name,
+                "enabled": pcfg.enabled,
+                "command": list(pcfg.command) if pcfg.command else [],
+                "integration": pcfg.integration,
+                "index_policy": pcfg.index_policy,
+                "timeout_seconds": pcfg.timeout_seconds,
+                "capabilities": list(pcfg.capabilities),
+            }
+            for pcfg in cfg.providers.values()
+        ]
+        if fmt == "json":
+            print(json.dumps(rows, indent=2))
+        else:
+            print(f"\n🧩 Configured providers under {root} (providers_mode={cfg.providers_mode}, allow_external={cfg.allow_external})")
+            for row in rows:
+                enabled = {True: "enabled", False: "disabled", None: "auto"}[row["enabled"]]
+                caps = ", ".join(row["capabilities"]) or "(none)"
+                cmd = " ".join(row["command"]) or "(embedded)"
+                print(f"  • {row['name']}: {enabled}, integration={row['integration']}, index_policy={row['index_policy']}, timeout={row['timeout_seconds']:g}s")
+                print(f"      command : {cmd}")
+                print(f"      caps    : {caps}")
+        return 0
+
+    if sub == "doctor":
+        report = providers_doctor(root)
+        if fmt == "json":
+            print(json.dumps(report, indent=2))
+        else:
+            print(f"\n🩺 Provider Doctor ({report['root']}):")
+            print(f"  providers_mode={report['providers_mode']} allow_external={report['allow_external']} conflict_policy={report['conflict_policy']} verification_provider={report['verification_provider']}")
+            _print_provider_rows(report["providers"], "Health")
+            if report["next_actions"]:
+                print("\n⚠️  Recommended next actions:")
+                for action in report["next_actions"]:
+                    print(f"   - {action}")
+            else:
+                print("\n✅ All providers healthy.")
+        return 0 if report["ok"] else 1
+
+    # resolve
+    ranked = [asdict(st) for st in resolve_capability(root, args.capability)]
+    if fmt == "json":
+        print(json.dumps(ranked, indent=2))
+    else:
+        print(f"\n🧩 Providers ranked for capability '{args.capability}' under {root}:")
+        if not ranked:
+            print("  (no available provider)")
+        for i, row in enumerate(ranked, start=1):
+            version = row.get("version") or "-"
+            print(f"  {i}. {row['name']} ({row['mode']}, {version}) — {row['detail']}")
+    return 0
+
 def cmd_bundle(args: argparse.Namespace, db: Database, root: str) -> int:
     from sot_graph.analytics.bundle import ArchitectureBundler
 
@@ -1571,6 +1667,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_sol_bun.add_argument("-o", "--output", default=None, help="Output file path (default: .sot/bundle/ContextBundle.md)")
     p_sol_bun.add_argument("--json", action="store_true", help="Output JSON format")
 
+    # providers
+    p_prov = subparsers.add_parser("providers", help="Detect, list, and diagnose evidence providers (read-only)")
+    prov_subs = p_prov.add_subparsers(dest="providers_subcommand", required=True)
+
+    p_prov_detect = prov_subs.add_parser("detect", help="Probe provider executables and SCIP artifacts (read-only)")
+    p_prov_detect.add_argument("--format", default="text", choices=["text", "json"], help="Output format (default: text)")
+
+    p_prov_list = prov_subs.add_parser("list", help="List configured providers, commands, and capabilities")
+    p_prov_list.add_argument("--format", default="text", choices=["text", "json"], help="Output format (default: text)")
+
+    p_prov_doc = prov_subs.add_parser("doctor", help="Provider health summary with recommended next actions")
+    p_prov_doc.add_argument("--format", default="text", choices=["text", "json"], help="Output format (default: text)")
+
+    p_prov_res = prov_subs.add_parser("resolve", help="Rank available providers for a capability")
+    p_prov_res.add_argument("--capability", required=True, help="Capability to resolve (e.g. impact, symbols, callgraph)")
+    p_prov_res.add_argument("--format", default="text", choices=["text", "json"], help="Output format (default: text)")
+
     # diff-impact
     p_diff = subparsers.add_parser("diff-impact", help="Git diff blast radius, upstream caller traversal, and API impact analysis")
     p_diff.add_argument("target", nargs="?", default="HEAD~1", help="Git revision target (e.g. 'HEAD~1', 'main...HEAD', commit hash; default: HEAD~1)")
@@ -1601,6 +1714,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     db_path = args.db or default_db_path(root)
     if args.command == "setup":
         return cmd_setup(args, root)
+
+    if args.command == "providers":
+        # Read-only: never touches the database or triggers auto-reconcile.
+        return cmd_providers(args, root)
 
     if args.command == "batch-reconcile" or (args.command == "reconcile" and getattr(args, "all_repos", False)):
         target_dir = getattr(args, "directory", None) or root

@@ -17,7 +17,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, 
 from urllib.parse import quote
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS file_journal (
@@ -140,6 +140,17 @@ CREATE TABLE IF NOT EXISTS related_features_index (
     key_files TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_rel_feat_module ON related_features_index(module_name);
+CREATE TABLE IF NOT EXISTS snapshots (
+    id TEXT PRIMARY KEY,
+    repo_root TEXT NOT NULL,
+    commit_sha TEXT,
+    dirty INTEGER NOT NULL DEFAULT 0,
+    dirty_fingerprint TEXT,
+    manifest_digest TEXT,
+    algo_version TEXT NOT NULL DEFAULT 'sha256-v1',
+    generation INTEGER,
+    captured_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS provider_runs (
     id TEXT PRIMARY KEY,
     provider_name TEXT NOT NULL,
@@ -149,7 +160,8 @@ CREATE TABLE IF NOT EXISTS provider_runs (
     project_root TEXT,
     position_encoding TEXT DEFAULT 'UTF-8',
     arguments_json TEXT,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    snapshot_id TEXT REFERENCES snapshots(id)
 );
 CREATE INDEX IF NOT EXISTS idx_provider_runs_prov ON provider_runs(provider_name);
 CREATE TABLE IF NOT EXISTS provider_evidence (
@@ -314,6 +326,23 @@ class Database:
     def _user_version(self) -> int:
         return int(self.conn.execute("PRAGMA user_version").fetchone()[0])
 
+    def _ensure_columns(self, table: str, columns: Dict[str, str]) -> None:
+        """Additively backfill missing columns on a legacy/drifted table.
+
+        Intermediate dev builds may carry an old shape under a newer
+        user_version; CREATE TABLE IF NOT EXISTS then no-ops and any index
+        or query touching the missing column would fail. Idempotent.
+        """
+        existing = {
+            row[1]
+            for row in self.conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        for name, ddl in columns.items():
+            if name not in existing:
+                self.conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"
+                )
+
     def transactional_mutation(self, action):
         """Execute a mutating action under the stable write lock and connection transaction."""
         with self.write_lock():
@@ -354,8 +383,11 @@ class Database:
                         if bck_conn is not None:
                             bck_conn.close()
 
-                    # Non-destructive upgrade from v4 to v5:
-                    if version == 4:
+                    # Non-destructive upgrades from v4/v5: provider tables were
+                    # added in v5 and snapshot binding in v6; every step is
+                    # purely additive (new tables / nullable columns), so no
+                    # disposable-index reset or data loss occurs.
+                    if version in (4, 5):
                         with self.conn:
                             self.conn.execute("""
                                 CREATE TABLE IF NOT EXISTS provider_runs (
@@ -397,12 +429,69 @@ class Database:
                                     FOREIGN KEY(run_id) REFERENCES provider_runs(id) ON DELETE CASCADE
                                 );
                             """)
+                            # Drifted intermediate builds may carry an old
+                            # provider_* shape under user_version 5; backfill
+                            # any missing column before indexing it.
+                            self._ensure_columns(
+                                "provider_runs",
+                                {
+                                    "provider_version": "TEXT",
+                                    "snapshot_hash": "TEXT",
+                                    "project_root": "TEXT",
+                                    "position_encoding": "TEXT DEFAULT 'UTF-8'",
+                                    "arguments_json": "TEXT",
+                                },
+                            )
+                            self._ensure_columns(
+                                "provider_evidence",
+                                {
+                                    "provider_name": "TEXT",
+                                    "file_path": "TEXT",
+                                    "symbol": "TEXT",
+                                    "target_symbol": "TEXT",
+                                    "dst_symbol": "TEXT",
+                                    "role": "TEXT",
+                                    "syntax_kind": "TEXT",
+                                    "documentation": "TEXT",
+                                    "confidence": "REAL DEFAULT 1.0",
+                                    "metadata_json": "TEXT",
+                                    "recorded_at": "INTEGER NOT NULL DEFAULT 0",
+                                },
+                            )
                             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_run ON provider_evidence(run_id);")
                             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_prov ON provider_evidence(provider_name);")
                             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_path ON provider_evidence(path);")
                             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_src ON provider_evidence(src_symbol);")
                             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_dst ON provider_evidence(dst_symbol);")
                             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_sym ON provider_evidence(symbol);")
+                        # v5 -> v6: snapshot binding. A new `snapshots` table
+                        # plus a nullable `provider_runs.snapshot_id` column;
+                        # existing rows stay NULL (= UNBOUND) and are never
+                        # backfilled.
+                        with self.conn:
+                            self.conn.execute("""
+                                CREATE TABLE IF NOT EXISTS snapshots (
+                                    id TEXT PRIMARY KEY,
+                                    repo_root TEXT NOT NULL,
+                                    commit_sha TEXT,
+                                    dirty INTEGER NOT NULL DEFAULT 0,
+                                    dirty_fingerprint TEXT,
+                                    manifest_digest TEXT,
+                                    algo_version TEXT NOT NULL DEFAULT 'sha256-v1',
+                                    generation INTEGER,
+                                    captured_at INTEGER NOT NULL
+                                );
+                            """)
+                            run_cols = [
+                                r[1] for r in self.conn.execute(
+                                    "PRAGMA table_info(provider_runs)"
+                                ).fetchall()
+                            ]
+                            if "snapshot_id" not in run_cols:
+                                self.conn.execute(
+                                    "ALTER TABLE provider_runs ADD COLUMN "
+                                    "snapshot_id TEXT REFERENCES snapshots(id)"
+                                )
                             self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                         return
 

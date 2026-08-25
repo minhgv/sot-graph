@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from sot_graph.db import Database
 from sot_graph.modutil import dotted_module, normalize_import, resolve_relative
+from sot_graph.parser_outcome import ParserOutcome, build_extractor_metadata, coerce_outcome
 
 # Suffix to extractor mapping
 EXT_DISPATCH = {
@@ -223,6 +224,11 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
             "sha256": sha,
             "size": file_size,
             "error": f"Extraction error: {e}",
+            "parser_outcome": ParserOutcome.PARSE_ERROR.value,
+            "fallback_reason": f"extraction failed: {e}",
+            "extractor_metadata": build_extractor_metadata(
+                "core-ast", ParserOutcome.PARSE_ERROR, f"extraction failed: {e}"
+            ),
         }
 
     raw_nodes = raw_result.get("nodes", [])
@@ -381,6 +387,24 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
                 ),
             })
 
+    # Truthful parser provenance: vendored core extractors (pure-Python ast)
+    # do not annotate, so infer honestly from what they produced; annotated
+    # results (tree-sitter / regex fallback) pass through unchanged.
+    fallback_reason = raw_result.get("fallback_reason")
+    outcome = coerce_outcome(raw_result.get("parser_outcome"))
+    if outcome is None:
+        # Vendored core extractors (pure-Python ast) do not annotate;
+        # infer honestly from what they produced.
+        if raw_result.get("error"):
+            outcome = ParserOutcome.PARSE_ERROR
+            fallback_reason = fallback_reason or str(raw_result["error"])
+        else:
+            produced = bool(raw_nodes or raw_edges)
+            outcome = ParserOutcome.COMPLETE if produced else ParserOutcome.VALID_EMPTY
+    extractor_name = raw_result.get("extractor") or "core-ast"
+    extractor_metadata = build_extractor_metadata(
+        extractor_name, outcome, fallback_reason
+    )
     return {
         "nodes": nodes,
         "edges": edges,
@@ -388,4 +412,7 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
         "sha256": sha,
         "size": file_size,
         "error": raw_result.get("error"),
+        "parser_outcome": outcome.value,
+        "fallback_reason": fallback_reason,
+        "extractor_metadata": extractor_metadata,
     }

@@ -50,11 +50,10 @@ class Phase1SchemaV5AndScipTests(unittest.TestCase):
     # 1. Schema v5 & Migration Tests
     # -------------------------------------------------------------------------
 
-    def test_schema_v5_tables_and_indices_present(self):
-        """Verify that Database initializes schema version 5 with provider tables."""
+    def test_schema_tables_and_indices_present(self):
+        """Verify that Database initializes current schema with provider tables."""
         db = Database(self.db_path)
-        self.assertEqual(db._user_version(), 5)
-        self.assertEqual(SCHEMA_VERSION, 5)
+        self.assertEqual(db._user_version(), SCHEMA_VERSION)
 
         tables = {
             r[0]
@@ -67,6 +66,7 @@ class Phase1SchemaV5AndScipTests(unittest.TestCase):
         self.assertIn("graph_nodes", tables)
         self.assertIn("graph_edges", tables)
         self.assertIn("file_journal", tables)
+        self.assertIn("snapshots", tables)
 
         # Check provider_evidence columns
         evidence_cols = {
@@ -110,7 +110,7 @@ class Phase1SchemaV5AndScipTests(unittest.TestCase):
 
         # Open with Database -> triggers _migrate_database() to v5
         db = Database(self.db_path)
-        self.assertEqual(db._user_version(), 5)
+        self.assertEqual(db._user_version(), SCHEMA_VERSION)
 
         # Verify note is fully preserved
         node = db.get_node("note_123")

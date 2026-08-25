@@ -12,6 +12,7 @@ import importlib
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
+from sot_graph.parser_outcome import ParserOutcome
 
 CONFIGS: Dict[str, Dict[str, Any]] = {
     "go": {
@@ -357,27 +358,55 @@ def available_languages() -> Dict[str, bool]:
 
 
 def extract_ts(path: Path, language: str) -> Dict[str, Any]:
-    """AST extraction into the graphify raw shape ({nodes, edges, error})."""
+    """AST extraction into the graphify raw shape ({nodes, edges, error}).
+
+    Results carry truthful parser provenance: ``parser_outcome`` (a
+    :class:`sot_graph.parser_outcome.ParserOutcome` value) plus an optional
+    ``fallback_reason`` explaining why a lower-fidelity path was taken.
+    """
     if language not in CONFIGS:
-        return {"nodes": [], "edges": [], "error": f"Unsupported tree-sitter language: {language}"}
+        return {
+            "nodes": [],
+            "edges": [],
+            "error": f"Unsupported tree-sitter language: {language}",
+            "parser_outcome": ParserOutcome.PARSER_UNAVAILABLE.value,
+            "fallback_reason": f"no tree-sitter grammar configured for language: {language}",
+        }
 
     cfg = CONFIGS[language]
-    lang_mod = importlib.import_module(cfg["module"])
-    from tree_sitter import Language, Parser
-
-    loader_fn_name = cfg.get("loader", "language")
-    loader_fn = getattr(lang_mod, loader_fn_name, None) or getattr(lang_mod, "language")
-    language_obj = Language(loader_fn())
     try:
-        parser = Parser(language_obj)
-    except TypeError:
-        parser = Parser()
-        if hasattr(parser, "set_language"):
-            getattr(parser, "set_language")(language_obj)
-        else:
-            parser.language = language_obj
-    source = path.read_bytes()
-    tree = parser.parse(source)
+        lang_mod = importlib.import_module(cfg["module"])
+        from tree_sitter import Language, Parser
+
+        loader_fn_name = cfg.get("loader", "language")
+        loader_fn = getattr(lang_mod, loader_fn_name, None) or getattr(lang_mod, "language")
+        language_obj = Language(loader_fn())
+        try:
+            parser = Parser(language_obj)
+        except TypeError:
+            parser = Parser()
+            if hasattr(parser, "set_language"):
+                getattr(parser, "set_language")(language_obj)
+            else:
+                parser.language = language_obj
+        source = path.read_bytes()
+        tree = parser.parse(source)
+    except ImportError as exc:
+        return {
+            "nodes": [],
+            "edges": [],
+            "error": f"tree-sitter grammar not installed for {language}: {exc}",
+            "parser_outcome": ParserOutcome.PARSER_UNAVAILABLE.value,
+            "fallback_reason": f"missing module: {cfg['module']}",
+        }
+    except Exception as exc:
+        return {
+            "nodes": [],
+            "edges": [],
+            "error": f"tree-sitter parse failed for {language}: {exc}",
+            "parser_outcome": ParserOutcome.PARSE_ERROR.value,
+            "fallback_reason": str(exc),
+        }
 
     nodes: List[Dict[str, Any]] = []
     edges: List[Dict[str, Any]] = []
@@ -744,4 +773,18 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
             bound = import_map[edge_item["target"]]
         if bound:
             edge_item["import_source"] = bound
-    return {"nodes": nodes, "edges": edges, "error": None}
+    if not nodes and not edges:
+        return {
+            "nodes": [],
+            "edges": [],
+            "error": None,
+            "parser_outcome": ParserOutcome.VALID_EMPTY.value,
+            "fallback_reason": None,
+        }
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "error": None,
+        "parser_outcome": ParserOutcome.COMPLETE.value,
+        "fallback_reason": None,
+    }
