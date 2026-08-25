@@ -696,6 +696,121 @@ def extract_lua(path: Path) -> Dict[str, Any]:
     return _ts_or_regex(path, "lua", patterns)
 
 
+def extract_zig(path: Path) -> Dict[str, Any]:
+    """Zig extractor (tree-sitter when available, regex fallback)."""
+    patterns = [
+        {"regex": r"(?:pub\s+)?const\s+([a-zA-Z0-9_]+)\s*=\s*(?:struct|enum|union)", "kind": "class", "prefix": "struct"},
+        {"regex": r"(?:pub\s+)?fn\s+([a-zA-Z0-9_]+)\s*\(", "kind": "function", "prefix": "fn"},
+    ]
+    return _ts_or_regex(path, "zig", patterns)
+
+
+def extract_julia(path: Path) -> Dict[str, Any]:
+    """Julia extractor (tree-sitter when available, regex fallback)."""
+    patterns = [
+        {"regex": r"module\s+([a-zA-Z0-9_]+)", "kind": "class", "prefix": "module"},
+        {"regex": r"struct\s+([a-zA-Z0-9_]+)", "kind": "class", "prefix": "struct"},
+        {"regex": r"function\s+([a-zA-Z0-9_!]+)\s*\(", "kind": "function", "prefix": "function"},
+        {"regex": r"macro\s+([a-zA-Z0-9_!]+)\s*\(", "kind": "function", "prefix": "macro"},
+    ]
+    return _ts_or_regex(path, "julia", patterns)
+
+
+def extract_r(path: Path) -> Dict[str, Any]:
+    """R language extractor using regex patterns."""
+    patterns = [
+        {"regex": r"([a-zA-Z0-9_.]+)\s*<-\s*function\s*\(", "kind": "function", "prefix": "function"},
+        {"regex": r"([a-zA-Z0-9_.]+)\s*=\s*function\s*\(", "kind": "function", "prefix": "function"},
+        {"regex": r"([a-zA-Z0-9_.]+)\s*<-\s*R6Class\s*\(", "kind": "class", "prefix": "class"},
+        {"regex": r"setClass\s*\(\s*['\"]([a-zA-Z0-9_.]+)['\"]", "kind": "class", "prefix": "class"},
+    ]
+    return _extract_regex_patterns(path, patterns)
+
+
+def extract_clojure(path: Path) -> Dict[str, Any]:
+    """Clojure extractor using lisp form patterns."""
+    patterns = [
+        {"regex": r"\(\s*ns\s+([a-zA-Z0-9_.-]+)", "kind": "class", "prefix": "ns"},
+        {"regex": r"\(\s*defprotocol\s+([a-zA-Z0-9_.-]+)", "kind": "class", "prefix": "protocol"},
+        {"regex": r"\(\s*defrecord\s+([a-zA-Z0-9_.-]+)", "kind": "class", "prefix": "record"},
+        {"regex": r"\(\s*defn-?\s+([a-zA-Z0-9_.-]+)", "kind": "function", "prefix": "defn"},
+        {"regex": r"\(\s*defmacro\s+([a-zA-Z0-9_.-]+)", "kind": "function", "prefix": "defmacro"},
+    ]
+    return _extract_regex_patterns(path, patterns)
+
+
+def extract_sql(path: Path) -> Dict[str, Any]:
+    """SQL DDL extractor (tree-sitter when available, regex fallback)."""
+    patterns = [
+        {"regex": r"CREATE\s+(?:OR\s+REPLACE\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_`\"\[\]\.]+)", "kind": "class", "prefix": "table"},
+        {"regex": r"CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_`\"\[\]\.]+)", "kind": "class", "prefix": "view"},
+        {"regex": r"CREATE\s+(?:OR\s+REPLACE\s+)?(?:PROCEDURE|FUNCTION)\s+([a-zA-Z0-9_`\"\[\]\.]+)", "kind": "function", "prefix": "proc"},
+    ]
+    return _ts_or_regex(path, "sql", patterns)
+
+
+def extract_graphql(path: Path) -> Dict[str, Any]:
+    """GraphQL schema extractor (tree-sitter when available, regex fallback)."""
+    patterns = [
+        {"regex": r"type\s+([a-zA-Z0-9_]+)", "kind": "class", "prefix": "type"},
+        {"regex": r"interface\s+([a-zA-Z0-9_]+)", "kind": "class", "prefix": "interface"},
+        {"regex": r"union\s+([a-zA-Z0-9_]+)", "kind": "class", "prefix": "union"},
+        {"regex": r"enum\s+([a-zA-Z0-9_]+)", "kind": "class", "prefix": "enum"},
+        {"regex": r"input\s+([a-zA-Z0-9_]+)", "kind": "class", "prefix": "input"},
+    ]
+    return _ts_or_regex(path, "graphql", patterns)
+
+
+def extract_sfc(path: Path) -> Dict[str, Any]:
+    """Vue / Svelte Single File Component extractor by isolating <script> AST."""
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return {"nodes": [], "edges": [], "error": str(e)}
+
+    script_match = re.search(r"<script(?:\s+[^>]*)?>([\s\S]*?)<\/script>", content, re.IGNORECASE)
+    if not script_match:
+        # Fallback to file node
+        return {
+            "nodes": [{
+                "id": path.name,
+                "label": path.name,
+                "kind": "file",
+                "source_location": "L1",
+                "doc": "",
+            }],
+            "edges": [],
+            "error": None,
+        }
+
+    # Extract script block and determine whether TypeScript or JavaScript
+    script_content = script_match.group(1)
+    is_ts = "lang=\"ts\"" in script_match.group(0) or "lang='ts'" in script_match.group(0) or "lang=ts" in script_match.group(0)
+
+    # Write temporary file and delegate to extract_ts / extract_js
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".ts" if is_ts else ".js", mode="w", encoding="utf-8", delete=False) as tf:
+        tf.write(script_content)
+        tpath = Path(tf.name)
+
+    try:
+        from sot_graph.ts_extract import extract_ts
+        res = extract_ts(tpath, "typescript" if is_ts else "javascript")
+        if not res.get("error") and (res.get("nodes") or res.get("edges")):
+            # Fix source references back to original path.name
+            for edge in res.get("edges", []):
+                if edge.get("source") == tpath.name:
+                    edge["source"] = path.name
+            return res
+    except Exception:
+        pass
+    finally:
+        tpath.unlink(missing_ok=True)
+
+    # Fallback to regex on script content
+    return extract_js(path)
+
+
 PHP_TYPE_PAT = re.compile(
     r"^(?:(?:abstract|final|readonly)\s+)*(class|interface|trait|enum)\s+"
     r"([A-Za-z_][A-Za-z0-9_]*)(.*)$"

@@ -42,6 +42,18 @@ EXT_DISPATCH = {
     ".ex": "extract_elixir",
     ".exs": "extract_elixir",
     ".lua": "extract_lua",
+    ".zig": "extract_zig",
+    ".jl": "extract_julia",
+    ".r": "extract_r",
+    ".R": "extract_r",
+    ".clj": "extract_clojure",
+    ".cljs": "extract_clojure",
+    ".cljc": "extract_clojure",
+    ".sql": "extract_sql",
+    ".graphql": "extract_graphql",
+    ".gql": "extract_graphql",
+    ".vue": "extract_sfc",
+    ".svelte": "extract_sfc",
 }
 LANGUAGE_MAP = {
     ".py": "python",
@@ -77,7 +89,18 @@ LANGUAGE_MAP = {
     ".yml": "yaml",
     ".toml": "toml",
     ".sh": "shell",
+    ".zig": "zig",
+    ".jl": "julia",
+    ".r": "r",
+    ".R": "r",
+    ".clj": "clojure",
+    ".cljs": "clojure",
+    ".cljc": "clojure",
     ".sql": "sql",
+    ".graphql": "graphql",
+    ".gql": "graphql",
+    ".vue": "vue",
+    ".svelte": "svelte",
 }
 
 

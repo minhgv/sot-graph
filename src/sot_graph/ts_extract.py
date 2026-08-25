@@ -285,6 +285,56 @@ CONFIGS: Dict[str, Dict[str, Any]] = {
         "calls": [{"type": "function_call", "field": "name"}],
         "imports": [r'\brequire\s*\(\s*["\']([^"\']+)["\']\s*\)'],
     },
+    "zig": {
+        "module": "tree_sitter_zig",
+        "loader": "language",
+        "defs": {
+            "function_declaration": ("name", "function"),
+            "struct_declaration": (None, "class"),
+            "enum_declaration": (None, "class"),
+            "union_declaration": (None, "class"),
+        },
+        "calls": [{"type": "call_expression", "field": "function"}],
+        "imports": [r'@import\s*\(\s*["\']([^"\']+)["\']\s*\)'],
+    },
+    "julia": {
+        "module": "tree_sitter_julia",
+        "loader": "language",
+        "defs": {
+            "module_definition": ("name", "class"),
+            "struct_definition": ("name", "class"),
+            "function_definition": ("name", "function"),
+            "macro_definition": ("name", "function"),
+        },
+        "calls": [{"type": "call_expression", "field": None}],
+        "imports": [r"\busing\s+([\w.]+)", r"\bimport\s+([\w.]+)"],
+    },
+    "sql": {
+        "module": "tree_sitter_sql",
+        "loader": "language",
+        "defs": {
+            "create_table": ("name", "class"),
+            "create_view": ("name", "class"),
+            "create_function": ("name", "function"),
+            "create_procedure": ("name", "function"),
+        },
+        "calls": [],
+        "imports": [],
+    },
+    "graphql": {
+        "module": "tree_sitter_graphql",
+        "loader": "language",
+        "defs": {
+            "type_definition": ("name", "class"),
+            "interface_type_definition": ("name", "class"),
+            "union_type_definition": ("name", "class"),
+            "enum_type_definition": ("name", "class"),
+            "input_object_type_definition": ("name", "class"),
+            "field_definition": ("name", "function"),
+        },
+        "calls": [],
+        "imports": [],
+    },
 }
 
 _NAME_CHILD_TYPES = (
