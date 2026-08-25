@@ -37,8 +37,12 @@ EXT_DISPATCH = {
     ".kts": "extract_kotlin",
     ".dart": "extract_dart",
     ".cs": "extract_c_sharp",
+    ".scala": "extract_scala",
+    ".sc": "extract_scala",
+    ".ex": "extract_elixir",
+    ".exs": "extract_elixir",
+    ".lua": "extract_lua",
 }
-
 LANGUAGE_MAP = {
     ".py": "python",
     ".js": "javascript",
@@ -61,6 +65,11 @@ LANGUAGE_MAP = {
     ".kts": "kotlin",
     ".dart": "dart",
     ".cs": "c_sharp",
+    ".scala": "scala",
+    ".sc": "scala",
+    ".ex": "elixir",
+    ".exs": "elixir",
+    ".lua": "lua",
     ".arb": "json",
     ".md": "markdown",
     ".json": "json",

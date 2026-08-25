@@ -222,11 +222,75 @@ CONFIGS: Dict[str, Dict[str, Any]] = {
             "extends_child_types": ("base_class_clause",),
         },
     },
+    "dart": {
+        "module": "tree_sitter_dart",
+        "loader": "language",
+        "defs": {
+            "class_definition": ("name", "class"),
+            "enum_declaration": ("name", "class"),
+            "mixin_declaration": ("name", "class"),
+            "extension_declaration": ("name", "class"),
+            "function_signature": ("name", "function"),
+            "method_signature": ("name", "method"),
+            "getter_signature": ("name", "function"),
+            "setter_signature": ("name", "function"),
+        },
+        "calls": [
+            {"type": "expression_statement", "field": None},
+        ],
+        "imports": [r"\bimport\s+['\"]([^'\"]+)['\"]"],
+        "inheritance": {
+            "types": {"class_definition", "mixin_declaration"},
+            "extends_child_types": ("superclass", "interfaces", "mixins"),
+        },
+    },
+    "scala": {
+        "module": "tree_sitter_scala",
+        "loader": "language",
+        "defs": {
+            "class_definition": ("name", "class"),
+            "trait_definition": ("name", "class"),
+            "object_definition": ("name", "class"),
+            "function_definition": ("name", "function"),
+            "function_declaration": ("name", "function"),
+        },
+        "calls": [
+            {"type": "call_expression", "field": "function"},
+            {"type": "generic_function", "field": "function"},
+        ],
+        "imports": [r"\bimport\s+([\w.]+)"],
+        "inheritance": {
+            "types": {"class_definition", "trait_definition", "object_definition"},
+            "extends_child_types": ("extends_clause",),
+        },
+    },
+    "elixir": {
+        "module": "tree_sitter_elixir",
+        "loader": "language",
+        "defs": {},
+        "calls": [{"type": "call", "field": None}],
+        "imports": [
+            r"\balias\s+([\w.]+)",
+            r"\bimport\s+([\w.]+)",
+            r"\buse\s+([\w.]+)",
+            r"\brequire\s+([\w.]+)",
+        ],
+    },
+    "lua": {
+        "module": "tree_sitter_lua",
+        "loader": "language",
+        "defs": {
+            "function_declaration": ("name", "function"),
+        },
+        "calls": [{"type": "function_call", "field": "name"}],
+        "imports": [r'\brequire\s*\(\s*["\']([^"\']+)["\']\s*\)'],
+    },
 }
 
 _NAME_CHILD_TYPES = (
     "simple_identifier", "identifier", "type_identifier", "name",
-    "namespace_identifier", "field_identifier", "property_identifier", "destructor_name"
+    "namespace_identifier", "field_identifier", "property_identifier",
+    "destructor_name", "dot_index_expression", "method_index_expression"
 )
 _CALLEE_RE = re.compile(r"\s*([A-Za-z_~][A-Za-z0-9_.]*)\s*\(")
 
@@ -282,6 +346,8 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
             return None
         if d_node.type in _NAME_CHILD_TYPES:
             raw_n = text(d_node).strip()
+            if ":" in raw_n or "." in raw_n:
+                raw_n = raw_n.replace(":", ".").split(".")[-1]
             match = re.match(r"[~]?[A-Za-z_][A-Za-z0-9_]*", raw_n)
             return match.group(0) if match else None
         if d_node.type == "qualified_identifier":
@@ -417,6 +483,70 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
                 elif val_node:
                     walk(val_node, containers, current_def)
             return
+        if language == "elixir" and node_type == "call":
+            # In Elixir, defmodule, def, defp, defmacro, defprotocol are call nodes
+            first_child = node.child_by_field_name("name") or (node.children[0] if node.children else None)
+            f_text = text(first_child).strip() if first_child else ""
+            if f_text == "defmodule":
+                args_node = node.child_by_field_name("arguments") or (node.children[1] if len(node.children) > 1 else None)
+                mod_name = text(args_node).strip().split(".")[-1] if args_node else None
+                if mod_name:
+                    if mod_name not in seen_ids:
+                        seen_ids.add(mod_name)
+                        nodes.append({
+                            "id": mod_name,
+                            "label": f"class {mod_name}",
+                            "kind": "class",
+                            "source_location": f"L{line(node)}",
+                            "doc": "",
+                            "signature": f"defmodule {mod_name}",
+                            "line_end": node.end_point[0] + 1,
+                            "col_start": node.start_point[1],
+                            "col_end": node.end_point[1],
+                        })
+                        edges.append({
+                            "source": path.name,
+                            "target": mod_name,
+                            "relation": "defines",
+                            "source_location": f"L{line(node)}",
+                        })
+                    for child in node.children:
+                        walk(child, containers + (mod_name,), current_def)
+                    return
+            elif f_text in ("def", "defp", "defmacro", "defprotocol", "defimpl"):
+                args_node = node.child_by_field_name("arguments") or (node.children[1] if len(node.children) > 1 else None)
+                fn_name = None
+                if args_node:
+                    m = re.match(r"([A-Za-z_][A-Za-z0-9_?!]*)", text(args_node).strip())
+                    if m:
+                        fn_name = m.group(1)
+                if fn_name:
+                    container = containers[-1] if containers else None
+                    raw_id = f"{container}.{fn_name}" if container else fn_name
+                    if raw_id not in seen_ids:
+                        seen_ids.add(raw_id)
+                        nodes.append({
+                            "id": raw_id,
+                            "label": f"def {raw_id}",
+                            "kind": "function",
+                            "source_location": f"L{line(node)}",
+                            "doc": "",
+                            "signature": text(node).split("\n", 1)[0][:120],
+                            "line_end": node.end_point[0] + 1,
+                            "col_start": node.start_point[1],
+                            "col_end": node.end_point[1],
+                        })
+                        edges.append({
+                            "source": path.name,
+                            "target": raw_id,
+                            "relation": "defines",
+                            "source_location": f"L{line(node)}",
+                        })
+                    # Walk only inside do_block body to avoid caller matching its own signature
+                    do_block = node.child_by_field_name("do_block") or next((c for c in node.children if c.type == "do_block"), None)
+                    if do_block:
+                        walk(do_block, containers, raw_id)
+                    return
         if node_type in defs_cfg:
             field, kind = defs_cfg[node_type]
             name = name_of(node, field)
@@ -452,7 +582,6 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
                         "source_location": f"L{line(node)}",
                     })
                     emit_inheritance(node, node_type, raw_id)
-
                 # Special: PHP traits used inside class body (use LoggerTrait;)
                 if language == "php" and kind == "class":
                     for child in node.children:
@@ -471,6 +600,22 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
                                                 })
 
                 next_containers = containers + (name,) if kind == "class" else containers
+                if language == "dart" and kind == "class":
+                    # In Dart grammar, class_body contains method_signature followed by function_body as sibling
+                    for child in node.children:
+                        if child.type == "class_body":
+                            active_method = current_def
+                            for member in child.children:
+                                if member.type in ("method_signature", "function_signature", "getter_signature", "setter_signature"):
+                                    m_name = name_of(member, "name")
+                                    if m_name:
+                                        active_method = f"{name}.{m_name}"
+                                        walk(member, next_containers, current_def)
+                                elif member.type == "function_body":
+                                    walk(member, next_containers, active_method)
+                                else:
+                                    walk(member, next_containers, current_def)
+                            return
                 for child in node.children:
                     walk(child, next_containers, raw_id if kind != "class" else current_def)
                 return

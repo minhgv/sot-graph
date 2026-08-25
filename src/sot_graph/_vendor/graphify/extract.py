@@ -667,6 +667,35 @@ def extract_ruby(path: Path) -> Dict[str, Any]:
     return _extract_regex_patterns(path, patterns)
 
 
+def extract_scala(path: Path) -> Dict[str, Any]:
+    """Scala extractor (tree-sitter when available, regex fallback)."""
+    patterns = [
+        {"regex": r"(?:case\s+)?class\s+([a-zA-Z0-9_]+)", "kind": "class", "prefix": "class"},
+        {"regex": r"trait\s+([a-zA-Z0-9_]+)", "kind": "class", "prefix": "trait"},
+        {"regex": r"object\s+([a-zA-Z0-9_]+)", "kind": "class", "prefix": "object"},
+        {"regex": r"def\s+([a-zA-Z0-9_]+)\s*[\(\[]?", "kind": "function", "prefix": "def"},
+    ]
+    return _ts_or_regex(path, "scala", patterns)
+
+
+def extract_elixir(path: Path) -> Dict[str, Any]:
+    """Elixir extractor (tree-sitter when available, regex fallback)."""
+    patterns = [
+        {"regex": r"defmodule\s+([a-zA-Z0-9_.]+)", "kind": "class", "prefix": "defmodule"},
+        {"regex": r"defp?\s+([a-zA-Z0-9_?!]+)\s*\(?", "kind": "function", "prefix": "def"},
+    ]
+    return _ts_or_regex(path, "elixir", patterns)
+
+
+def extract_lua(path: Path) -> Dict[str, Any]:
+    """Lua extractor (tree-sitter when available, regex fallback)."""
+    patterns = [
+        {"regex": r"function\s+([a-zA-Z0-9_.:]+)\s*\(", "kind": "function", "prefix": "function"},
+        {"regex": r"local\s+function\s+([a-zA-Z0-9_]+)\s*\(", "kind": "function", "prefix": "function"},
+    ]
+    return _ts_or_regex(path, "lua", patterns)
+
+
 PHP_TYPE_PAT = re.compile(
     r"^(?:(?:abstract|final|readonly)\s+)*(class|interface|trait|enum)\s+"
     r"([A-Za-z_][A-Za-z0-9_]*)(.*)$"
@@ -974,7 +1003,6 @@ DART_TYPE_PREFIXES = (
     "TextStyle ", "EdgeInsets ", "BoxDecoration ", "Response ", "Request ",
     "StreamSubscription<", "GlobalKey<"
 )
-
 
 def extract_dart(path: Path) -> Dict[str, Any]:
     """
