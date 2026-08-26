@@ -10,10 +10,11 @@ import re
 import shutil
 import sqlite3
 import stat
+import sys
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 from urllib.parse import quote
 
 
@@ -1732,10 +1733,10 @@ class Database:
         pending_bases = [
             {"src": r[0], "label": r[1], "path": r[2], "dst_symbol": r[3], "state": r[4]}
             for r in self.conn.execute(
-                f"SELECT p.src, n.label, n.path, p.dst_symbol, p.resolution_state "
-                f"FROM pending_edges p JOIN graph_nodes n ON p.src = n.id "
-                f"WHERE p.src = ? AND p.relation IN ('extends', 'implements') "
-                f"AND p.resolution_state != 'RESOLVED' ORDER BY n.path",
+                "SELECT p.src, n.label, n.path, p.dst_symbol, p.resolution_state "
+                "FROM pending_edges p JOIN graph_nodes n ON p.src = n.id "
+                "WHERE p.src = ? AND p.relation IN ('extends', 'implements') "
+                "AND p.resolution_state != 'RESOLVED' ORDER BY n.path",
                 (node_id,),
             ).fetchall()
         ]

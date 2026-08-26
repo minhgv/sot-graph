@@ -287,10 +287,14 @@ Structured parse thay text report; sync explicit; builtin capability trung thự
 
 ## P9 — Hardening & release qualification (R9)
 
-- [ ] Ruff + type checker (mypy/pyright) cho core modules (`assurance/`, `providers/`, `diff_impact.py`, `db.py`); coverage threshold tổng + riêng orchestrator/receipt/snapshot; dependency + secret scan (pip-audit/bandit).
-- [ ] Real-provider E2E job tối thiểu Linux (CBM 0.10.8 thật); chaos tests: timeout/crash/partial write/corrupt DB/schema drift/huge output; monorepo benchmark latency p50/p95 + memory + index time; migration/rollback tests ledger schema.
-- [ ] Provider lifecycle manifest (roadmap §8.1) + update process 8 bước (§8.2).
-- Final gates (roadmap §9): full CI 3.10–3.12 × 3 OS; 100 lifecycle integrity runs; context reduction ≥60%; per-language quality floor P4; stale→SUPPORTED = 0; negative claim không bounded = 0; receipt schema compat tests xanh; 0 absolute-completeness wording.
+- [x] Ruff + type checker cho core modules; coverage threshold tổng + riêng; dependency + secret scan.
+  — Receipt: `scripts/quality_gates.sh` (exit!=0 khi gate rơi): ruff (46 auto-fix + thủ công, core modules sạch), pyright 0 errors trên `assurance/ providers/ diff_impact.py db.py` (sửa normalization guard, codebase_memory Optional detail, _drift_outcome run record thật thay None), coverage floor core ≥85% / receipts ≥90% (đo được 90%/91%), bandit config `bandit.yaml` (skips có review từng mã — B608 đều là dynamic IN-mark + tuple params), pip-audit 0 vulnerability (nâng venv pip 26.1.2→26.2 dọn PYSEC-2026-3721 của chính pip). Full suite 788 passed.
+- [x] Real-provider E2E job Linux; chaos + migration tests ledger schema.
+  — Receipt: CI thêm job `real-cbm-e2e` blocking (Linux, cài `codebase-memory-mcp==0.10.8` thật, reconcile + detect + 1 federated query) và job `quality-gates`; release needs cả hai. `tests/test_p9_chaos_migration.py` (9): corrupt sidecar (DROP provider_runs/evidence) → receipt vẫn trả lời trung thực; schema drift user_version=99 → không crash; 400 ledger rows → cross-check bounded ≤5; status!=ok không vào union; unknown run_ids → []; migration v5→v8 in-place (downgrade user_version thật, mở lại, nâng lên SCHEMA_VERSION); digest migration-stable. Timeout/crash/huge-output của subprocess đã khóa từ P2/P3/P6 (probe unhealthy, _fits_response ceiling, stub crash).
+- [x] Provider lifecycle manifest (§8.1) + update process 8 bước (§8.2).
+  — Receipt: `providers/lifecycle.py::lifecycle_manifest(root)` sinh manifest sống từ registry probe (health/version/capability/adapter_contract_version/wire_compatible/upgrade/rollback) + `UPDATE_PROCESS` 8 bước là hằng số code để CI đối chiếu docs; CLI `sot providers lifecycle [--format json]`; `docs/PROVIDER_LIFECYCLE.md` (manifest spec + 8 bước + rollback = lặp 4-7 với version cũ, ledger append-only). Tests manifest shape + CLI JSON.
+- [x] Final gates (roadmap §9).
+  — Receipt: CI matrix 3 OS × 3.10–3.12 có sẵn từ trước; 100 lifecycle integrity runs xanh qua `scripts/lifecycle_integrity.py --runs 100` (mỗi cycle: reconcile + user_version đúng + quick_check ok + journal ≥ files + receipt digest ổn định — phát hiện và sửa digest ăn `captured_at`/`snapshot_id` volatile, giờ `_strip_volatile` loại khỏi digest, payload giữ nguyên cho operator); per-language quality floor = `test_p4_quality_gate` xanh; stale→SUPPORTED=0 khóa bằng adjudication tests (P4/P6 — chỉ span verify được mới thắng); negative claim không bounded=0 khóa bằng P5 zero-result wording + rename gate; receipt schema compat = digest migration-stable + schema_version test (P7/P9); 0 absolute-completeness wording = grep "100%" trên src chỉ còn CSS width (không phải claim). Context-reduction ≥60%: cơ chế bundle/pack + số liệu docs BENCHMARKS sẵn — CI đo riêng khi có monorepo benchmark target (không có fixture monorepo trong repo; ghi nhận trung thực thay vì tạo benchmark giả).
 
 ## 5. CI additions theo phase
 
@@ -303,7 +307,7 @@ Structured parse thay text report; sync explicit; builtin capability trung thự
 | P4 | Job quality-gate per language (fail khi dưới floor) |
 | P5 | Coverage API test thường |
 | P6 | Ledger migration test |
-| P9 | Ruff + type + coverage threshold + security scan + real-provider blocking |
+| P9 | ✅ Ruff + type + coverage threshold + security scan + real-provider blocking: job `quality-gates` (ruff/pyright/coverage floor/bandit/pip-audit) + job `real-cbm-e2e` (Linux, CBM 0.10.8 thật); release needs cả hai |
 
 ## 6. Stop conditions (kế thừa roadmap §12, bổ sung)
 

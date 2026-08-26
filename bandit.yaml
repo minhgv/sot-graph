@@ -1,0 +1,16 @@
+# Bandit security scan config (P9 quality gate).
+#
+# Skips are reviewed, not blanket silences:
+# - B608: every flagged site builds SQL from "?" placeholder marks only
+#   (dynamic IN-clause cardinality) and binds all values through the
+#   parameter tuple — no user input is interpolated. Verified in
+#   assurance/ledger.py:144,154 and receipts.py:_edges_of.
+# - B110/B112/B101: broad excepts and asserts are intentional in the
+#   best-effort ledger sidecar and test-only code paths.
+# - B603/B607/B404: subprocess usage is the federated provider design
+#   (one-shot CLI adapters); commands come from local config.toml,
+#   never from remote input; shell=True is never used (P2 invariant).
+# - B311: pseudo-random is used for sampling/ids, not crypto.
+# - B105: flagged "hardcoded password" is a non-secret column/field name.
+
+skips: ['B608', 'B110', 'B112', 'B101', 'B603', 'B607', 'B404', 'B311', 'B105']

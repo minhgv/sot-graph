@@ -28,7 +28,7 @@ import tempfile
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping
 
 from sot_graph.proc import RunResult, run_command
 from sot_graph.snapshot import dirty_state, get_head_sha
@@ -283,7 +283,7 @@ class CodebaseMemoryProvider:
         self,
         config: Any = None,
         *,
-        db: _RunsLedger | None = None,
+        db: Any = None,
         command: list[str] | tuple[str, ...] | None = None,
         query_timeout_seconds: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
         index_timeout_seconds: float = DEFAULT_INDEX_TIMEOUT_SECONDS,
@@ -723,10 +723,11 @@ class CodebaseMemoryProvider:
         self,
         capability: str,
         repo_root: str,
-        detail: str,
+        detail: str | None,
         next_action: str | None,
     ) -> QueryOutcome:
         """Honest no-spawn outcome when a query cannot even be addressed."""
+        detail = detail or "query could not be addressed"
         record = ProviderRunRecord(
             run_id=f"run_{int(time.time())}_{uuid.uuid4().hex[:8]}",
             provider_name=PROVIDER_NAME,
@@ -740,7 +741,7 @@ class CodebaseMemoryProvider:
             detail=detail,
         )
         return QueryOutcome(
-            ok=False, run=record, payload=None, error=detail,  # type: ignore[arg-type]
+            ok=False, run=record, payload=None, error=detail,
             next_action=next_action,
             metadata={"wire_status": "abstained", "freshness": "UNBOUND",
                       "snapshot_bound": False},
@@ -1129,8 +1130,20 @@ class CodebaseMemoryProvider:
         )
 
     def _drift_outcome(self, tool: str, detail: str) -> QueryOutcome:
+        record = ProviderRunRecord(
+            run_id=f"run_{int(time.time())}_{uuid.uuid4().hex[:8]}",
+            provider_name=PROVIDER_NAME,
+            provider_version=self._version,
+            capability=tool,
+            status="schema_drift",
+            exit_code=None,
+            duration_ms=0,
+            arguments_redacted=(tool,),
+            next_action="rerun after provider adapter update",
+            detail=detail,
+        )
         return QueryOutcome(
-            ok=False, run=None, payload=None,
+            ok=False, run=record, payload=None,
             error=f"{tool} schema drift: {detail}; abstaining",
             next_action=None,
             metadata={"wire_status": "schema_drift",

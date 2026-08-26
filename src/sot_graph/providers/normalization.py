@@ -200,6 +200,8 @@ def normalize_subject(
         problems.append("missing qualified_name")
     if problems:
         return None, tuple(problems)
+    assert isinstance(path, str) and isinstance(kind, str) \
+        and isinstance(qualified_name, str)
 
     span = _extract_span(raw)
     has_span = span["start_line"] is not None and span["end_line"] is not None

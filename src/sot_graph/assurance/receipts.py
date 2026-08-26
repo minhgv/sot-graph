@@ -48,10 +48,35 @@ _RELATION_FAMILIES = {
 _TEST_PATH_MARKERS = ("test", "spec")
 
 
+#: Snapshot fields that change between captures of the SAME worktree
+#: state (wall clock, generated id). They stay in the payload for
+#: operators but never enter the digest: two receipts of one unchanged
+#: state must share a digest (final gate: 100 lifecycle integrity runs).
+_VOLATILE_SNAPSHOT_KEYS = ("captured_at", "snapshot_id")
+
+
+def _strip_volatile(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            k: _strip_volatile(v)
+            for k, v in value.items()
+            if k not in _VOLATILE_SNAPSHOT_KEYS
+        }
+    if isinstance(value, list):
+        return [_strip_volatile(v) for v in value]
+    return value
+
+
 def receipt_digest(payload: Dict[str, Any]) -> str:
-    """Deterministic digest over canonical JSON (sorted keys, no spaces)."""
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"),
-                           ensure_ascii=False, default=str)
+    """Deterministic digest over canonical JSON (sorted keys, no spaces).
+
+    Wall-clock fields (snapshot captured_at, generated snapshot ids) are
+    excluded: the digest describes the evidenced STATE, not the moment
+    of capture.
+    """
+    canonical = json.dumps(_strip_volatile(payload), sort_keys=True,
+                           separators=(",", ":"), ensure_ascii=False,
+                           default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 

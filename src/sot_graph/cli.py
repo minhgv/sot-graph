@@ -1073,6 +1073,23 @@ def cmd_providers(args: argparse.Namespace, root: str) -> int:
     if sub == "sync":
         return cmd_providers_sync(args, root)
 
+    if sub == "lifecycle":
+        from sot_graph.providers.lifecycle import lifecycle_manifest
+
+        manifest = lifecycle_manifest(root)
+        if fmt == "json":
+            print(json.dumps(manifest, indent=2))
+            return 0
+        print(f"Provider lifecycle manifest (schema v{manifest['schema_version']})")
+        for entry in manifest["providers"]:
+            state = "healthy" if entry["healthy"] else "unhealthy"
+            print(f"  {entry['name']}: {state} v{entry['version'] or '?'} "
+                  f"[{entry['mode']}] wire_compatible={entry['wire_compatible']}")
+        print(f"  update process: {len(manifest['update_process'])} steps "
+              "(docs/PROVIDER_LIFECYCLE.md); "
+              f"rollback: {manifest['providers'][0]['rollback'][:60]}…"
+              if manifest["providers"] else "  no providers configured")
+        return 0
     if sub == "detect":
         rows = [asdict(st) for st in detect_providers(root)]
         if fmt == "json":
@@ -1996,6 +2013,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_prov_res.add_argument("--capability", required=True, help="Capability to resolve (e.g. impact, symbols, callgraph)")
     p_prov_res.add_argument("--format", default="text", choices=["text", "json"], help="Output format (default: text)")
 
+    p_prov_lifecycle = prov_subs.add_parser("lifecycle", help="Provider lifecycle manifest + 8-step update process (roadmap §8.1/§8.2)")
+    p_prov_lifecycle.add_argument("--format", default="text", choices=["text", "json"], help="Output format (default: text)")
     p_prov_sync = prov_subs.add_parser(
         "sync",
         help="Explicit index sync for one provider (own timeout, lock, receipt)",

@@ -27,7 +27,6 @@ from .base import (
     CoverageRequest,
     IndexRequest,
     SymbolRequest,
-    supports_method,
 )
 
 #: Version of the provider plugin contract. Bump on any breaking change

@@ -110,6 +110,66 @@ jobs:
           path: /tmp/builtin-baseline-ci.json
           retention-days: 30
 
+  quality-gates:
+    name: Quality Gates (P9)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Install audit tools
+        run: uv pip install bandit pip-audit
+
+      - name: Set up Node (ruff/pyright via npx)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run quality gates
+        run: bash scripts/quality_gates.sh
+
+  real-cbm-e2e:
+    name: Real Provider E2E (Linux, CBM 0.10.8)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Install real codebase-memory-mcp 0.10.8
+        run: uv pip install codebase-memory-mcp==0.10.8
+
+      - name: Configure provider + run one federated query
+        run: |
+          mkdir -p /tmp/cbm-e2e/.sot
+          cat > /tmp/cbm-e2e/.sot/config.toml <<'EOF'
+          allow_external = true
+          [providers.codebase-memory]
+          command = ["codebase-memory-mcp"]
+          EOF
+          uv run sot --root /tmp/cbm-e2e reconcile
+          uv run sot --root /tmp/cbm-e2e providers detect --format json
+          uv run sot --root /tmp/cbm-e2e usages run --provider auto ||             uv run sot --root /tmp/cbm-e2e search run --provider auto
+
   package-smoke:
     name: Package & Smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -148,7 +208,7 @@ jobs:
 
   release:
     name: Publish Release Artifacts
-    needs: [lint, test, package-smoke]
+    needs: [lint, test, quality-gates, real-cbm-e2e, package-smoke]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

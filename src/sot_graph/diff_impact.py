@@ -16,7 +16,7 @@ import subprocess
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 __all__ = [
     "DiffHunk",
@@ -1167,29 +1167,29 @@ def format_diff_impact_markdown(result: DiffImpactResult) -> str:
     risk_icon = "🔴" if risk_level == "HIGH" else "🟡" if risk_level == "MEDIUM" else "🟢"
 
     lines: List[str] = [
-        f"# SOT-Graph Diff Impact Analysis Report",
-        f"",
+        "# SOT-Graph Diff Impact Analysis Report",
+        "",
         f"**Target:** `{_sanitize_cell(result.target)}` | **Risk Level:** {risk_icon} **{risk_level}** (Score: {summary.get('risk_score', 0)}/100) | **Execution Time:** {summary.get('execution_time_ms', 0)}ms",
-        f"",
-        f"## 📊 Summary Metrics",
-        f"",
-        f"| Metric | Count |",
-        f"| :--- | :--- |",
+        "",
+        "## 📊 Summary Metrics",
+        "",
+        "| Metric | Count |",
+        "| :--- | :--- |",
         f"| Changed Files | **{summary.get('total_changed_files', 0)}** |",
         f"| Diff Hunks | **{summary.get('total_hunks', 0)}** |",
         f"| Directly Modified Symbols | **{summary.get('total_direct_nodes', 0)}** |",
         f"| Blast Radius Callers (In-Degree) | **{summary.get('total_callers', 0)}** |",
         f"| Impacted API Endpoints | **{summary.get('total_apis', 0)}** |",
         f"| Tests to Re-Run | **{summary.get('total_tests', 0)}** |",
-        f"",
+        "",
     ]
 
     # Direct Nodes Table
-    lines.append(f"## 🎯 1. Directly Modified AST Symbols")
-    lines.append(f"")
+    lines.append("## 🎯 1. Directly Modified AST Symbols")
+    lines.append("")
     if result.direct_nodes:
-        lines.append(f"| Symbol | Kind | File | Lines | Change Type |")
-        lines.append(f"| :--- | :--- | :--- | :--- | :--- |")
+        lines.append("| Symbol | Kind | File | Lines | Change Type |")
+        lines.append("| :--- | :--- | :--- | :--- | :--- |")
         for n in result.direct_nodes:
             sym = _sanitize_cell(n.symbol or n.label)
             kind = _sanitize_cell(n.kind)
@@ -1197,15 +1197,15 @@ def format_diff_impact_markdown(result: DiffImpactResult) -> str:
             chg = _sanitize_cell(n.change_type)
             lines.append(f"| `{sym}` | `{kind}` | `{path}` | L{n.line_start}-L{n.line_end} | **{chg}** |")
     else:
-        lines.append(f"_No matching AST nodes in knowledge graph for modified line intervals._")
-    lines.append(f"")
+        lines.append("_No matching AST nodes in knowledge graph for modified line intervals._")
+    lines.append("")
 
     # Callers Table
-    lines.append(f"## 💥 2. Blast Radius: Upstream Inward Callers")
-    lines.append(f"")
+    lines.append("## 💥 2. Blast Radius: Upstream Inward Callers")
+    lines.append("")
     if result.caller_impacts:
-        lines.append(f"| Depth | Caller Symbol | Kind | File : Line | Relation | Target Symbol |")
-        lines.append(f"| :--- | :--- | :--- | :--- | :--- | :--- |")
+        lines.append("| Depth | Caller Symbol | Kind | File : Line | Relation | Target Symbol |")
+        lines.append("| :--- | :--- | :--- | :--- | :--- | :--- |")
         for c in result.caller_impacts:
             sym = _sanitize_cell(c.symbol or c.label)
             kind = _sanitize_cell(c.kind)
@@ -1214,15 +1214,15 @@ def format_diff_impact_markdown(result: DiffImpactResult) -> str:
             callee = _sanitize_cell(c.callee_symbol)
             lines.append(f"| Hop {c.depth} | `{sym}` | `{kind}` | `{loc}` | `{rel}` | `{callee}` |")
     else:
-        lines.append(f"_Zero inward caller dependencies detected (low ripple effect)._")
-    lines.append(f"")
+        lines.append("_Zero inward caller dependencies detected (low ripple effect)._")
+    lines.append("")
 
     # API Endpoints Table
-    lines.append(f"## 🌐 3. Affected Cross-Stack API Endpoints")
-    lines.append(f"")
+    lines.append("## 🌐 3. Affected Cross-Stack API Endpoints")
+    lines.append("")
     if result.api_impacts:
-        lines.append(f"| Method | Normalized URI | Frontend Caller | Backend Controller | Impact Source |")
-        lines.append(f"| :--- | :--- | :--- | :--- | :--- |")
+        lines.append("| Method | Normalized URI | Frontend Caller | Backend Controller | Impact Source |")
+        lines.append("| :--- | :--- | :--- | :--- | :--- |")
         for a in result.api_impacts:
             method = _sanitize_cell(a.http_method)
             uri = _sanitize_cell(a.normalized_uri)
@@ -1231,15 +1231,15 @@ def format_diff_impact_markdown(result: DiffImpactResult) -> str:
             src = _sanitize_cell(a.impact_source)
             lines.append(f"| **{method}** | `{uri}` | `{fe}` | `{be}` | `{src}` |")
     else:
-        lines.append(f"_No direct or indirect API contract bindings affected._")
-    lines.append(f"")
+        lines.append("_No direct or indirect API contract bindings affected._")
+    lines.append("")
 
     # Impacted Tests Table
-    lines.append(f"## 🧪 4. Recommended Test Coverage Verification")
-    lines.append(f"")
+    lines.append("## 🧪 4. Recommended Test Coverage Verification")
+    lines.append("")
     if result.test_impacts:
-        lines.append(f"| Test Target | Kind | File | Reason |")
-        lines.append(f"| :--- | :--- | :--- | :--- |")
+        lines.append("| Test Target | Kind | File | Reason |")
+        lines.append("| :--- | :--- | :--- | :--- |")
         for t in result.test_impacts:
             target_desc = f" -> `{_sanitize_cell(t.target_symbol)}`" if t.target_symbol else ""
             target_str = _sanitize_cell(t.symbol or t.path)
@@ -1248,8 +1248,8 @@ def format_diff_impact_markdown(result: DiffImpactResult) -> str:
             reason = _sanitize_cell(t.impact_reason)
             lines.append(f"| `{target_str}` | `{kind}` | `{path}` | `{reason}`{target_desc} |")
     else:
-        lines.append(f"_No existing test suites mapped directly to modified symbols. Consider adding new test coverage._")
-    lines.append(f"")
+        lines.append("_No existing test suites mapped directly to modified symbols. Consider adding new test coverage._")
+    lines.append("")
 
     return "\n".join(lines)
 
@@ -1263,12 +1263,12 @@ def format_commit_history_markdown(result: CommitHistoryResult) -> str:
     """Render CommitHistoryResult into a Markdown table with risk assessment badges."""
     breakdown = result.risk_breakdown
     lines: List[str] = [
-        f"# SOT-Graph Commit History & Risk Assessment",
-        f"",
+        "# SOT-Graph Commit History & Risk Assessment",
+        "",
         f"**Total Commits Analyzed:** {result.total_commits} | 🔴 High Risk: {breakdown.get('HIGH', 0)} | 🟡 Medium Risk: {breakdown.get('MEDIUM', 0)} | 🟢 Low Risk: {breakdown.get('LOW', 0)}",
-        f"",
-        f"| Hash | Author | Date | Churn | Risk | Message | Reasons |",
-        f"| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+        "",
+        "| Hash | Author | Date | Churn | Risk | Message | Reasons |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
     ]
 
     for c in result.commits:
