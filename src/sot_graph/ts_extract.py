@@ -373,6 +373,7 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
             "fallback_reason": f"no tree-sitter grammar configured for language: {language}",
         }
 
+    path = Path(path)  # callers/tests may pass a plain str path
     cfg = CONFIGS[language]
     try:
         lang_mod = importlib.import_module(cfg["module"])
