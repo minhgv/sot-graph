@@ -397,6 +397,7 @@ def cmd_explore(args: argparse.Namespace, db: Database, root: str = ".") -> int:
     fed = federated_extras(
         resolve_federated_spec(getattr(args, "provider", None), root),
         root, "explore", query, builtin_target=(_symbol, path, line),
+        db=db,
     )
     if fed is not None and fed["fail_message"]:
         print(f"❌ {fed['fail_message']}", file=sys.stderr)
@@ -498,6 +499,7 @@ def cmd_usages(args: argparse.Namespace, db: Database, root: str = ".") -> int:
     fed = federated_extras(
         resolve_federated_spec(getattr(args, "provider", None), root),
         root, "usages", query, builtin_target=(symbol, path, line),
+        db=db,
     )
     if fed is not None and fed["fail_message"]:
         print(f"❌ {fed['fail_message']}", file=sys.stderr)
@@ -1331,6 +1333,7 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
         staged=bool(getattr(args, "staged", False)),
         working_tree=bool(getattr(args, "working_tree", False)),
         depth=int(getattr(args, "depth", 2) or 2),
+        db=db,
     )
     if fed is not None and fed["fail_message"]:
         print(f"❌ {fed['fail_message']}", file=sys.stderr)

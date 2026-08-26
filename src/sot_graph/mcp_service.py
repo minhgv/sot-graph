@@ -114,6 +114,80 @@ class McpService:
         """Mark the service closed; per-operation connections are already closed."""
         self._closed = True
 
+    def providers_sync(self, provider_name: str = "codebase-memory") -> Dict[str, Any]:
+        """P6: explicit provider index sync over MCP (a write path).
+
+        Mirrors ``sot providers sync``: guarded by the project write
+        lock, ledger connection opened only for the sync, receipt
+        returned (run id + snapshot + evidence rows). Read tools stay
+        read-only; this is the one explicitly-write MCP surface.
+        """
+        if not isinstance(provider_name, str) or not provider_name.strip():
+            raise McpServiceError("invalid_argument", "provider_name must not be empty")
+        from sot_graph.config import load_config
+        from sot_graph.db import Database
+        from sot_graph.locking import LockBusy, WriteLock
+        from sot_graph.providers.base import IndexRequest
+        from sot_graph.providers.codebase_memory import CodebaseMemoryProvider
+        from sot_graph.providers_registry import ADAPTER_PROBED_PROVIDERS
+
+        name = provider_name.strip()
+        pcfg = load_config(self.project_root).providers.get(name)
+        if pcfg is None or pcfg.name not in ADAPTER_PROBED_PROVIDERS:
+            raise McpServiceError(
+                "invalid_argument",
+                f"sync is not available for provider '{name}'; supported: "
+                + ", ".join(sorted(ADAPTER_PROBED_PROVIDERS)),
+            )
+        lock_path = os.path.join(self.project_root, ".sot", "write.lock")
+        try:
+            with WriteLock(lock_path, timeout_ms=60_000):
+                db = Database(self.db_path)
+                try:
+                    provider = CodebaseMemoryProvider(config=pcfg, db=db)
+                    record = provider.index(
+                        IndexRequest(repo_root=self.project_root)
+                    )
+                finally:
+                    db.close()
+        except LockBusy:
+            raise McpServiceError(
+                "ledger_locked",
+                "another sot writer holds the project lock; retry sync later",
+            )
+        from dataclasses import asdict
+
+        receipt = asdict(record) if hasattr(record, "__dataclass_fields__") else {
+            "run_id": getattr(record, "run_id", None),
+            "status": getattr(record, "status", None),
+        }
+        evidence_rows = 0
+        snapshot = None
+        try:
+            conn = self._connection()
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM provider_evidence "
+                    "WHERE run_id = ?", (receipt.get("run_id"),)
+                ).fetchone()
+                evidence_rows = int(row[0])
+                run_row = conn.execute(
+                    "SELECT snapshot_hash FROM provider_runs WHERE id = ?",
+                    (receipt.get("run_id"),),
+                ).fetchone()
+                snapshot = run_row[0] if run_row else None
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            pass
+        return {
+            "provider": name,
+            "run": receipt,
+            "evidence_rows": evidence_rows,
+            "snapshot": snapshot,
+        }
+
+
     def _connection(self) -> sqlite3.Connection:
         if self._closed:
             raise McpServiceError("closed", "MCP service is closed")

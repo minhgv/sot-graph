@@ -514,7 +514,7 @@ class TestFederatedExtrasGaps:
         def run(outcome):
             monkeypatch.setattr(
                 orch, "federation_plan",
-                lambda spec, root, kind: {
+                lambda spec, root, kind, db=None: {
                     "mode": "prefer", "warnings": [], "fail_message": None,
                     "status": {"name": "cbm", "version": "0.10.8"},
                     "name": "cbm", "provider": object(),

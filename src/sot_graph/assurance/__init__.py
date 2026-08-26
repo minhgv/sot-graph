@@ -35,6 +35,7 @@ from .identity import (
     identity_key,
 )
 from .engine import assured_query_context, resolve_symbol, stale_files_warning
+from .ledger import ledger_rows_for_runs, receipt_from_ledger, union_evidence
 from .orchestrator import (
     architecture,
     cbm_candidates_from_outcome,
@@ -57,6 +58,9 @@ from .routing import (
 
 __all__ = [
     "GAP_TAXONOMY",
+    "ledger_rows_for_runs",
+    "receipt_from_ledger",
+    "union_evidence",
     "CoverageReport",
     "CoverageState",
     "coverage_note",

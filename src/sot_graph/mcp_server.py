@@ -246,10 +246,15 @@ def create_server(service: McpService) -> Any:
                     "format": {"type": "string", "enum": ["markdown", "json"], "description": "Output format (default: markdown)"},
                 }, "additionalProperties": False,
             }),
+            types.Tool(name="sot_providers_sync", description="Explicit provider index sync (write path): mirrors `sot providers sync`, guarded by the project write lock; records ledger run + evidence with snapshot. Read tools stay read-only.", inputSchema={
+                "type": "object", "properties": {
+                    "provider_name": {"type": "string", "description": "Provider to sync (default: codebase-memory)"},
+                }, "additionalProperties": False,
+            }),
             types.Tool(name="sot_git_history", description="Inspect git commit history with automated risk scoring and impacted symbol detection.", inputSchema={
                 "type": "object", "properties": {
                     "limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Maximum commits to evaluate (default: 10)"},
-                    "author": {"type": "string", "description": "Filter by commit author"},
+                    "author": {"type": "string", "description": "Filter commits by author"},
                     "since": {"type": "string", "description": "Filter commits since date (e.g. '2026-01-01' or '2.weeks')"},
                     "with_impact": {"type": "boolean", "description": "Cross-reference touched symbols with SOT knowledge graph (default: true)"},
                     "format": {"type": "string", "enum": ["markdown", "json"], "description": "Output format (default: markdown)"},
@@ -320,6 +325,11 @@ def create_server(service: McpService) -> Any:
                     working_tree=args.get("working_tree", False),
                     auto_reconcile=args.get("auto_reconcile", False),
                     format=args.get("format", "markdown"),
+                )
+            elif name == "sot_providers_sync":
+                result = await asyncio.to_thread(
+                    service.providers_sync,
+                    args.get("provider_name", "codebase-memory"),
                 )
             elif name == "sot_git_history":
                 result = await service.agit_history(

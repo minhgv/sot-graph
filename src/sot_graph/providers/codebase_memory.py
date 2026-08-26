@@ -462,10 +462,61 @@ class CodebaseMemoryProvider:
             status=outcome.status, repo_root=cwd, redacted=redacted,
             match=match,
         )
+        self._persist_evidence(tool, outcome, run, match)
         return _InvokeOutcome(
             ok=outcome.ok, status=outcome.status, payload=outcome.payload,
             error=outcome.error, run=run, match=match,
         )
+
+    def _persist_evidence(self, tool, outcome, run, match) -> int:
+        """P6: persist query evidence next to its run (sidecar-safe).
+
+        Ledger failures are swallowed like ``_persist_run`` — a broken
+        ledger must never abort an otherwise successful query.
+        """
+        if self._db is None or run is None or not outcome.ok:
+            return 0
+        from sot_graph.assurance.orchestrator import (
+            search_rows_from_payload,
+            trace_edges_from_payload,
+        )
+
+        items: list[dict] = []
+        payload = outcome.payload or {}
+        snap = match.cbm_head_sha if match is not None and match.bound else None
+        try:
+            if tool in ("trace_path", "trace", "impact"):
+                for edge in trace_edges_from_payload(payload):
+                    items.append({
+                        "path": "",
+                        "symbol": str(edge.get("root") or ""),
+                        "target_symbol": str(edge.get("qualified_name") or ""),
+                        "relation": f"call:{edge.get('direction', 'out')}",
+                        "snapshot_hash": snap,
+                        "metadata_json": {"hop": edge.get("hop"),
+                                          "edge_type": edge.get("edge_type"),
+                                          "strategy": edge.get("strategy")},
+                        "confidence": edge.get("confidence") or 1.0,
+                    })
+            else:
+                rows, _more, drift = search_rows_from_payload(payload)
+                if not drift:
+                    for row in rows:
+                        items.append({
+                            "path": row.get("path") or "",
+                            "symbol": row.get("qualified_name") or "",
+                            "relation": "define",
+                            "line_start": row.get("start_line"),
+                            "line_end": row.get("end_line"),
+                            "syntax_kind": row.get("kind"),
+                            "snapshot_hash": snap,
+                        })
+            if not items:
+                return 0
+            return int(self._db.record_provider_evidence(run.run_id, items))
+        except Exception as exc:  # noqa: BLE001 - sidecar isolation
+            logger.warning("provider evidence ledger write failed: %s", exc)
+            return 0
 
     def _shape_outcome(self, tool: str, result: RunResult) -> _InvokeOutcome:
         """Classify one completed invocation against the wire contract."""
@@ -1012,11 +1063,35 @@ class CodebaseMemoryProvider:
                     duration_ms=duration_ms,
                     command_digest=_command_digest(record.arguments_redacted),
                 )
-            except Exception as exc:  # pragma: no cover - defensive ledger guard
-                logger.warning(
-                    "cbm ledger persistence failed for index run %s: %s",
-                    record.run_id, exc,
-                )
+                if status == "ok":
+                    # P6: bind the index run to the snapshot it produced.
+                    # index_repository returns no head_sha on this wire;
+                    # read it back through index_status right after.
+                    match = self.snapshot_match(
+                        request.repo_root,
+                        project=None,
+                    )
+                    if match is not None and match.bound:
+                        snap = match.cbm_head_sha
+                        with self._db.conn:
+                            self._db.conn.execute(
+                                "UPDATE provider_runs SET snapshot_hash = ? "
+                                "WHERE id = ?",
+                                (snap, record.run_id),
+                            )
+                        binding_api = getattr(
+                            self._db, "record_provider_binding", None
+                        )
+                        if binding_api is not None and match.project:
+                            binding_api(
+                                request.repo_root,
+                                PROVIDER_NAME,
+                                match.project,
+                                head_sha=snap,
+                                branch=match.branch,
+                            )
+            except Exception as exc:  # noqa: BLE001 - sidecar isolation
+                logger.warning("cbm index run ledger write failed: %s", exc)
         else:
             logger.info("cbm index_repository %s: %s", status, detail)
         return record

@@ -32,7 +32,7 @@ __all__ = [
 ]
 
 
-def federation_plan(provider_spec: Optional[str], root: str, command_kind: str) -> dict:
+def federation_plan(provider_spec: Optional[str], root: str, command_kind: str, db=None) -> dict:
     """Resolve one provider spec into an executable plan.
 
     builtin/absent never spawns anything; every other mode is gated behind
@@ -91,7 +91,7 @@ def federation_plan(provider_spec: Optional[str], root: str, command_kind: str) 
             plan["fail_message"] = msg
         else:
             plan["warnings"].append(f"{msg}; using sot-builtin only")
-    provider = CodebaseMemoryProvider(config=pcfg)
+    provider = CodebaseMemoryProvider(config=pcfg, db=db)
     st = provider.probe(root)
     plan["status"] = {
         "name": target, "installed": st.installed, "healthy": st.healthy,
@@ -523,6 +523,7 @@ def federated_extras(
     staged: bool = False,
     working_tree: bool = False,
     depth: int = 2,
+    db=None,
 ) -> Optional[dict]:
     """Run the optional external-provider evidence path for one command.
 
@@ -531,7 +532,7 @@ def federated_extras(
     candidates, conflicts, providers_extra, coverage, known_gaps, truncated,
     and (for diff-impact) the diff_identity both sides must share.
     """
-    plan = federation_plan(provider_spec, root, command_kind)
+    plan = federation_plan(provider_spec, root, command_kind, db=db)
     result = {
         "warnings": list(plan["warnings"]), "fail_message": plan["fail_message"],
         "candidates": [], "conflicts": [], "providers_extra": [],
