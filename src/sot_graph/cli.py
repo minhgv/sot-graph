@@ -9,7 +9,7 @@ import json
 import os
 import sys
 import time
-from typing import Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import sqlite3
 
