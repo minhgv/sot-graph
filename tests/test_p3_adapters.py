@@ -241,9 +241,9 @@ class TestBuiltinCapabilityHonesty:
             s for s in detect_providers(str(repo), cfg) if s.name == "sot-builtin"
         )
         assert builtin.language_capability == BUILTIN_LANGUAGE_SCORECARD
-        # disclosure names the weak cells instead of hiding behind one token
         assert "weak:" in builtin.detail
-        assert "rust.calls" in builtin.detail and "java.implements" in builtin.detail
+        assert "rust.implements" in builtin.detail and "java.implements" in builtin.detail
+        assert "rust.calls" not in builtin.detail  # P3.3b fixed Go/TS/Rust call recall
 
     def test_scorecard_matches_oracle_baseline_numbers(self):
         baseline = json.loads(

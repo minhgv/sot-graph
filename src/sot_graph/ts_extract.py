@@ -12,7 +12,39 @@ import importlib
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+from sot_graph.modutil import dotted_module
 from sot_graph.parser_outcome import ParserOutcome
+
+
+def module_form_of_import(raw: str, language: str, dir_module: str) -> Optional[str]:
+    """Normalize an import path to the dotted project-module form (P3.3b).
+
+    Go 'go_pkg/storage' -> 'go_pkg.storage'. TS/JS relative '../models/order'
+    absolutized against ``dir_module`` — the DECLARING FILE'S DIRECTORY in
+    dotted form — mirroring resolve_relative semantics: the first dot is the
+    directory itself, each further dot steps one level up. Other languages
+    keep slash->dot with a JS/TS extension tail stripped. Returns None when
+    nothing usable remains.
+    """
+    if not raw:
+        return None
+    if language == "go":
+        return raw.replace("/", ".")
+    if language in ("typescript", "tsx", "javascript") and raw.startswith("."):
+        stripped = raw.lstrip("./")
+        if not stripped:
+            return None
+        dots = len(raw) - len(raw.lstrip("."))
+        base_parts = dir_module.split(".") if dir_module else []
+        for _ in range(max(dots - 1, 0)):
+            if base_parts:
+                base_parts.pop()
+        joined = stripped.replace("/", ".")
+        return ".".join(base_parts + [joined]) if base_parts else joined
+    return raw.replace("/", ".").removesuffix(".js").removesuffix(".ts")
+
+
 
 CONFIGS: Dict[str, Dict[str, Any]] = {
     "go": {
@@ -35,6 +67,9 @@ CONFIGS: Dict[str, Dict[str, Any]] = {
             "struct_item": ("name", "class"),
             "enum_item": ("name", "class"),
             "trait_item": ("name", "class"),
+            # P3.3b: `impl Doc { ... }` scopes its methods to the type —
+            # canonical qualified identity Doc.save instead of bare save.
+            "impl_item": ("type", "class"),
         },
         "calls": [{"type": "call_expression", "field": "function"}],
         "imports": [r"\buse\s+([^;]+);"],
@@ -414,6 +449,44 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
     seen_ids: Set[str] = set()
     calls_cfg_list = cfg.get("calls", [])
     defs_cfg = cfg["defs"]
+    # P3.3b: AST-anchored receiver typing. Maps a simple variable name to
+    # the type it was constructed as (TS `const v = new C()`, Go receiver
+    # params `func (r *T)`, Go value params `func f(r *T)`, Go
+    # `r := &T{}`). File-scoped and last-declaration-wins: deliberately
+    # conservative — it only ever QUALIFIES an existing receiver call
+    # target, never invents a callee.
+    var_types: Dict[str, str] = {}
+
+    def _bind_typed_params(node: Any) -> None:
+        """Bind Go/Rust parameter variables to their declared types.
+
+        Go: `d *Doc` / receiver `(w *Worker1)`. Rust: `d: &Doc`,
+        `d: Doc`, `d: &mut Doc` (crate:: paths keep their tail type).
+        """
+        patterns = (
+            r"([A-Za-z_]\w*)\s+\*?\s*([A-Za-z_]\w*)"  # Go form
+            if language == "go"
+            else r"([A-Za-z_]\w*)\s*:\s*&?(?:mut\s+)?(?:crate::)?([A-Z]\w*)"  # Rust form
+        )
+        for child in node.children:
+            if child.type in ("parameter_list", "parameter_declaration", "parameters"):
+                for m in re.finditer(patterns, text(child)):
+                    var, type_name = m.group(1), m.group(2)
+                    if var != type_name and type_name[0].isupper():
+                        var_types[var] = type_name
+
+    def _bind_ts_declarator(node: Any) -> None:
+        """Bind TS `const v = new C()` variable names to class C."""
+        name_node = node.child_by_field_name("name")
+        value_node = node.child_by_field_name("value")
+        if name_node is None or value_node is None or value_node.type != "new_expression":
+            return
+        ctor = value_node.child_by_field_name("constructor")
+        if ctor is not None and ctor.type in _NAME_CHILD_TYPES + ("identifier",):
+            ctor_name = text(ctor).strip()
+            var_name = text(name_node).strip()
+            if ctor_name and var_name and re.fullmatch(r"[A-Za-z_$][\w$]*", var_name):
+                var_types[var_name] = ctor_name
 
     def text(node: Any) -> str:
         return source[node.start_byte:node.end_byte].decode("utf-8", "replace")
@@ -526,6 +599,37 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
     def walk(node: Any, containers: Tuple[str, ...], current_def: Optional[str]) -> None:
         node_type = node.type
 
+        # P3.3b receiver typing + constructor edges (AST-anchored).
+        if node_type in ("variable_declarator", "lexical_declaration", "variable_declaration"):
+            for _d in (
+                [c for c in node.children if c.type == "variable_declarator"]
+                if node_type != "variable_declarator" else [node]
+            ):
+                _bind_ts_declarator(_d)
+        elif language == "go" and node_type == "short_var_declaration":
+            for _m in re.finditer(
+                r"([A-Za-z_]\w*)\s*:=\s*&?\s*([A-Z]\w*)\s*\{", text(node)
+            ):
+                var_types[_m.group(1)] = _m.group(2)
+        elif language == "rust" and node_type == "let_declaration":
+            for _m in re.finditer(
+                r"let\s+(?:mut\s+)?([a-z_]\w*)\s*(?::\s*[^=]+)?=\s*([A-Z]\w*)\s*(?:\{|;)",
+                text(node),
+            ):
+                var_types[_m.group(1)] = _m.group(2)
+        elif node_type == "new_expression" and language in ("typescript", "tsx", "javascript"):
+            ctor = node.child_by_field_name("constructor")
+            if ctor is not None:
+                ctor_text = text(ctor).strip()
+                if re.fullmatch(r"[A-Za-z_$][\w$]*", ctor_text):
+                    edges.append({
+                        "source": current_def or path.name,
+                        "target": ctor_text,
+                        "relation": "calls",
+                        "source_location": f"L{line(node)}",
+                        "receiver": None,
+                        "call_kind": "CONSTRUCTOR",
+                    })
         # Check for named arrow functions / function expressions in variable assignments
         if node_type in ("variable_declarator", "lexical_declaration", "variable_declaration"):
             declarators = (
@@ -641,6 +745,10 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
                         if identifiers:
                             container = identifiers[-1]
                 raw_id = f"{container}.{name}" if container else name
+                if language == "go" and node_type in ("function_declaration", "method_declaration"):
+                    _bind_typed_params(node)
+                elif language == "rust" and node_type == "function_item":
+                    _bind_typed_params(node)
                 if raw_id not in seen_ids:
                     seen_ids.add(raw_id)
                     snippet = text(node).split("\n", 1)[0][:120]
@@ -723,6 +831,7 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
                         "relation": "calls",
                         "source_location": f"L{line(node)}",
                         "receiver": receiver,
+                        "receiver_type": var_types.get(receiver) if receiver else None,
                         "call_kind": "BARE" if receiver is None else "QUALIFIED",
                     })
                 break
@@ -751,6 +860,7 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
     # disambiguate same-named symbols by the calling file's imports
     # (mirrors the Python extractor's ``import_source`` behavior).
     import_map: Dict[str, str] = {}
+    alias_map: Dict[str, str] = {}
     for edge_item in edges:
         if edge_item.get("relation") == "imports" and edge_item.get("import_source"):
             raw_import = edge_item["import_source"]
@@ -763,6 +873,22 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
                 import_map.setdefault(tail, raw_import)
             if base:
                 import_map.setdefault(base, raw_import)
+    # P3.3b: TS alias imports ``import { x as y }`` bind y -> x so calls via
+    # the alias resolve to the original exported name.
+    if language in ("typescript", "tsx", "javascript"):
+        for bindings in re.findall(r"import\s*\{([^}]*)\}", decoded):
+            for item in bindings.split(","):
+                m = re.match(r"\s*([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)\s*$", item)
+                if m:
+                    alias_map[m.group(2)] = m.group(1)
+
+    def _module_for_import(raw: str) -> Optional[str]:
+        """Shared normalizer; the caller with the true repo-relative module
+        re-normalizes via import_raw (dir base is best-effort here)."""
+        return module_form_of_import(raw, language, dotted_module(str(path.parent)))
+
+
+
     for edge_item in edges:
         if edge_item.get("relation") != "calls":
             continue
@@ -772,8 +898,13 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
             bound = import_map[receiver.split(".")[0]]
         elif edge_item["target"] in import_map:
             bound = import_map[edge_item["target"]]
-        if bound:
-            edge_item["import_source"] = bound
+        module_form = _module_for_import(bound) if bound else None
+        if module_form:
+            edge_item["import_raw"] = bound
+            edge_item["import_source"] = module_form
+        if edge_item["target"] in alias_map:
+            edge_item["alias_of"] = edge_item["target"]
+            edge_item["target"] = alias_map[edge_item["target"]]
     if not nodes and not edges:
         return {
             "nodes": [],

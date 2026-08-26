@@ -235,6 +235,20 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
     raw_nodes = raw_result.get("nodes", [])
     raw_edges = raw_result.get("edges", [])
 
+    # P3.3b: re-normalize call-edge import provenance against THIS file's
+    # repo-relative directory module (the ts_extract pass could only guess
+    # it from a possibly-absolute path). Go slash imports and TS relative
+    # imports become the dotted project-module form the resolver compares
+    # against.
+    if module and fn_name in ("extract_js", "extract_go", "extract_rust"):
+        from sot_graph.ts_extract import module_form_of_import as _mfi
+        ts_lang = {"extract_go": "go", "extract_rust": "rust"}.get(fn_name, "typescript")
+        _dir_module = rel_posix.rsplit("/", 1)[0].replace("/", ".") if "/" in rel_posix else ""
+        for _e in raw_edges:
+            if _e.get("relation") == "calls" and _e.get("import_raw"):
+                _fixed = _mfi(str(_e["import_raw"]), ts_lang, _dir_module)
+                if _fixed:
+                    _e["import_source"] = _fixed
     nodes = [file_node]
     edges = []
     pending = []
@@ -312,6 +326,24 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
         line_no = int(re.search(r"L(\d+)", loc).group(1)) if re.search(r"L(\d+)", loc) else None
         receiver = re_edge.get("receiver")
 
+        # P3.3b receiver-typed qualification runs BEFORE the bare-name
+        # match: when the extractor resolved the receiver variable's
+        # constructed type (TS `const v = new C()`, Go receiver/value
+        # params `r *T`, Go/Rust `r := &T{}` / `let r = T{}`), `v.m()`
+        # targets the class-scoped 'C.m' of THAT type. A same-named
+        # module-level function must never win over the typed method.
+        if rel == "calls" and re_edge.get("receiver_type"):
+            receiver_type = re_edge.get("receiver_type")
+            typed_id = symbol_to_node_id.get(f"{receiver_type}.{dst_raw}")
+            if typed_id:
+                edges.append({
+                    "src": src_id,
+                    "dst": typed_id,
+                    "relation": rel,
+                    "line": line_no,
+                })
+                continue
+
         if dst_raw in symbol_to_node_id and not re_edge.get("is_shadowed"):
             # Resolved intra-file edge
             edges.append({
@@ -322,13 +354,15 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
             })
             continue
 
-        # Method-call qualification: a call on `self`/`cls` (or the enclosing
-        # class name) targets the class-scoped symbol 'Class.method', while
-        # the raw call target is only the bare attribute name. A receiver-less
-        # BARE call inside a method (Java/Kotlin sibling call) qualifies too.
+
+        # Method-call qualification: a call on `self`/`cls`/`this` (or the
+        # enclosing class name) targets the class-scoped symbol
+        # 'Class.method', while the raw call target is only the bare
+        # attribute name. A receiver-less BARE call inside a method
+        # (Java/Kotlin sibling call) qualifies too.
         if rel == "calls" and "." in src_raw:
             parent = src_raw.rsplit(".", 1)[0]
-            if receiver in ("self", "cls", parent, None):
+            if receiver in ("self", "cls", "this", parent, None):
                 qualified_id = symbol_to_node_id.get(f"{parent}.{dst_raw}")
                 if qualified_id:
                     edges.append({
@@ -338,6 +372,7 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
                         "line": line_no,
                     })
                     continue
+
 
         # Cross-file pending edge (target symbol lives in another file)
         if rel == "calls":
@@ -353,6 +388,8 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
                 "language": lang,
                 "call_kind": call_kind,
                 "receiver": re_edge.get("receiver"),
+                "receiver_type": re_edge.get("receiver_type"),
+                "alias_of": re_edge.get("alias_of"),
                 "import_source": _pending_import_source(
                     re_edge.get("import_source")
                 ),

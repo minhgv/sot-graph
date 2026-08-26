@@ -173,7 +173,7 @@ public class OrderService : BaseService, IOrderService {
 
 EXPECTED_NODES = {
     "go": ["Server", "Server.Handle", "helper", "main"],
-    "rust": ["Cache", "get", "main"],
+    "rust": ["Cache", "Cache.get", "main"],  # P3.3b: impl methods are type-qualified
     "java": ["Greeter", "Greeter.greet", "Greeter.helper"],
     "kotlin": ["Calc", "Calc.double", "Calc.twice", "main"],
     "swift": ["Greeter", "Greeter.greet"],

@@ -206,8 +206,8 @@ Structured parse thay text report; sync explicit; builtin capability trung thự
 ### P3.3 Builtin
 
 - [x] Capability theo từng language×relation (không quảng bá chung), dựa trên scorecard P0.
-  — Receipt: `providers_registry.BUILTIN_LANGUAGE_SCORECARD` (F1 từng language×relation từ oracle P0, test lock số liệu vs `builtin-baseline.json`); `ProviderStatus.language_capability` + detail "weak: rust.calls, java.implements, …" trong `sot providers detect`/doctor. `TestBuiltinCapabilityHonesty` (2 test).
-- [ ] Sửa Go/TS recall theo exact oracle; nâng canonical qualified identity Rust/Go/TS methods; regex fallback giữ ở heuristic ceiling.
+- [x] Sửa Go/TS recall theo exact oracle; nâng canonical qualified identity Rust/Go/TS methods; regex fallback giữ ở heuristic ceiling.
+  — Receipt: baseline oracle regen: **P 99.8 / R 99.2 / F1 99.5** (trước: 99.2/69.4/81.6). Go calls 100/100/100, TS 99.5, Rust 98.5 (trước 4.4), Java/Py giữ. Cơ chế (đều AST-anchored, không đụng regex fallback — PARTIAL_AST vẫn cap 0.45/WEAK ở verifier): (1) `module_form_of_import` — Go slash-package 'go_pkg/storage'→dotted (trước bị prune external), TS relative absolutize theo dir-module; (2) receiver typing TS `const v = new C()`/typed params, Go receiver+value params `r *T` + `r := &T{}`, Rust `let r = T{..}`/unit + `r: &T` → `v.m()` resolve `C.m` TRƯỚC bare-match (module-level same-name không bao giờ thắng — sửa 3 FP same_name_two_scopes); (3) Rust `impl T` container → method canonical `T.save`; (4) TS constructor edge (`new C()`→C), `this.m()`, alias import `{x as y}` retarget. Tests: `tests/test_p3_builtin_recall.py` (12 test) + treesitter rust canonical update + tripwire P0 đổi sang lock fix (go/ts ≥0.99, rust ≥0.95) + residual (rust implements <0.5). Residual 8 FN + 2 FP (python annotation binding, TS closure nested scope, rust `use ... as` alias, `impl Trait for T`, java static import, virtual dispatch dynamic) — từng cái một cơ chế riêng, để lại cho phase sau, có anchor trong confusion list.
 
 ### P3.4 Plugin contract
 

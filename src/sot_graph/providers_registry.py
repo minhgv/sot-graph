@@ -46,16 +46,17 @@ CAPABILITY_PRIORITY: dict[str, tuple[str, ...]] = {
 }
 
 #: sot-builtin measured per language x relation F1 (oracle P0 baseline,
-#: benchmarks/oracle/builtin-baseline.json, corpus digest ce6feeb9). The
-#: builtin does NOT advertise a blanket callgraph capability: it declares
-#: where it is strong (python/java), moderate (typescript/go calls) and
-#: weak (rust; java implements) so routing and reports stay honest.
+#: benchmarks/oracle/builtin-baseline.json — regenerated after the P3.3b
+#: recall work: Go 100, TS 99.5, Rust 98.5 overall). The builtin does NOT
+#: advertise a blanket callgraph capability: it declares where it is
+#: strong and names the weak cells (rust/java implements extraction) so
+#: routing and reports stay honest.
 BUILTIN_LANGUAGE_SCORECARD: dict[str, dict[str, float]] = {
     "python": {"calls": 0.997, "extends": 1.0},
     "java": {"calls": 0.996, "implements": 0.0},
-    "typescript": {"calls": 0.747, "implements": 1.0},
-    "go": {"calls": 0.578},
-    "rust": {"calls": 0.044, "implements": 0.0},
+    "typescript": {"calls": 0.995, "implements": 1.0},
+    "go": {"calls": 1.0},
+    "rust": {"calls": 0.988, "implements": 0.0},
 }
 
 

@@ -176,17 +176,24 @@ class TestRealCorpusBaseline:
         for entry in confusion:
             assert ANCHOR_RE.match(entry), f"not line-anchored: {entry}"
 
-    def test_oracle_exposes_known_go_ts_defects(self, baseline):
-        """The exact oracle must show the Go/TS recall defect the legacy
-        loose metric hid: exact recall strictly below the loose diagnostic."""
+    def test_oracle_exposes_known_residual_defects(self, baseline):
+        """The exact oracle must keep discriminating: exact recall stays
+        strictly below the loose diagnostic, and the residual defect class
+        (implements extraction in rust/java — roadmap R3.3 follow-up) stays
+        visible. The Go/TS/Rust method-call recall defect this test
+        originally guarded was fixed in P3.3b; the tripwire moves to what
+        is still broken instead of silently passing."""
         _payload, doc = baseline
         per_lang = doc["builtin"]["per_language"]
         loose = doc["builtin"]["diagnostics"]["legacy_loose_recall_diagnostic"]
         exact = doc["builtin"]["counts"]["recall"]
         assert exact <= loose, "exact recall can never exceed the loose fallback ladder"
-        # Known defect class (roadmap R3.3): method-call identity in Go.
-        assert per_lang["go"]["overall"]["recall"] < 0.9
-        assert per_lang["go"]["overall"]["recall"] < loose
+        # Fixed in P3.3b — lock the fix so a regression trips here:
+        assert per_lang["go"]["overall"]["recall"] >= 0.99
+        assert per_lang["typescript"]["overall"]["recall"] >= 0.99
+        assert per_lang["rust"]["overall"]["recall"] >= 0.95
+        # Residual defect class still exposed: implements extraction.
+        assert per_lang["rust"]["implements"]["f1"] < 0.5
 
     def test_search_topk_section(self, baseline):
         _payload, doc = baseline
