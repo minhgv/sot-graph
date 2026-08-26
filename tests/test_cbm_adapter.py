@@ -381,6 +381,10 @@ class TestVersionGate:
         assert outcome.metadata["version_compatibility"] == "UNKNOWN"
 
 class TestTimeoutAndOrphans:
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="grandchild group-kill is POSIX-only; Windows tree-kill is plan G6.4",
+    )
     def test_timeout_kills_whole_group_and_reports(self, tmp_path):
         grandchild_file = tmp_path / "grand.pid"
         body = (

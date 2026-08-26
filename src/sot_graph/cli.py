@@ -2367,6 +2367,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    # CLI output contains emoji; on Windows the console default (cp1252)
+    # cannot encode them, so normalize the streams to UTF-8 before any
+    # print() can raise UnicodeEncodeError mid-command.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            if _stream and _stream.encoding and _stream.encoding.lower().replace("-", "") != "utf8":
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError, ValueError):
+            pass  # non-tty or exotic stream: keep the interpreter default
     parser = build_parser()
     args = parser.parse_args(argv)
 
