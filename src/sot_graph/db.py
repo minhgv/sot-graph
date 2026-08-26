@@ -17,12 +17,13 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, 
 from urllib.parse import quote
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS file_journal (
     path TEXT PRIMARY KEY, sha256 TEXT NOT NULL, size INTEGER NOT NULL,
-    mtime_ms INTEGER NOT NULL, generation INTEGER DEFAULT 1, reconciled_at INTEGER NOT NULL
+    mtime_ms INTEGER NOT NULL, generation INTEGER DEFAULT 1, reconciled_at INTEGER NOT NULL,
+    parser_outcome TEXT, parser_error TEXT
 );
 CREATE TABLE IF NOT EXISTS graph_nodes (
     id TEXT PRIMARY KEY, path TEXT NOT NULL, kind TEXT NOT NULL, symbol TEXT,
@@ -411,7 +412,7 @@ class Database:
                     # columns), so no disposable-index reset or data loss
                     # occurs. All steps are idempotent, so a v6 database
                     # simply skips the already-applied shapes.
-                    if version in (4, 5, 6):
+                    if version in (4, 5, 6, 7):
                         with self.conn:
                             self.conn.execute("""
                                 CREATE TABLE IF NOT EXISTS provider_runs (
@@ -568,6 +569,23 @@ class Database:
                                 "CREATE INDEX IF NOT EXISTS idx_p_evidence_snapshot "
                                 "ON provider_evidence(snapshot_hash);"
                             )
+                            self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                        # v7 -> v8: parser outcome persistence on the file
+                        # journal (P5.2). Two nullable columns; existing
+                        # rows keep NULL (= parse outcome UNKNOWN).
+                        with self.conn:
+                            has_journal = bool(self.conn.execute(
+                                "SELECT COUNT(*) FROM sqlite_master "
+                                "WHERE type='table' AND name='file_journal'"
+                            ).fetchone()[0])
+                            if has_journal:
+                                self._ensure_columns(
+                                    "file_journal",
+                                    {
+                                        "parser_outcome": "TEXT",
+                                        "parser_error": "TEXT",
+                                    },
+                                )
                             self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                         return
 
@@ -951,8 +969,8 @@ class Database:
     @staticmethod
     def _record_value(record: Any, name: str) -> Any:
         if isinstance(record, Mapping):
-            return record[name]
-        return getattr(record, name)
+            return record.get(name)
+        return getattr(record, name, None)
 
     def commit_file_batch(
         self,
@@ -1024,12 +1042,16 @@ class Database:
                 sha = self._record_value(record, "sha256")
                 size = self._record_value(record, "size")
                 mtime_ms = self._record_value(record, "mtime_ms")
+                parser_outcome = self._record_value(record, "parser_outcome")
+                parser_error = self._record_value(record, "parser_error")
                 self.conn.execute(
                     "INSERT INTO file_journal "
-                    "(path,sha256,size,mtime_ms,generation,reconciled_at) VALUES (?,?,?,?,1,?) "
+                    "(path,sha256,size,mtime_ms,generation,reconciled_at,parser_outcome,parser_error) "
+                    "VALUES (?,?,?,?,1,?,?,?) "
                     "ON CONFLICT(path) DO UPDATE SET sha256=excluded.sha256,size=excluded.size, "
-                    "mtime_ms=excluded.mtime_ms,generation=generation+1,reconciled_at=excluded.reconciled_at",
-                    (path, sha, size, mtime_ms, now),
+                    "mtime_ms=excluded.mtime_ms,generation=generation+1,reconciled_at=excluded.reconciled_at,"
+                    "parser_outcome=excluded.parser_outcome,parser_error=excluded.parser_error",
+                    (path, sha, size, mtime_ms, now, parser_outcome, parser_error),
                 )
         return {"committed": len(ordered) - len(conflicts), "conflicts": conflicts}
 

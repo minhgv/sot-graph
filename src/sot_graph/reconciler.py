@@ -47,7 +47,10 @@ class ParseResult:
     pending: Tuple[dict, ...]
     error: Optional[str] = None
     base_generation: int = 0
-
+    # P5.2: parser outcome persisted to the file journal so coverage can
+    # distinguish parsed/partial/failed files from merely-scanned ones.
+    parser_outcome: Optional[str] = None
+    parser_error: Optional[str] = None
 
 @dataclass(frozen=True)
 class ReconcileSummary:
@@ -123,6 +126,8 @@ def _parse_worker(job: ParseJob) -> ParseResult:
                 edges,
                 pending,
                 _worker_error("parse", job),
+                parser_outcome=str(parsed.get("parser_outcome") or ""),
+                parser_error=str(parsed.get("error") or "") or None,
             )
         return ParseResult(
             job.path,
@@ -134,6 +139,8 @@ def _parse_worker(job: ParseJob) -> ParseResult:
             pending,
             None,
             job.base_generation,
+            parser_outcome=str(parsed.get("parser_outcome") or ""),
+            parser_error=str(parsed.get("error") or "") or None,
         )
     except PermissionError:
         return ParseResult(

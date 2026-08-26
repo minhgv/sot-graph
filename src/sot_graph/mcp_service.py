@@ -172,6 +172,32 @@ class McpService:
         if len(raw) <= self.limits.body_bytes:
             return text
         return raw[: self.limits.body_bytes].decode("utf-8", errors="ignore")
+
+    def _coverage_note(self, conn: sqlite3.Connection) -> Dict[str, Any]:
+        """P5: honest index-coverage statement for every search reply.
+
+        Zero results under incomplete coverage stays "not found within
+        covered scope" — never a negative claim about the repository.
+        """
+        from types import SimpleNamespace
+
+        from sot_graph.assurance.coverage import (
+            completeness as completeness_of,
+            coverage_note,
+            repo_coverage,
+        )
+
+        try:
+            report = repo_coverage(SimpleNamespace(conn=conn), self.project_root)
+            return {
+                "note": coverage_note(report),
+                "basis": report.basis,
+                "completeness_symbols": completeness_of(report, "symbols"),
+                "gaps": sorted(report.gaps),
+            }
+        except Exception:
+            return {"note": "coverage: UNKNOWN (unmeasured)", "basis": "unknown"}
+
     def _providers(self, conn: sqlite3.Connection) -> List[Dict[str, str]]:
         try:
             has_runs = bool(conn.execute(
@@ -281,6 +307,7 @@ class McpService:
                     "results": [],
                     "returned": 0,
                     "stale": 0,
+                    "coverage": self._coverage_note(conn),
                     "providers": self._providers(conn),
                 }
             return self._run(empty_op)
@@ -344,6 +371,7 @@ class McpService:
                 "results": out[:limit],
                 "returned": min(len(out), limit),
                 "stale": stale,
+                "coverage": self._coverage_note(conn),
                 "providers": self._providers(conn),
             })
         return self._run(op)

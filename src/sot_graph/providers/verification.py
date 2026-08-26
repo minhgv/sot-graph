@@ -116,6 +116,82 @@ def _token_for(qualified_name: Any, path: Any) -> str | None:
     return token or None
 
 
+def _language_key(path: str) -> str | None:
+    """Map a source path to its tree-sitter grammar key, if any."""
+    low = path.replace("\\", "/").split("/")[-1].lower()
+    for suffix, key in (
+        (".ts", "typescript"), (".tsx", "tsx"), (".mts", "typescript"),
+        (".js", "javascript"), (".mjs", "javascript"), (".cjs", "javascript"),
+        (".jsx", "javascript"), (".go", "go"), (".rs", "rust"),
+        (".java", "java"), (".kt", "kotlin"), (".swift", "swift"),
+        (".php", "php"), (".cs", "c_sharp"), (".c", "c"), (".h", "c"),
+        (".cpp", "cpp"), (".cc", "cpp"), (".hpp", "cpp"),
+    ):
+        if low.endswith(suffix):
+            return key
+    return None
+
+
+_DEFINING_NODE_KINDS = {
+    "function", "method", "class", "struct", "enum", "trait",
+    "interface", "record",
+}
+
+
+def _tree_sitter_defines(
+    abs_path: str, language: str, token: str, start: int, end: int
+) -> int | None:
+    """Count definitions of ``token`` in [start, end] via tree-sitter.
+
+    Returns None when no grammar is available (caller must abstain —
+    never fall back to Python-shaped regex for another language, S6).
+    """
+    from pathlib import Path
+
+    from sot_graph.ts_extract import extract_ts
+
+    try:
+        result = extract_ts(Path(abs_path), language)
+    except Exception:  # noqa: BLE001 - grammar/parsing failure => abstain
+        return None
+    if result.get("error"):
+        return None
+    count = 0
+    for node in result.get("nodes", ()):
+        node_id = str(node.get("id") or "")
+        if not node_id:
+            continue
+        bare = node_id.rsplit(".", 1)[-1]
+        if bare != token:
+            continue
+        if str(node.get("kind") or "") not in _DEFINING_NODE_KINDS:
+            continue
+        loc = str(node.get("source_location") or "")
+        try:
+            node_start = int(loc.lstrip("L")) if loc.startswith("L") else None
+        except ValueError:
+            node_start = None
+        if node_start is not None and start <= node_start <= end:
+            count += 1
+    return count
+
+
+def _python_defines(lines: list[str], token: str, start: int, end: int) -> int:
+    """Count definitions of ``token`` via the real Python AST."""
+    import ast
+
+    try:
+        tree = ast.parse("".join(lines))
+    except SyntaxError:
+        return 0
+    wanted = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+    return sum(
+        1 for n in ast.walk(tree)
+        if isinstance(n, wanted) and n.name == token
+        and start <= n.lineno <= end
+    )
+
+
 def verify_subject(subject: Any, repo_root: str) -> VerificationOutcome:
     """Verify one canonical subject's path/span/token claim on live source.
 
@@ -202,12 +278,27 @@ def verify_subject(subject: Any, repo_root: str) -> VerificationOutcome:
         )
 
     if kind in DEFINING_KINDS:
-        def_re = _DEF_PATTERNS[kind]
-        def_count = sum(
-            1
-            for line in lines[start - 1:end]
-            if def_re.match(line) and def_re.match(line).group(1) == token
-        )
+        # P5.3 (S6): language-aware definition check. Python uses the real
+        # ast; grammars we ship use tree-sitter; anything else ABSTAINS
+        # from an exact verdict — a Python-shaped regex must never
+        # "confirm" a definition in another language.
+        language = _language_key(path)
+        if language == "python" or (language is None and path.endswith(".py")):
+            def_count: int | None = _python_defines(lines, token, start, end)
+        elif language is not None:
+            def_count = _tree_sitter_defines(resolved, language, token, start, end)
+        else:
+            def_count = None
+        if def_count is None:
+            gap = (
+                f"no language-aware parser for {path!r}; exact definition "
+                "verdict withheld (S6)"
+            )
+            return VerificationOutcome(
+                NOT_APPLICABLE,
+                f"cannot confirm definition of {token!r} in {path}: {gap}",
+                (gap,),
+            )
         if def_count == 0:
             return VerificationOutcome(
                 SPAN_MISMATCH,

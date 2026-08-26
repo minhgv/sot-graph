@@ -16,6 +16,14 @@ live in :mod:`sot_graph.providers` and move into this package in their
 owning phases (P5-P7).
 """
 
+from .coverage import (
+    GAP_TAXONOMY,
+    CoverageReport,
+    CoverageState,
+    coverage_note,
+    completeness,
+    repo_coverage,
+)
 from .identity import (
     Span,
     SymbolIdentity,
@@ -26,7 +34,6 @@ from .identity import (
     identity_hash,
     identity_key,
 )
-
 from .engine import assured_query_context, resolve_symbol, stale_files_warning
 from .orchestrator import (
     architecture,
@@ -49,14 +56,13 @@ from .routing import (
 )
 
 __all__ = [
+    "GAP_TAXONOMY",
+    "CoverageReport",
+    "CoverageState",
+    "coverage_note",
+    "completeness",
+    "repo_coverage",
     "Span",
-    "SymbolIdentity",
-    "dedup_by_identity",
-    "from_graph_row",
-    "from_provider_symbol",
-    "from_subject",
-    "identity_hash",
-    "identity_key",
     "assured_query_context",
     "resolve_symbol",
     "stale_files_warning",

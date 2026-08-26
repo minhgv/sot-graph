@@ -135,7 +135,8 @@ class MaintenanceTests(unittest.TestCase):
                 p = f"{self.root}/stale_file_{i}.py"
                 nid = f"file:stale_{i}"
                 db.conn.execute(
-                    "INSERT INTO file_journal VALUES (?,?,?,?,?,?)",
+                    "INSERT INTO file_journal (path,sha256,size,mtime_ms,generation,reconciled_at) "
+                    "VALUES (?,?,?,?,?,?)",
                     (p, "hash", 10, now, 1, now),
                 )
                 db.conn.execute(

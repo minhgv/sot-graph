@@ -234,13 +234,18 @@ Structured parse thay text report; sync explicit; builtin capability trung thự
 - [x] Quality gate (release floor, không phải global claim): top-k recall ≥90% (hit@10=1.0, unique hit@5=1.0), direct-call precision ≥95% per Tier-A (py 0.997/java 1.0/ts 0.995/go 1.0/rust 1.0), project-local recall ≥80% (min rust 0.970) — khóa trong `tests/test_p4_quality_gate.py` đọc baseline committed; gate fail loud khi thiếu section. **Pending P6**: false-verified-edge=0 và union-không-giảm-verified-precision cần evidence ledger để đo — không claim trước khi đo được.
 ## P5 — Coverage & multilingual verification (R5)
 
-- [ ] Coverage model path/range/language/relation; trạng thái indexed/parsed/partial/skipped/excluded/stale/unknown; phân biệt `queried` vs coverage thật (S5 — `cli.py:703,717`).
-- [ ] Propagate parser error ranges + generated/vendor paths; coverage API lỗi → downgrade completeness.
-- [ ] Source-span verifier language-aware cho Python, TS/JS, Go, Rust, Java, C/C++ (S6 — bỏ Python-regex cho symbol khác ngôn ngữ); verify declaration span và call-site span riêng.
-- [ ] Gap taxonomy đầy đủ (dynamic dispatch, reflection, DI, framework routing, macros, fn pointers, generated, cross-repo) — khai báo trong receipt, không cắt qua scope assurance.
-- [ ] Completeness engine: coverage + capability + pagination + gaps, không đếm số kết quả.
-- Exit gate: zero-result không thành negative claim khi coverage thiếu; verifier non-Python không phát exact verdict bằng Python-regex (S6 fix verify bằng test).
-
+- [x] Coverage model path/range/language/relation; trạng thái indexed/parsed/partial/skipped/excluded/stale/unknown; phân biệt `queried` vs coverage thật (S5).
+  — Receipt: `assurance/coverage.py` — `repo_coverage(db, root, paths)` đo từ file_journal (schema v8: cột `parser_outcome`/`parser_error` persist qua reconciler) + disk hash/mtime (tolerance ±2s như publication gate); states: INDEXED/PARSED/PARTIAL/SKIPPED/EXCLUDED (node_modules/.venv/vendor/_pb2/.min)/STALE/UNKNOWN; journal abs-path normalize về repo-relative; scope path chưa scan → UNKNOWN honestly. `tests/test_p5_coverage_verification.py` (14 test).
+- [x] Propagate parser error ranges + generated/vendor paths; coverage API lỗi → downgrade completeness.
+  — Receipt: ParseResult mang `parser_outcome/parser_error` → journal (commit_file_batch); coverage API exception → `basis="unknown"`, `completeness()=None` — không bao giờ fabricate số; generated/vendor paths → state EXCLUDED + gap `generated`.
+- [x] Source-span verifier language-aware cho Python, TS/JS, Go, Rust, Java, C/C++ (S6 — bỏ Python-regex cho symbol khác ngôn ngữ); verify declaration span và call-site span riêng.
+  — Receipt: `providers/verification.py::verify_subject` DEFINING branch dispatch: Python → real `ast`; grammar có sẵn (TS/TSX/JS/Go/Rust/Java/Kotlin/Swift/PHP/C#/C/C++) → tree-sitter `_tree_sitter_defines` (node name + kind + span khớp); ngôn ngữ không grammar → `NOT_APPLICABLE` + gap "S6" — Python-regex không bao giờ confirm definition ngôn ngữ khác. Declaration vs call-site: `verify_subject` (declaration span, unique-def) tách khỏi `verify_edge` (originating-subject span) như cũ. Tests: python ast ok/mismatch, TS class, Go method `W.Do`, no-grammar abstain.
+- [x] Gap taxonomy đầy đủ (dynamic dispatch, reflection, DI, framework routing, macros, fn pointers, generated, cross-repo) — khai báo trong receipt, không cắt qua scope assurance.
+  — Receipt: `GAP_TAXONOMY` 11 mã ổn định (thêm parser-partial/parser-failed/unresolved-edge từ đo lường thật: PARTIAL_AST/PARSE_ERROR/pending UNRESOLVED|AMBIGUOUS); gap families hiện trong `coverage_note` mọi search reply.
+- [x] Completeness engine: coverage + capability + pagination + gaps, không đếm số kết quả.
+  — Receipt: `completeness(report, capability)` — covered_fraction trừ gap penalty THEO capability (symbols/search bỏ behavioural gaps; callgraph/trace/impact chịu dynamic-dispatch/reflection/DI/...); unmeasurable → None. MCP `search` + CLI search rỗng đều gắn `coverage` note (basis/completeness/gaps) — pagination đã có (`_fits_response` cắt theo limits, `returned` field).
+- [x] Exit gate: zero-result không thành negative claim khi coverage thiếu; verifier non-Python không phát exact verdict bằng Python-regex (S6 fix verify bằng test).
+  — Receipt: `TestZeroResultIsNotNegativeClaim` (CLI in "absence is only claimed within covered scope" + MCP `coverage.basis=measured`); `test_no_grammar_language_abstains_not_confirms` (NOT_APPLICABLE + gap S6).
 ## P6 — Evidence ledger & conflict (R6)
 
 - [ ] Truyền active `Database` vào provider qua orchestrator (W1 — `cli.py:350,825`, `providers_registry.py:119`); persist run/binding/evidence trên production CLI+MCP path (kích hoạt write sites `codebase_memory.py:518,532`).

@@ -255,6 +255,16 @@ def cmd_search(args: argparse.Namespace, db: Database, root: str) -> int:
     print("=" * 80)
     if not final_list:
         print("  (No verified matching knowledge found in graph)")
+        try:
+            from types import SimpleNamespace
+
+            from sot_graph.assurance.coverage import coverage_note, repo_coverage
+
+            report = repo_coverage(SimpleNamespace(conn=db.conn), root)
+            print(f"  ⚠️  {coverage_note(report)} — absence is only claimed "
+                  "within covered scope")
+        except Exception:
+            pass
         return 0
 
     for i, r in enumerate(final_list, 1):
