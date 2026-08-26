@@ -1536,8 +1536,11 @@ class Database:
               "FROM graph_fts f JOIN graph_nodes k ON f.rowid=k.rowid WHERE graph_fts MATCH ?"
         params: List[Any] = [" OR ".join(sorted(tokens))]
         if scope:
-            sql += " AND (k.path LIKE ? OR k.body LIKE ?)"
-            params.extend([f"%{scope}%", f"%{scope}%"])
+            # LIKE wildcard escaping: a user scope of '%' or '_' must
+            # match literally, never open the filter to every row.
+            esc = scope.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            sql += " AND (k.path LIKE ? ESCAPE '\\' OR k.body LIKE ? ESCAPE '\\')"
+            params.extend([f"%{esc}%", f"%{esc}%"])
         sql += " ORDER BY bm25(graph_fts) ASC LIMIT ?"
         params.append(limit * 3)
         rows = self.conn.execute(sql, params).fetchall()
@@ -1553,6 +1556,23 @@ class Database:
         return [{"id": r[0], "path": r[1], "kind": r[2], "symbol": r[3], "fqn": r[4],
                  "label": r[5], "body": r[6], "keywords": r[7], "line_start": r[8], "score": abs(r[9])}
                 for r in rows]
+
+    def provider_evidence_counts(self, paths: Sequence[str]) -> Dict[Tuple[str, str], int]:
+        """Batch count live (non-invalidated) provider evidence rows per
+        (path, symbol) — one query for the whole result page, feeding the
+        P4 ranking's provider-evidence factor. Empty input -> empty map.
+        """
+        paths = [p for p in dict.fromkeys(paths) if p]
+        if not paths:
+            return {}
+        placeholders = ",".join("?" * len(paths))
+        rows = self.conn.execute(
+            f"SELECT file_path, symbol, COUNT(*) FROM provider_evidence "
+            f"WHERE invalidated_at IS NULL AND file_path IN ({placeholders}) "
+            f"GROUP BY file_path, symbol",
+            paths,
+        ).fetchall()
+        return {(r[0], r[1] or ""): int(r[2]) for r in rows}
 
     def explore_node(self, node_id: str, depth: int = 1, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         if depth < 0 or (limit is not None and limit <= 0):

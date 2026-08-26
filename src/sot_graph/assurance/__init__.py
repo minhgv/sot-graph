@@ -10,10 +10,22 @@ One engine behind both surfaces:
   adjudication.
 
 CLI handlers and McpService import from here; no orchestration logic lives
-in presentation layers. identity/normalization/coverage/verification
-modules currently live in :mod:`sot_graph.providers` and move into this
-package in their owning phases (P4-P7).
+in presentation layers. :mod:`.identity` (P4) holds the canonical symbol
+identity tuple; normalization/coverage/verification modules currently
+live in :mod:`sot_graph.providers` and move into this package in their
+owning phases (P5-P7).
 """
+
+from .identity import (
+    Span,
+    SymbolIdentity,
+    dedup_by_identity,
+    from_graph_row,
+    from_provider_symbol,
+    from_subject,
+    identity_hash,
+    identity_key,
+)
 
 from .engine import assured_query_context, resolve_symbol, stale_files_warning
 from .orchestrator import (
@@ -37,6 +49,14 @@ from .routing import (
 )
 
 __all__ = [
+    "Span",
+    "SymbolIdentity",
+    "dedup_by_identity",
+    "from_graph_row",
+    "from_provider_symbol",
+    "from_subject",
+    "identity_hash",
+    "identity_key",
     "assured_query_context",
     "resolve_symbol",
     "stale_files_warning",

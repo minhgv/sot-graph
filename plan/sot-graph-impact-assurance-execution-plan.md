@@ -223,12 +223,15 @@ Structured parse thay text report; sync explicit; builtin capability trung thự
 
 ## P4 — Canonical identity & search accuracy (R4)
 
-- [ ] Identity tuple `(repo, normalized path, language, kind, qualified name, span, provider symbol ID?)`; không dedup short name.
-- [ ] Alias/import/re-export resolution per language (Python resolver hiện hành là chuẩn tham chiếu); bổ sung TS/JS module resolution, Go package/receiver, Rust module/impl, Java package/type.
-- [ ] Ranking theo exact identity + scope + path proximity + provider evidence + freshness; top-k luôn kèm reason/provenance.
-- [ ] Query parser chống FTS injection + wildcard/path ambiguity.
-- Quality gate (release floor, không phải global claim): top-k recall ≥90%, confirmed direct-call precision ≥95%, project-local recall ≥80% — **per Tier-A language**, false verified edge = 0 trên adversarial corpus (P0), provider union không giảm verified precision.
-
+- [x] Identity tuple `(repo, normalized path, language, kind, qualified name, span, provider symbol ID?)`; không dedup short name.
+  — Receipt: `assurance/identity.py` — `SymbolIdentity` + `identity_key/identity_hash` + adapters `from_subject` (CanonicalSubject)/`from_graph_row` (graph_nodes)/`from_provider_symbol` (namespace id `provider:id` — scip/CBM id không bao giờ cross-join) + `dedup_by_identity` (gộp chỉ khi key trùng, short-name collision sống sót). Path normalize POSIX repo-relative. `tests/test_p4_identity.py` (16 test).
+- [x] Alias/import/re-export resolution per language (Python resolver hiện hành là chuẩn tham chiếu); bổ sung TS/JS module resolution, Go package/receiver, Rust module/impl, Java package/type.
+  — Receipt: Python `modutil` (chuẩn, `tests/test_import_resolution.py`); P3.3b đã bổ sung: TS relative absolutize theo dir-module + alias import `{x as y}` retarget, Go slash-package → dotted + receiver/value param typing, Rust `impl T` container + `let r = T{}` + `r: &T` params, TS constructor edge + `this.m()`. Locked bởi `tests/test_p3_builtin_recall.py` (12 test) + oracle corpus (Go 100/TS 99.5/Rust 98.5 recall). Java dotted import là native module-form (generic branch).
+- [x] Ranking theo exact identity + scope + path proximity + provider evidence + freshness; top-k luôn kèm reason/provenance.
+  — Receipt: `cmd_search` sort key mới verdict → exact-identity grade (exact/qualified/prefix/text) → provider-evidence rows (batch 1 query, `db.provider_evidence_counts` — không N+1) → coverage; mỗi row `reasons: [verdict=…, identity grade, freshness, evidence count, scope]`, hiện trên JSON + text (`🧾 Rank:`). Internal keys không leak envelope. `tests/test_p4_ranking.py` (12 test).
+- [x] Query parser chống FTS injection + wildcard/path ambiguity.
+  — Receipt: MATCH string chỉ gồm quoted prefix phrases (spy-test chứng minh mọi term match `"…"*`); operators `*^"(){}:` NEAR/column-filter không bao giờ thành operator; scope LIKE escape `%`/`_`/`\` với ESCAPE clause (scope `%` match 0 row, không mở rộng). `tests/test_p4_search_safety.py` (20 test, 13 injection vectors).
+- [x] Quality gate (release floor, không phải global claim): top-k recall ≥90% (hit@10=1.0, unique hit@5=1.0), direct-call precision ≥95% per Tier-A (py 0.997/java 1.0/ts 0.995/go 1.0/rust 1.0), project-local recall ≥80% (min rust 0.970) — khóa trong `tests/test_p4_quality_gate.py` đọc baseline committed; gate fail loud khi thiếu section. **Pending P6**: false-verified-edge=0 và union-không-giảm-verified-precision cần evidence ledger để đo — không claim trước khi đo được.
 ## P5 — Coverage & multilingual verification (R5)
 
 - [ ] Coverage model path/range/language/relation; trạng thái indexed/parsed/partial/skipped/excluded/stale/unknown; phân biệt `queried` vs coverage thật (S5 — `cli.py:703,717`).

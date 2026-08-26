@@ -145,6 +145,47 @@ def cmd_vacuum(args: argparse.Namespace, db: Database) -> int:
 def default_db_path(root: str) -> str:
     return os.path.join(os.path.abspath(root), ".sot", "sot.db")
 
+# P4 ranking: exact identity + scope + path proximity + provider
+# evidence + freshness, each factor surfaced as a human-readable reason
+# so every top-k row carries its provenance.
+_RANK_ORDER = {"STRONG": 0, "REBUILT": 0, "WEAK": 1, "NOPATH": 2, "STALE": 3, "REMOVED": 4}
+
+
+def _identity_grade(row: Dict[str, Any], query: str) -> Tuple[int, str]:
+    """0 exact symbol, 1 exact label/fqn, 2 name-prefix, 3 body-only."""
+    q = query.strip().strip('"\'' )
+    symbol = (row.get("label") or "").strip()
+    if q and symbol == q:
+        return 0, "exact symbol name match"
+    fqn = (row.get("fqn") or "").strip()
+    if q and (fqn == q or fqn.endswith("." + q) or fqn.endswith("::" + q)):
+        return 1, "qualified-name match"
+    if q and symbol.lower().startswith(q.lower()):
+        return 2, "symbol name prefix match"
+    return 3, "text match only"
+
+
+def _rank_reasons(row: Dict[str, Any], grade_reason: str, evidence_count: int,
+                  scope: Optional[str]) -> List[str]:
+    reasons = [f"verdict={row['verdict']}", grade_reason]
+    ev = (row.get("evidence") or {}).get("freshness", "")
+    if ev:
+        reasons.append(f"freshness={ev}")
+    if evidence_count:
+        reasons.append(f"provider evidence rows: {evidence_count}")
+    if scope:
+        reasons.append(f"scope filter: {scope}")
+    return reasons
+
+
+def _p4_sort_key(row: Dict[str, Any]) -> Tuple[int, int, float, int]:
+    return (
+        _RANK_ORDER.get(row["verdict"], 9),
+        row["_identity_grade"],
+        -row.get("_evidence_count", 0),
+        -float(str(row["coverage"]).replace("%", "") or 0),
+    )
+
 
 def cmd_search(args: argparse.Namespace, db: Database, root: str) -> int:
     q_toks = tokenize(args.query)
@@ -184,15 +225,26 @@ def cmd_search(args: argparse.Namespace, db: Database, root: str) -> int:
             "evidence": evidence.to_dict(),
         })
 
-    # Sort priority: STRONG / REBUILT -> WEAK -> NOPATH -> STALE / REMOVED, then highest coverage
-    rank_order = {"STRONG": 0, "REBUILT": 0, "WEAK": 1, "NOPATH": 2, "STALE": 3, "REMOVED": 4}
-    verified.sort(
-        key=lambda x: (
-            rank_order.get(x["verdict"], 9),
-            -float(x["coverage"].replace("%", "")),
-        )
+    # P4 ranking: verdict -> exact-identity grade -> provider evidence ->
+    # coverage; every row carries its ranking provenance as reasons.
+    scope = getattr(args, "scope", None)
+    evidence_counts = db.provider_evidence_counts(
+        [v["path"] for v in verified]
     )
+    for v in verified:
+        grade, grade_reason = _identity_grade(v, args.query)
+        v["_identity_grade"] = grade
+        v["_evidence_count"] = evidence_counts.get(
+            (v["path"], (v.get("label") or "")), 0
+        )
+        v["reasons"] = _rank_reasons(
+            v, grade_reason, v["_evidence_count"], scope
+        )
+    verified.sort(key=_p4_sort_key)
     final_list = verified[:args.limit]
+    for v in final_list:
+        v.pop("_identity_grade", None)
+        v.pop("_evidence_count", None)
 
     if args.json:
         envelope = wrap_envelope({"query": args.query, "results": final_list}, db=db, project_root=root)
@@ -213,6 +265,8 @@ def cmd_search(args: argparse.Namespace, db: Database, root: str) -> int:
             print(f"      📍 File: {loc}")
         first_line = r['body'].splitlines()[0][:110]
         print(f"      💡 Content: {first_line}...")
+        if r.get("reasons"):
+            print(f"      🧾 Rank: {'; '.join(r['reasons'])}")
         print()
 
     if has_stale:
