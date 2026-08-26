@@ -51,6 +51,7 @@ def test_trust_verifier_detects_stale_file_when_modified():
         journal = db.get_file_journal(src_file) or db.get_file_journal("service.py")
         assert journal is not None
         assert journal["generation"] >= 1
+        db.close()
 
 
 def test_cli_cmd_search_jit_reconcile():
@@ -81,6 +82,7 @@ def test_cli_cmd_search_jit_reconcile():
         )
         code = cmd_search(args, db, tmpdir)
         assert code == 0
+        db.close()
 
 
 def test_mcp_service_stale_detection_via_conn_view():
@@ -104,3 +106,5 @@ def test_mcp_service_stale_detection_via_conn_view():
         res = svc.search("login_user")
         assert res["returned"] >= 1
         assert res["stale"] >= 1 or res["results"][0]["evidence"]["freshness"] == "STALE"
+        svc.close()
+        db.close()

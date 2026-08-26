@@ -122,6 +122,7 @@ class TestIgnoreEngine(unittest.TestCase):
             self.assertNotIn(os.path.join("ignored_folder", "file.py"), walked_relative)
             self.assertNotIn("test.tmp", walked_relative)
             self.assertNotIn(os.path.join("node_modules", "pkg.js"), walked_relative)
+            db.close()
 
 
 if __name__ == "__main__":

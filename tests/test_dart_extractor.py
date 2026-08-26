@@ -317,6 +317,9 @@ class HomePage extends StatelessWidget {
             db_stats = db.stats()
             self.assertEqual(db_stats["paths"], 3)
             self.assertGreater(db_stats["nodes"], 0)
+            # Release the SQLite handle before TemporaryDirectory cleanup
+            # (Windows refuses to unlink an open database file).
+            db.close()
 
 
 if __name__ == "__main__":

@@ -50,3 +50,4 @@ def call_with_nested_nonlocal(v: int) -> int:
         """).fetchone()
 
         assert edge is None, "Nonlocal / shadowed helper created unexpected external calls edge!"
+        db.close()

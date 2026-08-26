@@ -76,7 +76,7 @@ class RehomeTests(unittest.TestCase):
             db, cand, tokenize("Gateway"), str(self.root), auto_heal=True)
 
         self.assertEqual(verdict, "REBUILT")
-        self.assertTrue(str(path).endswith("pkg_c/service.py"), path)
+        self.assertTrue(str(path).replace("\\", "/").endswith("pkg_c/service.py"), path)
 
     def test_read_only_mode_reports_stale_without_mutation(self):
         self.write("pkg_a/service.py",
@@ -108,7 +108,7 @@ class RehomeTests(unittest.TestCase):
             db, cand, tokenize("notes"), str(self.root), auto_heal=True)
 
         self.assertEqual(verdict, "REBUILT")
-        self.assertTrue(str(path).endswith("pkg_b/notes.py"), path)
+        self.assertTrue(str(path).replace("\\", "/").endswith("pkg_b/notes.py"), path)
 
 
 if __name__ == "__main__":

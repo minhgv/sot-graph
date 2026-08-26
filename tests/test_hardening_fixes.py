@@ -146,7 +146,7 @@ class HardeningFixesTests(unittest.TestCase):
         src_mod = self.root / "src" / "mod.py"
         src_mod.parent.mkdir(parents=True, exist_ok=True)
         content = "def test_fn():\n    # A function with some documentation and code\n    return 42\n"
-        src_mod.write_text(content, encoding="utf-8")
+        src_mod.write_bytes(content.encode("utf-8"))
         st = os.stat(src_mod)
         sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
         abs_path = str(src_mod)
@@ -184,7 +184,7 @@ class HardeningFixesTests(unittest.TestCase):
         # Long content that will trigger several truncation loops
         lines = [f"    # Line comment {i} to increase size of source" for i in range(100)]
         content = "def large_fn():\n" + "\n".join(lines) + "\n    return 0\n"
-        src_mod.write_text(content, encoding="utf-8")
+        src_mod.write_bytes(content.encode("utf-8"))
         st = os.stat(src_mod)
         sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
         abs_path = str(src_mod)
