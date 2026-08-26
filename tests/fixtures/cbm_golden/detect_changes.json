@@ -1,0 +1,1 @@
+{"content":[{"type":"text","text":"base: main\nmerge_base: ba99fbe0db8ead483a76a92070cfe86f63358f17\ndirection: inbound\nchanged_files: 1\n  tests/fixtures/\nseed_symbols: 0\nimpacted_total: 0\nimpacted_shown: 0\nimpacted: 0  (rows: name label hop; qn = group prefix + \".\" + name; nearest hops first)\n"}],"isError":false}

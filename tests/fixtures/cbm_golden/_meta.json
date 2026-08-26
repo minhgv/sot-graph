@@ -1,0 +1,34 @@
+{
+  "description": "Golden outputs captured verbatim from the real codebase-memory-mcp binary against tests/fixtures/cbm_sample_repo. No mocked content. The CBM database itself is NOT committed.",
+  "captured_at": "2026-08-25T07:20:00+07:00",
+  "binary": {
+    "path": "/Users/giapminh79/.local/bin/codebase-memory-mcp",
+    "version": "codebase-memory-mcp 0.10.8",
+    "version_probe_exit": 0
+  },
+  "source_commit": "010569fa6ce1bc5d6430f858129243ea1a2e3fd5",
+  "os_arch": "Darwin arm64 (capture machine)",
+  "capture_command_digest": "615d54348f68e81c52aad3049ba6f0655b27fc4e7667adfc7dcaccf21a65908a",
+  "fixture_repo_digest": "eeee1fb3c320d96e1c66a71eb6b4337cb770cdec363474e3625dc7a77df99a16",
+  "invocation_format": "codebase-memory-mcp cli --json <tool> [--flag value]",
+  "fixture": {
+    "path": "tests/fixtures/cbm_sample_repo",
+    "project_slug": "Users-giapminh79-code-GitHub-sot-graph-tests-fixtures-cbm_sample_repo",
+    "index_result": {"status": "indexed", "nodes": 46, "edges": 104, "exit": 0}
+  },
+  "captures": [
+    {"file": "search_graph.json", "argv": ["cli", "--json", "search_graph", "--project", "<slug>", "--query", "compute_total"], "cwd": "tests/fixtures/cbm_sample_repo", "exit": 0},
+    {"file": "trace_path.json", "argv": ["cli", "--json", "trace_path", "--project", "<slug>", "--function_name", "build_invoice"], "cwd": "tests/fixtures/cbm_sample_repo", "exit": 0},
+    {"file": "get_architecture.json", "argv": ["cli", "--json", "get_architecture", "--project", "<slug>"], "cwd": "tests/fixtures/cbm_sample_repo", "exit": 0},
+    {"file": "check_index_coverage.json", "argv": ["cli", "--json", "check_index_coverage", "--project", "<slug>", "--paths", "[\"app/main.py\", \"core/service.py\", \"generated/models_pb2.py\"]"], "cwd": "tests/fixtures/cbm_sample_repo", "exit": 0},
+    {"file": "detect_changes.json", "argv": ["cli", "--json", "detect_changes", "--project", "<slug>"], "cwd": "tests/fixtures/cbm_sample_repo", "exit": 0},
+    {"file": "index_status.json", "argv": ["cli", "--json", "index_status", "--project", "<slug>"], "cwd": "tests/fixtures/cbm_sample_repo", "exit": 0},
+    {"file": "list_projects.json", "argv": ["cli", "--json", "list_projects"], "cwd": "tests/fixtures/cbm_sample_repo", "exit": 0}
+  ],
+  "receipts": [
+    "No tool failed with the real binary 0.10.8; all seven captures exited 0.",
+    "detect_changes resolves git context from the project root's enclosing repository (the parent sot-graph checkout); its output is environment-dependent (base branch + merge_base) and must be re-captured if the parent repo state changes.",
+    "Wire-format quirk (binary 0.10.8): list-valued flags via --flag do not arrive as arrays server-side; check_index_coverage recorded the entire JSON array string as a single requested_path. Adapter work should prefer --args-file for array arguments.",
+    "Digests (G1.3): capture_command_digest = sha256 over canonical JSON (sort_keys, separators (',',':')) of captures[] as {file,argv,cwd} in listed order; fixture_repo_digest = sha256 over the git-tracked sample-repo files (git ls-files tests/fixtures/cbm_sample_repo, sorted, each 'path:sha256(content)' newline-joined) — recomputable from a clean clone."
+  ]
+}
