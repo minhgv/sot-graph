@@ -186,13 +186,13 @@ def create_server(service: McpService) -> Any:
     async def list_tools() -> list[Any]:
         return [
             types.Tool(name="sot_search", description="Read-only verified graph search. Returns resource links (sot://node/{id}) for lazy per-node fetches.", inputSchema={
-                "type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1}, "scope": {"type": "string"}, "threshold": {"type": "number", "minimum": 0, "maximum": 1}}, "required": ["query"], "additionalProperties": False,
+                "type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1}, "scope": {"type": "string"}, "threshold": {"type": "number", "minimum": 0, "maximum": 1}, "assurance": {"type": "boolean"}, "provider_policy": {"type": "string", "enum": ["builtin_only", "prefer_external", "require_external"]}, "budget": {"type": "integer", "minimum": 1}}, "required": ["query"], "additionalProperties": False,
             }, outputSchema=_SEARCH_OUTPUT),
             types.Tool(name="sot_explore", description="Read-only bounded graph traversal.", inputSchema={
                 "type": "object", "properties": {"node_id": {"type": "string"}, "depth": {"type": "integer", "minimum": 1}, "limit": {"type": "integer", "minimum": 1}}, "required": ["node_id"], "additionalProperties": False,
             }),
             types.Tool(name="sot_usages", description="Read-only find-all-references: every reference site of a symbol, grouped by caller, plus unresolved bare-name risk.", inputSchema={
-                "type": "object", "properties": {"target": {"type": "string"}, "limit": {"type": "integer", "minimum": 1}}, "required": ["target"], "additionalProperties": False,
+                "type": "object", "properties": {"target": {"type": "string"}, "limit": {"type": "integer", "minimum": 1}, "scope": {"type": "string"}, "assurance": {"type": "boolean"}, "provider_policy": {"type": "string", "enum": ["builtin_only", "prefer_external", "require_external"]}, "budget": {"type": "integer", "minimum": 1}}, "required": ["target"], "additionalProperties": False,
             }, outputSchema=_USAGES_OUTPUT),
             types.Tool(name="sot_implementations", description="Read-only extends/implements relationships of a symbol (bases and derived types).", inputSchema={
                 "type": "object", "properties": {"target": {"type": "string"}}, "required": ["target"], "additionalProperties": False,
@@ -267,11 +267,11 @@ def create_server(service: McpService) -> Any:
         args = arguments or {}
         try:
             if name == "sot_search":
-                result = await service.asearch(args.get("query", ""), limit=args.get("limit", 6), scope=args.get("scope"), threshold=args.get("threshold", 0.5))
+                result = await service.asearch(args.get("query", ""), limit=args.get("limit", 6), scope=args.get("scope"), threshold=args.get("threshold", 0.5), assurance=args.get("assurance", True), provider_policy=args.get("provider_policy", "builtin_only"), budget=args.get("budget"))
             elif name == "sot_explore":
                 result = await service.aexplore(args.get("node_id", ""), depth=args.get("depth", 1), limit=args.get("limit", 100))
             elif name == "sot_usages":
-                result = await service.ausages(args.get("target", ""), limit=args.get("limit", 100))
+                result = await service.ausages(args.get("target", ""), limit=args.get("limit", 100), scope=args.get("scope"), assurance=args.get("assurance", True), provider_policy=args.get("provider_policy", "builtin_only"), budget=args.get("budget"))
             elif name == "sot_implementations":
                 result = await service.aimplementations(args.get("target", ""))
             elif name == "sot_verify_drift":

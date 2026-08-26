@@ -20,7 +20,7 @@
 # [TÊN DỰ ÁN] — BÁO CÁO KIẾN TRÚC & PHÂN TÍCH HỆ THỐNG TOÀN DIỆN
 
 **Nguồn phân tích:** Single Source of Truth (`sot-graph`)  
-**Mục tiêu:** Bóc tách kiến trúc tổng thể, phân rã chi tiết 100% modules & chức năng con theo User Role, State Machine, Cron SLA và Khuyến nghị tối ưu.  
+**Mục tiêu:** Bóc tách kiến trúc tổng thể, phân rã chi tiết các modules & chức năng con trong phạm vi bundle đã sinh theo User Role, State Machine, Cron SLA và Khuyến nghị tối ưu.  
 **Pattern & Modularity:** [Tên Pattern kiến trúc] — Modularity Score (Q = [Score])
 
 ---
@@ -69,9 +69,9 @@ graph TD
 
 ---
 
-## 2. PHÂN RÃ CHI TIẾT 100% MODULES NGHIỆP VỤ & TÍNH NĂNG CON (FEATURE TAXONOMY)
+## 2. PHÂN RÃ CHI TIẾT MODULES NGHIỆP VỤ & TÍNH NĂNG CON (FEATURE TAXONOMY — THEO PHẠM VI BUNDLE)
 
-> **Cấu trúc bắt buộc:** Nhóm thành các **Cụm Bounded Contexts** logic. Trình bày **100% tất cả module con** không được bỏ sót bất kỳ module nào.
+> **Cấu trúc bắt buộc:** Nhóm thành các **Cụm Bounded Contexts** logic. Trình bày **tất cả module con trong phạm vi bundle**; module ngoài phạm vi phải ghi rõ là chưa bao phủ.
 
 ### CỤM [N]: [TÊN CỤM NGHIỆP VỤ]
 

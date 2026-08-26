@@ -1,7 +1,7 @@
 # SOT-Graph Single Source of Truth Protocols & Rules for Agents (SSOT v0.3.0)
 
 ## 1. Filesystem as Single Source of Truth (SSOT)
-- The physical filesystem is the absolute ground truth. The SOT knowledge graph (`.sot/sot.db`) is an authoritative projection of reality (Schema v5).
+- The physical filesystem is the absolute ground truth. The SOT knowledge graph (`.sot/sot.db`) is an authoritative projection of reality (Schema v8).
 - Never assume a file path exists based on historical context without verification.
 
 ## 2. Knowledge Reuse & Multi-Provider Protocol (Mandatory Before Implementation)
@@ -40,7 +40,7 @@ When delegating code context to subagents or prompt registers:
 When requested to review or synthesize architecture documentation:
 1. Run `sot bundle` (or tool `sot_bundle`) to generate 5 high-density fact files in `.sot/bundle/` (MCP output paths are strictly confined to project root).
 2. Ingest the 5 fact files (`01_module_inventory.md`, `02_routing_endpoints.md`, `03_workflows_states.md`, `04_dependencies_violations.md`, `05_system_metrics.json`) along with `src/sot_graph/templates/ARCHITECTURE_TEMPLATE.md`.
-3. Output the report with 100% grounded facts, valid diagrams, and prioritized recommendations.
+3. Output the report with facts grounded ONLY in the bundle files (mark anything beyond them as [INFERENCE]), valid diagrams, and prioritized recommendations.
 
 ## Quick CLI & MCP Reference
 | Category | CLI Command | MCP Tool |

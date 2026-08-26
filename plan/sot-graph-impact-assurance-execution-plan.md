@@ -274,11 +274,16 @@ Structured parse thay text report; sync explicit; builtin capability trung thự
 
 ## P8 — OMP integration (R8)
 
-- [ ] MCP input hỗ trợ `assurance`, `provider_policy`, `scope`, `budget`; OMP config chỉ cần SOT MCP.
-- [ ] OMP rule bắt buộc scope receipt trước sửa core/public symbol; todo nodes tham chiếu receipt items; stop-time rule chặn đóng khi receipt còn pending.
-- [ ] Reviewer đối chiếu diff với pre/post receipts; planner được đọc source anchors + known gaps.
-- [ ] Xóa 12 claim "100%" agent-facing (mục 1.2 blocker #11) — thay bằng capability/coverage-scoped wording; đồng thời sửa docs "Schema v5" → thực tế đang chạy.
-- Exit gate: E2E fixture `scope receipt → plan → edit → targeted tests → diff-impact receipt → reconcile → reviewer` xanh; provider vắng mặt vẫn hoàn thành workflow builtin-only với assurance hạ trung thực.
+- [x] MCP input hỗ trợ `assurance`, `provider_policy`, `scope`, `budget`; OMP config chỉ cần SOT MCP.
+  — Receipt: `McpService.search/usages` nhận `assurance` (tắt → bỏ coverage block), `provider_policy` (enum builtin_only|prefer_external|require_external — invalid → invalid_argument), `scope`, `budget` (cap limit); response thêm `policy` meta nói thẳng MCP read là builtin-only, federation qua CLI/sot_providers_sync. inputSchemas + dispatch `mcp_server.py` cập nhật cho sot_search/sot_usages. Tests `TestMcpAssuranceInputs`.
+- [x] OMP rule bắt buộc scope receipt trước sửa core/public symbol; todo nodes tham chiếu receipt items; stop-time rule chặn đóng khi receipt còn pending.
+  — Receipt: `adapters/omp.py` RULES_MARKDOWN thêm section 3 "Pre-Edit Scope Receipt Gate": scope-receipt trước edit, BLOCKED → không edit, mỗi omp_confirmation là todo node `receipt <digest12>`, stop-time rule, post loop (diff-impact + reconcile + re-verify). `omp_extension.ts` thêm tool 27 `sot_scope_receipt` (blocked → details.blocked). Tests `test_omp_rules_installed_reference_receipts`.
+- [x] Reviewer đối chiếu diff với pre/post receipts; planner được đọc source anchors + known gaps.
+  — Receipt: RULES_MARKDOWN section 8 "Reviewer & Planner Receipt Duties" — reviewer đối chiếu diff với pre/post receipts + yêu cầu closure_decision closed; planner đọc source_anchors + coverage/known gaps, không plan vào file UNKNOWN.
+- [x] Xóa 12 claim "100%" agent-facing (mục 1.2 blocker #11) — thay bằng capability/coverage-scoped wording; đồng thời sửa docs "Schema v5" → thực tế đang chạy.
+  — Receipt: 12/12 claim đã thay (adapters/AGENTS.md:43, antigravity.py:35,116, claude.py:49, omp.py:30,108, opencode.py:36,115, zcode.py:37,116, ARCHITECTURE_TEMPLATE.md:23,72,74) → wording scoped ("grounded ONLY in bundle files", "[INFERENCE]", "hash-verified — high confidence, not absolute"). "Schema v5"→v8 ở 11 file (AGENTS.md, README.md×4, .claude, .gemini×3, .omp×4, .opencode×3, docs/WORKFLOW_GUIDELINES×2, adapters/AGENTS.md). Test `test_omp_skill_and_rules_no_absolute_claims` khóa không-tái-lặp.
+- [x] Exit gate: E2E fixture `scope receipt → plan → edit → targeted tests → diff-impact receipt → reconcile → reviewer` xanh; provider vắng mặt vẫn hoàn thành workflow builtin-only với assurance hạ trung thực.
+  — Receipt: `tests/test_p8_omp_integration.py::test_full_loop_builtin_only` — pre receipt (builtin-only: providers.runs==[] nhưng coverage basis=measured) → edit code+test → targeted pytest xanh theo candidate_tests → `sot diff-impact --json` (giờ có proof_scope=post_change + schema_version + digest + pre/post snapshots; fix thêm NameError envelope cũ ở fed path) → reconcile → reviewer assert (stale rỗng, không BLOCKED, pre digest ≠ post — pre không là post-proof). BLOCKED rename → exit 2 chặn loop sớm. Suite: 779 passed.
 
 ## P9 — Hardening & release qualification (R9)
 

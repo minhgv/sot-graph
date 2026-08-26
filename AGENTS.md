@@ -6,7 +6,7 @@ Before implementing any new feature, fix, or refactoring:
 1. Check existing work across projects using the Single Source of Truth search:
    `sot search "<what you are looking for>" --scope <optional-dir> [--json]`
 2. Follow Multi-Provider Trust Verdict Guidance:
-   - `[STRONG]`: High confidence — file and symbols physically verified on disk (Schema v5).
+   - `[STRONG]`: High confidence — file and symbols physically verified on disk (Schema v8).
    - `[WEAK]`: Semantic match only — inspect the file snippet before relying on it.
    - `[REBUILT]`: File has moved location; use the updated reported path.
    - `[REMOVED]`: Node deleted on disk; do NOT reference or hallucinate.

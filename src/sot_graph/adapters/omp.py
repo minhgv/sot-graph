@@ -27,7 +27,7 @@ When to use:
 - **Database maintenance**: Purge stale records and vacuum freelists (`sot clean`, `sot vacuum`, `sot doctor`).
 
 ## Trust Verdicts
-- `[STRONG]`: 100% verified against disk reality. File exists, symbol exists, token coverage matches.
+- `[STRONG]`: hash-verified against disk reality (high confidence, not absolute). File exists, symbol exists, token coverage matches.
 - `[WEAK]`: Semantic or partial match. Inspect the file snippet before relying on it.
 - `[REBUILT]`: File has moved location; use the updated path reported by the reconciler.
 - `[REMOVED]`: Node deleted on disk; do NOT reference or hallucinate.
@@ -84,30 +84,42 @@ Before writing any new utility, helper function, or class:
    - `[REMOVED]`: Node deleted on disk; do NOT reference.
    - `[NOPATH]`: Virtual/inline node; verify origin.
 
-## 3. Dependency Impact & Safe Refactoring Protocol
+## 3. Pre-Edit Scope Receipt Gate (P8)
+Before editing core/public symbols (anything outside a leaf function body):
+1. Run `sot scope-receipt <symbol> --change-kind <kind> [--auth] [--dynamic] [--json]`.
+2. If the receipt status is BLOCKED (e.g. rename gate: caller coverage insufficient), resolve the blocker first — do not edit.
+3. Track each `omp_confirmations` item as its own todo node referencing the receipt digest (`receipt <digest12>`).
+4. Stop-time rule: do NOT mark the task complete while receipt confirmations remain pending.
+5. After the edit: run `sot diff-impact` (post-change receipt binds its own snapshot), run `sot reconcile`, then re-verify. A pre-change receipt (`proof_scope: pre_change_only`) is NEVER post-change proof.
+
+## 4. Dependency Impact & Safe Refactoring Protocol
 Before modifying, refactoring, or renaming core functions/classes:
 1. Run `sot explore "<symbol>"` or `sot usages "<symbol>"` to inspect both Outward Calls and Incoming References.
 2. When working with interfaces or abstract classes, run `sot implementations "<interface>"` to identify all concrete implementations.
 3. Ensure you understand all upstream callers before changing signatures.
 4. Before finalizing changes or submitting PRs, run `sot diff-impact` (or `xd://sot_diff_impact`) to analyze blast radius, upstream inward callers, API contract impacts, and affected tests.
 5. Inspect commit risk history via `sot log` (or `xd://sot_git_history`).
-## 4. Context Isolation & Subgraph Packaging Protocol
+## 5. Context Isolation & Subgraph Packaging Protocol
 - When modifying multi-module features, avoid reading dozens of raw source files sequentially.
 - Run `sot pack "<symbol>" --depth 2` to generate a token-efficient YAML ContextBundle for subagents.
 
-## 5. Self-Healing & Drift Reconciliation
+## 6. Self-Healing & Drift Reconciliation
 - If you create, move, or delete files, run:
   `sot reconcile` or `sot_reconcile` tool (or `sot batch-reconcile` for monorepo roots).
 - After completing tricky bugs or complex architectural designs, record knowledge:
   `sot insert --title "..." --body "..." --keywords "..."`.
 
-## 6. Architecture Analysis & Fact Bundle Protocol
+## 7. Architecture Analysis & Fact Bundle Protocol
 When requested to review or synthesize comprehensive architecture documentation for a repository:
 1. Run `sot bundle` (or tool `sot_bundle`) to generate 5 high-density fact files in `.sot/bundle/`.
 2. Ingest the 5 fact files (`01_module_inventory.md`, `02_routing_endpoints.md`, `03_workflows_states.md`, `04_dependencies_violations.md`, `05_system_metrics.json`) along with `src/sot_graph/templates/ARCHITECTURE_TEMPLATE.md`.
-3. Output the 6-section report in Vietnamese with 100% grounded facts, valid ASCII/Mermaid diagrams, and prioritized recommendations.
+3. Output the 6-section report in Vietnamese with facts grounded ONLY in the generated bundle files (mark anything beyond them as `[INFERENCE]`), valid ASCII/Mermaid diagrams, and prioritized recommendations.
 
-## 7. Markdown, LaTeX & Unicode Rendering Rules (Dual-Target: Human & AI)
+## 8. Reviewer & Planner Receipt Duties
+- Reviewer: compare the final diff against the PRE and POST receipts — verify every pre-receipt caller was either updated or still compiles, and that the post receipt's `closure_decision` is `closed` (no remaining gaps) before approving.
+- Planner: read the scope receipt's `source_anchors` (path + line span) and `known_gaps`/coverage note before assigning work; never plan edits into files the receipt marks UNKNOWN.
+
+## 9. Markdown, LaTeX & Unicode Rendering Rules (Dual-Target: Human & AI)
 1. **Mermaid Diagrams:**
    - Wrap every Node label and Subgraph title in double quotes: `NODE["Label"]`, `subgraph ID ["Title"]`.
    - Never use bare pipe `|` inside node labels (use `/` or `\\|`).

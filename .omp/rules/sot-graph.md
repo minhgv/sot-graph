@@ -1,7 +1,7 @@
 # SOT-Graph Project Rules for OMP (Oh My Pi)
 
 ## 1. Filesystem as Single Source of Truth (SSOT)
-- The physical filesystem is the absolute ground truth. The SOT knowledge graph (`.sot/sot.db`) is an authoritative projection of reality (Schema v5).
+- The physical filesystem is the absolute ground truth. The SOT knowledge graph (`.sot/sot.db`) is an authoritative projection of reality (Schema v8).
 - Never assume a file path exists based on historical context without verification.
 
 ## 2. Knowledge Reuse & Multi-Provider Evidence Protocol (Mandatory Before Implementation)

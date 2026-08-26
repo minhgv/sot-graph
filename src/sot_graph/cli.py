@@ -1378,23 +1378,27 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
         return 2
 
     if getattr(args, "json", False):
+        from sot_graph.assurance.receipts import (
+            RECEIPT_SCHEMA_VERSION,
+            receipt_digest,
+        )
+
+        payload = res.to_dict()
         if fed is not None:
             _print_fed_warnings(fed)
-            payload = res.to_dict()
             payload["external_candidates"] = fed["candidates"]
-            payload["snapshot"] = {
-                "pre_change": pre_snapshot.as_dict(),
-                "post_change": post_snapshot.as_dict(),
-            }
-            payload["stale_files"] = stale
-            print(json.dumps(envelope, indent=2))
+        payload["snapshot"] = {
+            "pre_change": pre_snapshot.as_dict(),
+            "post_change": post_snapshot.as_dict(),
+        }
+        payload["stale_files"] = stale
+        payload["proof_scope"] = "post_change"
+        payload["schema_version"] = RECEIPT_SCHEMA_VERSION
+        payload["digest"] = receipt_digest(payload)
+        envelope = wrap_envelope(payload, db=db)
+        print(json.dumps(envelope, indent=2, default=str))
+        if fed is not None:
             _print_federation_notes(fed)
-            return 0
-        print(format_diff_impact_json(res))
-        print(
-            f"snapshot: pre {pre_snapshot.descriptor_digest} post {post_snapshot.descriptor_digest}",
-            file=sys.stderr,
-        )
         return 0
 
     print(

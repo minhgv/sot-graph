@@ -17,12 +17,12 @@
 
 `sot-graph` is an ultra-fast, zero-daemon knowledge graph and symbol navigation engine designed specifically for **Autonomous AI Coding Agents** (Oh My Pi / OMP, Claude Code, Cursor, OpenCode, Google Antigravity / Gemini CLI, ZCode IDE).
 
-It replaces slow, blind, and hallucination-prone text grepping with an incremental, AST-verified structural graph stored in SQLite (WAL mode + FTS5 full-text indexing + Schema v5 Multi-Provider Provenance Ledger).
+It replaces slow, blind, and hallucination-prone text grepping with an incremental, AST-verified structural graph stored in SQLite (WAL mode + FTS5 full-text indexing + Schema v8 Multi-Provider Provenance Ledger).
 
 ### Core Value Pillars
 
 1. **Zero Hallucinated Anchors**: The filesystem is the single source of truth. Every symbol returned is physically verified on disk with confidence scores and Trust Verdicts (`[STRONG]`, `[WEAK]`, `[REBUILT]`).
-2. **Multi-Provider Provenance Ledger (Schema v5)**: Transparently records both fast AST Heuristics (`AST_HEURISTIC_PARSER`) and exact compiler-backed SCIP indices (`COMPILER_INDEXED_SYMBOLS`) in dedicated `provider_runs` and `provider_evidence` tables.
+2. **Multi-Provider Provenance Ledger (Schema v8)**: Transparently records both fast AST Heuristics (`AST_HEURISTIC_PARSER`) and exact compiler-backed SCIP indices (`COMPILER_INDEXED_SYMBOLS`) in dedicated `provider_runs` and `provider_evidence` tables.
 3. **Token-Bounded Context Packaging (`sot pack`)**: Extracts exact target spans (L0) + 1-hop caller/callee contracts (L1) + 2-hop signature stubs (L2) within strict hard token budgets (`--tokens` / `--max-tokens`), preventing prompt bloat.
 4. **Architectural Blast Radius (`sot usages` / `sot explore` / `sot diff-impact`)**: Inbound and outbound dependency traversal identifying transitive callers, breaking API contracts, and unresolved bare-name shadowing risk before refactoring or landing PRs.
 5. **Atomic Two-Phase Mutation Gateway**: All database mutations (`reconcile`, `batch-reconcile`, `insert`, `clean`, `import-scip`) execute inside write locks (`BEGIN IMMEDIATE` + write lock file) with automatic WAL backups and note preservation across schema migrations.
@@ -100,7 +100,7 @@ sot import-scip index.scip
 # Watch filesystem and reconcile automatically on file changes
 sot watch --debounce-ms 200
 
-# Audit graph health and Schema v5 table counts
+# Audit graph health and Schema v8 table counts
 sot doctor
 ```
 
@@ -224,7 +224,7 @@ sot mcp
 ## Database Architecture & Durability
 
 - **Storage Engine**: SQLite in WAL (Write-Ahead Logging) mode with `NORMAL` synchronous mode and 64MB memory-mapped I/O (`mmap_size = 67108864`).
-- **Physical Tables (Schema v5)**:
+- **Physical Tables (Schema v8)**:
   - `graph_nodes`: AST symbols, signatures, docstrings, content hashes, roles, and generation timestamps.
   - `graph_edges`: Directed dependency edges (`calls`, `imports`, `extends`, `implements`, `defines`).
   - `provider_runs`: Immutable ledger of extraction runs (`AST_HEURISTIC_PARSER` vs SCIP tool providers, versions, argument digests, snapshot hashes, status).

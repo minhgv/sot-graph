@@ -1,6 +1,6 @@
 ---
 name: sot-graph
-description: Single Source of Truth (SOT) verified knowledge graph for AI coding agents. Provides verified codebase search with Multi-Provider Evidence Ledger (Schema v5), SCIP Compiler Indexing, North-Star Response Envelopes, Pure-Read Search, Honest Usages & Call Graph Semantics, Compass 2-Hop Exploration, Live-Verified Hard-Budget Context Packaging, Zero-Daemon SQLite Storage (with PRAGMA health checks & atomic content-hash rehoming), and 2-stage fact bundle extraction for LLM architecture reports.
+description: Single Source of Truth (SOT) verified knowledge graph for AI coding agents. Provides verified codebase search with Multi-Provider Evidence Ledger (Schema v8), SCIP Compiler Indexing, North-Star Response Envelopes, Pure-Read Search, Honest Usages & Call Graph Semantics, Compass 2-Hop Exploration, Live-Verified Hard-Budget Context Packaging, Zero-Daemon SQLite Storage (with PRAGMA health checks & atomic content-hash rehoming), and 2-stage fact bundle extraction for LLM architecture reports.
 ---
 
 # /sot-graph (Single Source of Truth Knowledge Layer v0.3.0)
@@ -21,7 +21,7 @@ When to use:
 
 ---
 
-## 1. Multi-Provider Evidence Ledger & Trust Veracity (Schema v5)
+## 1. Multi-Provider Evidence Ledger & Trust Veracity (Schema v8)
 
 All query results provide structured **Multi-Provider Evidence** distinguishing static heuristic AST extractions from compiler-backed semantic indices:
 

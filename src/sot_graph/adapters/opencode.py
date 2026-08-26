@@ -33,7 +33,7 @@ Ground OpenCode agent actions in physical filesystem reality using the SOT knowl
 ## Trust Verdicts
 | Verdict | Meaning | Action |
 | :--- | :--- | :--- |
-| `[STRONG]` | File exists on disk, symbol exists in AST, token coverage verified. | **Proceed directly.** 100% reliable anchor. |
+| `[STRONG]` | File exists on disk, symbol exists in AST, token coverage verified. | **Proceed directly.** Hash-verified anchor — high confidence, not absolute. |
 | `[WEAK]` | Semantic or partial match; low lexical coverage. | **Inspect snippet range** before relying on symbol. |
 | `[REBUILT]` | File moved or renamed; auto-rehomed by reconciler. | **Use updated path** reported in result. |
 | `[REMOVED]` | Node deleted on disk; scheduled for purge. | **Do NOT use.** Symbol no longer exists. |
@@ -112,7 +112,7 @@ When delegating code context to subagents or prompt registers:
 When requested to review or synthesize architecture documentation:
 1. Run `sot bundle` (or tool `sot_bundle`) to generate 5 high-density fact files in `.sot/bundle/`.
 2. Ingest the 5 fact files (`01_module_inventory.md`, `02_routing_endpoints.md`, `03_workflows_states.md`, `04_dependencies_violations.md`, `05_system_metrics.json`) along with `src/sot_graph/templates/ARCHITECTURE_TEMPLATE.md`.
-3. Output the report with 100% grounded facts, valid diagrams, and prioritized recommendations.
+3. Output the report with facts grounded ONLY in the bundle files — anything beyond them must be marked [INFERENCE]. Valid diagrams, prioritized recommendations.
 
 ### 7. Markdown, LaTeX & Unicode Rendering Rules (Dual-Target: Human & AI)
 1. **Mermaid Diagrams:**

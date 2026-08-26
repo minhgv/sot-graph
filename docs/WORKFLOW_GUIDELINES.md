@@ -1,6 +1,6 @@
 # SOT-Graph Agent Workflow & Operational Guidelines (v0.3.0)
 
-> **Standard Operating Procedures (SOP) and Behavioral Protocols for AI Coding Agents utilizing `sot-graph` as a Verified Single Source of Truth (SSOT) Multi-Provider Knowledge Layer (Schema v5).**
+> **Standard Operating Procedures (SOP) and Behavioral Protocols for AI Coding Agents utilizing `sot-graph` as a Verified Single Source of Truth (SSOT) Multi-Provider Knowledge Layer (Schema v8).**
 
 ---
 
@@ -32,7 +32,7 @@ Autonomous AI coding agents operating across multi-thousand-line codebases often
 2. **Context Window Exhaustion:** Ingesting dozens of raw source files sequentially (>100 lines each) to discover relationships, wasting thousands of input tokens.
 3. **Refactoring Blind Spots:** Modifying a core symbol without auditing upstream callers, causing subtle cross-module breakage.
 
-`sot-graph` addresses these challenges by establishing the **Physical Filesystem as the Absolute Ground Truth**, mapped through an embedded, zero-daemon SQLite storage layer (Schema v5) with sub-millisecond retrieval, deterministic AST parsing across 12+ languages, SCIP compiler index ingestion, and a real-time **Multi-Provider Trust Verdict Engine**.
+`sot-graph` addresses these challenges by establishing the **Physical Filesystem as the Absolute Ground Truth**, mapped through an embedded, zero-daemon SQLite storage layer (Schema v8) with sub-millisecond retrieval, deterministic AST parsing across 12+ languages, SCIP compiler index ingestion, and a real-time **Multi-Provider Trust Verdict Engine**.
 
 ---
 

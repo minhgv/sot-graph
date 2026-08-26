@@ -744,6 +744,38 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
     },
   });
 
+  // 27. sot_scope_receipt: PRE-change bounded evidence receipt (P8)
+  pi.registerTool({
+    name: "sot_scope_receipt",
+    label: "SOT Scope Receipt (pre-change)",
+    description:
+      "PRE-change bounded evidence receipt for one edit target: snapshot binding, source anchors, callers/callees, bounded transitive impact, candidate tests, coverage, risk rules, rename gate, and remaining OMP confirmations. Exit code 2 (details.ok=false) when BLOCKED.",
+    promptSnippet: "Run a pre-change scope receipt before editing core/public symbols",
+    parameters: {
+      type: "object",
+      properties: {
+        target: { type: "string", description: "Symbol to scope (e.g. 'Pipeline.process')" },
+        depth: { type: "number", description: "Transitive impact walk depth (default: 2)" },
+        changeKind: { type: "string", description: "local-body | public-api | rename | delete (default: local-body)" },
+        auth: { type: "boolean", description: "Change touches auth/tenant logic" },
+        dynamic: { type: "boolean", description: "Change is dynamic-heavy (dispatch/reflection)" },
+        json: { type: "boolean", description: "Output raw JSON receipt" },
+      },
+      required: ["target"],
+    },
+    async execute(_id, params) {
+      const args = ["scope-receipt", String(params.target)];
+      if (params.depth) args.push("--depth", String(params.depth));
+      if (params.changeKind) args.push("--change-kind", String(params.changeKind));
+      if (params.auth) args.push("--auth");
+      if (params.dynamic) args.push("--dynamic");
+      if (params.json) args.push("--json");
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok, blocked: !ok } };
+    },
+  });
+
   // Optional Hook: check graph status on session start
   if (typeof pi.on === "function") {
     pi.on("session_start", async () => {

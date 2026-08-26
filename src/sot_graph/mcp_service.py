@@ -343,7 +343,10 @@ class McpService:
                 return value
 
         raise McpServiceError("response_too_large", "response exceeds configured size limit")
-    def search(self, query: str, *, limit: int = 6, scope: Optional[str] = None, threshold: float = 0.5) -> Dict[str, Any]:
+    def search(self, query: str, *, limit: int = 6, scope: Optional[str] = None,
+               threshold: float = 0.5, assurance: bool = True,
+               provider_policy: str = "builtin_only",
+               budget: Optional[int] = None) -> Dict[str, Any]:
         if not isinstance(query, str) or not query.strip():
             raise McpServiceError("invalid_argument", "query must not be empty")
         if len(query) > 1000:
@@ -351,6 +354,20 @@ class McpService:
         if scope is not None and (not isinstance(scope, str) or len(scope) > 4096):
             raise McpServiceError("invalid_argument", "scope exceeds 4096 characters")
         limit = self._bounded(limit, self.limits.search)
+        if provider_policy not in ("builtin_only", "prefer_external", "require_external"):
+            raise McpServiceError(
+                "invalid_argument",
+                "provider_policy must be builtin_only | prefer_external | require_external",
+            )
+        if budget is not None:
+            limit = self._bounded(budget, limit)
+        policy_meta = {
+            "provider_policy": provider_policy,
+            "builtin_only": provider_policy == "builtin_only",
+            "note": "MCP read tools are builtin-only; prefer_external/"
+                    "require_external apply to CLI federation and "
+                    "sot_providers_sync",
+        }
         try:
             threshold = float(threshold)
         except (TypeError, ValueError) as exc:
@@ -376,14 +393,17 @@ class McpService:
                     tokens_l.append(part_strip.lower())
         if not tokens:
             def empty_op(conn: sqlite3.Connection) -> Dict[str, Any]:
-                return {
+                resp = {
                     "query": query,
                     "results": [],
                     "returned": 0,
                     "stale": 0,
-                    "coverage": self._coverage_note(conn),
+                    "policy": policy_meta,
                     "providers": self._providers(conn),
                 }
+                if assurance:
+                    resp["coverage"] = self._coverage_note(conn)
+                return resp
             return self._run(empty_op)
         expr = " OR ".join(sorted(tokens))
 
@@ -445,7 +465,8 @@ class McpService:
                 "results": out[:limit],
                 "returned": min(len(out), limit),
                 "stale": stale,
-                "coverage": self._coverage_note(conn),
+                "policy": policy_meta,
+                "coverage": self._coverage_note(conn) if assurance else None,
                 "providers": self._providers(conn),
             })
         return self._run(op)
@@ -542,13 +563,22 @@ class McpService:
             raise McpServiceError("not_found", "symbol was not found")
         return row
 
-    def usages(self, target: str, *, limit: int = 100) -> Dict[str, Any]:
+    def usages(self, target: str, *, limit: int = 100, scope: Optional[str] = None,
+               assurance: bool = True, provider_policy: str = "builtin_only",
+               budget: Optional[int] = None) -> Dict[str, Any]:
         """Reference sites of a symbol grouped by caller (find-all-references)."""
         if not isinstance(target, str) or not target.strip():
             raise McpServiceError("invalid_argument", "target must not be empty")
         if len(target) > 512:
             raise McpServiceError("invalid_argument", "target exceeds 512 characters")
         limit = self._bounded(limit, self.limits.explore_nodes)
+        if provider_policy not in ("builtin_only", "prefer_external", "require_external"):
+            raise McpServiceError(
+                "invalid_argument",
+                "provider_policy must be builtin_only | prefer_external | require_external",
+            )
+        if budget is not None:
+            limit = self._bounded(budget, limit)
 
         def op(conn: sqlite3.Connection) -> Dict[str, Any]:
             row = self._resolve_target_row(conn, target)
@@ -583,6 +613,9 @@ class McpService:
                 "risk": risk,
                 "next_steps": data.get("next_steps", []),
                 "truncated": len(data["callers"]) > limit or len(data["risk"]) > limit,
+                "policy": {"provider_policy": provider_policy,
+                           "builtin_only": provider_policy == "builtin_only"},
+                "coverage": self._coverage_note(conn) if assurance else None,
                 "providers": self._providers(conn),
                 "snapshot": snapshot,
                 "stale_files": stale,
