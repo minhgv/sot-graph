@@ -7,6 +7,7 @@ fake script placed on a private PATH (same pattern as tests/test_cbm_adapter).
 from __future__ import annotations
 
 import json
+import os
 import stat
 import sys
 from pathlib import Path
@@ -21,6 +22,14 @@ PY = sys.executable
 
 
 def make_exe(directory: Path, name: str, body: str) -> str:
+    if os.name == "nt":
+        # CreateProcess cannot exec shebang scripts; install a .cmd wrapper
+        # that forwards to this interpreter, keeping a single spawnable argv[0].
+        script = directory / f"{name}.py"
+        script.write_text(body, encoding="utf-8")
+        wrapper = directory / f"{name}.cmd"
+        wrapper.write_text(f'@"{sys.executable}" "%~dp0{name}.py" %*\r\n', encoding="utf-8")
+        return str(wrapper)
     path = directory / name
     path.write_text(f"#!{PY}\n{body}")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -85,7 +94,7 @@ def make_cbm_fake(bin_dir: Path, *, version: str | None = "0.10.8",
 
 def make_failing_cbm(bin_dir: Path) -> None:
     """A CBM binary whose --version probe exits non-zero (unhealthy)."""
-    make_exe(bin_dir, "codebase-memory-mcp", "#!/bin/sh\necho boom >&2\nexit 3\n")
+    make_exe(bin_dir, "codebase-memory-mcp", "import sys\nsys.stderr.write('boom\\n')\nsys.exit(3)\n")
 
 
 def no_spawn(monkeypatch) -> None:

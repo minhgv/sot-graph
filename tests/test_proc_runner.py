@@ -58,6 +58,7 @@ def test_cwd_with_spaces_and_unicode(tmp_path) -> None:
     result = run_command(
         [PY, "-c", "import os; print(os.getcwd())"],
         cwd=workdir,
+        env_extra={"PYTHONIOENCODING": "utf-8"},  # child stdout must survive the unicode cwd
     )
 
     assert result.returncode == 0

@@ -37,6 +37,14 @@ PY = sys.executable
 # --------------------------------------------------------------------- fakes
 
 def make_exe(directory, name: str, body: str) -> str:
+    if os.name == "nt":
+        # CreateProcess cannot exec shebang scripts; install a .cmd wrapper
+        # that forwards to this interpreter, keeping a single spawnable argv[0].
+        script = directory / f"{name}.py"
+        script.write_text(body, encoding="utf-8")
+        wrapper = directory / f"{name}.cmd"
+        wrapper.write_text(f'@"{sys.executable}" "%~dp0{name}.py" %*\r\n', encoding="utf-8")
+        return str(wrapper)
     path = directory / name
     path.write_text(f"#!{PY}\n{body}")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)

@@ -5,6 +5,7 @@ import copy
 import json
 import os
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,16 @@ import pytest
 from sot_graph.cli import main as cli_main
 from sot_graph.config import DEFAULT_PROVIDERS, SotConfig
 from sot_graph.providers_registry import detect_providers, resolve_capability
+
+
+# PATH discovery resolves a bare executable name; on Windows CreateProcess
+# only auto-appends .exe, so a fake text script on PATH cannot be spawned.
+# The spawn contract itself stays covered cross-platform by
+# tests/test_cbm_adapter.py, whose fakes use absolute command paths.
+requires_spawned_fake_bin = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="PATH-resolved fake binaries need real PE executables on Windows",
+)
 
 HEALTHY_VERSION_SCRIPT = "#!/bin/sh\necho 'gitnexus 1.2.3'\n"
 FAILING_VERSION_SCRIPT = "#!/bin/sh\necho 'boom' >&2\nexit 1\n"
@@ -48,6 +59,7 @@ def by_name(statuses) -> dict:
 
 
 class TestDetect:
+    @requires_spawned_fake_bin
     def test_installed_executable_reports_version(self, tmp_path: Path, fake_bin: Path):
         make_fake_exe(fake_bin, "gitnexus", HEALTHY_VERSION_SCRIPT)
         statuses = detect_providers(str(tmp_path), config_with_defaults())
@@ -76,6 +88,7 @@ class TestDetect:
         assert gitnexus.healthy is False
         assert "not found in PATH" in gitnexus.detail
 
+    @requires_spawned_fake_bin
     def test_failing_version_probe_is_unhealthy_with_detail(self, tmp_path: Path, fake_bin: Path):
         make_fake_exe(fake_bin, "gitnexus", FAILING_VERSION_SCRIPT)
         statuses = detect_providers(str(tmp_path), config_with_defaults())
@@ -93,6 +106,7 @@ class TestDetect:
 
 
 class TestResolveCapability:
+    @requires_spawned_fake_bin
     def test_impact_ranks_gitnexus_first_builtin_last(self, tmp_path: Path, fake_bin: Path):
         make_fake_exe(fake_bin, "gitnexus", HEALTHY_VERSION_SCRIPT)
         ranked = resolve_capability(str(tmp_path), "impact", config_with_defaults())
@@ -116,6 +130,7 @@ class TestResolveCapability:
         ranked = resolve_capability(str(tmp_path), "impact", cfg)
         assert "gitnexus" not in names(ranked)
 
+    @requires_spawned_fake_bin
     def test_repo_map_orders_by_coverage(self, tmp_path: Path, fake_bin: Path):
         make_fake_exe(fake_bin, "gitnexus", HEALTHY_VERSION_SCRIPT)
         ranked = resolve_capability(str(tmp_path), "repo-map", config_with_defaults())
@@ -125,6 +140,7 @@ class TestResolveCapability:
 
 
 class TestCliProviders:
+    @requires_spawned_fake_bin
     def test_detect_json_smoke(self, tmp_path: Path, fake_bin: Path, capsys: pytest.CaptureFixture):
         make_fake_exe(fake_bin, "gitnexus", HEALTHY_VERSION_SCRIPT)
         rc = cli_main(["--root", str(tmp_path), "providers", "detect", "--format", "json"])
@@ -157,6 +173,7 @@ class TestCliProviders:
         assert rc == 1
         assert "gitnexus" in captured.out
 
+    @requires_spawned_fake_bin
     def test_resolve_json_returns_ranked_list(self, tmp_path: Path, fake_bin: Path, capsys: pytest.CaptureFixture):
         make_fake_exe(fake_bin, "gitnexus", HEALTHY_VERSION_SCRIPT)
         rc = cli_main(["--root", str(tmp_path), "providers", "resolve", "--capability", "impact", "--format", "json"])

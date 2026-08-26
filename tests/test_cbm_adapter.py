@@ -7,6 +7,7 @@ owned by another worker and live elsewhere.
 from __future__ import annotations
 
 import json
+import os
 import stat
 import sys
 import time
@@ -42,6 +43,14 @@ INJECTION_QUERY = 'x"; rm -rf $HOME; echo pwned; `id` $(reboot)'
 
 
 def make_exe(directory: Path, name: str, body: str) -> str:
+    if os.name == "nt":
+        # CreateProcess cannot exec shebang scripts; install a .cmd wrapper
+        # that forwards to this interpreter, keeping a single spawnable argv[0].
+        script = directory / f"{name}.py"
+        script.write_text(body, encoding="utf-8")
+        wrapper = directory / f"{name}.cmd"
+        wrapper.write_text(f'@"{sys.executable}" "%~dp0{name}.py" %*\r\n', encoding="utf-8")
+        return str(wrapper)
     path = directory / name
     path.write_text(f"#!{sys.executable}\n{body}")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)

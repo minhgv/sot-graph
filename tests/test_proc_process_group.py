@@ -11,9 +11,20 @@ import stat
 import sys
 import time
 
+import pytest
+
 from sot_graph.proc import run_command
 
 PY = sys.executable
+
+# Process-group semantics (setsid/killpg, os.kill(pid, 0) liveness probes) are
+# POSIX-only; on Windows os.kill(sig!=CTRL_*) maps to TerminateProcess and
+# there is no process group to signal. Windows tree-kill coverage is tracked
+# as remediation-plan follow-up (G6.4).
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="process-group kill semantics are POSIX-only",
+)
 
 
 def make_exe(directory, name, body):

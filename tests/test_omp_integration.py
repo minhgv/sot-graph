@@ -34,7 +34,12 @@ class TestOMPIntegrationScenarios(unittest.TestCase):
         cls.env["PYTHONPATH"] = str(REPO_ROOT / "src")
 
     def run_sot(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
-        cmd = [str(BIN_SOT)] + args
+        if sys.platform == "win32":
+            # bin/sot is a bash launcher; on Windows drive the CLI module
+            # directly with the same PYTHONPATH the launcher exports.
+            cmd = [sys.executable, "-m", "sot_graph.cli"] + args
+        else:
+            cmd = [str(BIN_SOT)] + args
         proc = subprocess.run(
             cmd,
             cwd=str(REPO_ROOT),
