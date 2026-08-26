@@ -215,6 +215,10 @@ class GitDeltaExtractor:
                 cwd=self.repo_path,
                 capture_output=True,
                 text=True,
+                # Repository content may be UTF-8 beyond the console
+                # codepage (e.g. cp1252 runners); a strict decode kills the
+                # pipe reader thread and orphans the git child.
+                errors="replace",
                 timeout=timeout_sec,
                 check=False,
             )
