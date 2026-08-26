@@ -89,12 +89,10 @@ jobs:
           uv run python -c "import glob, subprocess, sys; sdists = glob.glob('dist/*.tar.gz'); sys.exit(1) if not sdists else subprocess.run(['uv', 'run', '--isolated', '--with', sdists[0], 'sot', '--version'], check=True)"
 
       - name: Smoke test MCP server initialization
-        run: |
-          uv run python -c "import glob, tempfile, os, subprocess, sys; wheels = glob.glob('dist/*.whl'); code = '''import tempfile, os; from sot_graph.db import Database; from sot_graph.mcp_service import McpService; from sot_graph.mcp_server import create_server; f = tempfile.NamedTemporaryFile(suffix=\".db\", delete=False); db_path = f.name; f.close(); db = Database(db_path); db.close(); service = McpService(db_path, \".\"); s = create_server(service); assert s._sot_initialization_options.server_version == \"0.3.0\"; print(\"MCP server verified:\", s._sot_initialization_options.server_version); service.close(); os.unlink(db_path)'''; subprocess.run(['uv', 'run', '--isolated', '--with', 'mcp>=1.3', '--with', wheels[0], 'python', '-c', code], check=True)"
+        run: uv run python scripts/ci_smoke.py mcp
 
       - name: Smoke test template and adapter generation
-        run: |
-          uv run python -c "import glob, tempfile, subprocess; wheels = glob.glob('dist/*.whl'); td = tempfile.mkdtemp(); subprocess.run(['uv', 'run', '--isolated', '--with', wheels[0], 'sot', '--root', td, 'setup', '--harness', 'omp', '--workspace-only'], check=True); print('Template smoke test passed')"
+        run: uv run python scripts/ci_smoke.py template
 
   release:
     name: Publish Release Artifacts
