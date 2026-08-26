@@ -398,8 +398,8 @@ def start_daemon(
         return True, f"Started SOT Watcher daemon (PID: {proc.pid}) for {target_desc}.\nLogs: {log_path}"
     except Exception as e:
         return False, f"Failed to start daemon: {e}"
-
-
+    finally:
+        log_file.close()
 def stop_daemon(root: str, is_all: bool = False) -> Tuple[bool, str]:
     """Stop the running background watcher daemon."""
     pid_path, _ = _get_pid_and_log_paths(root, is_all)
@@ -425,7 +425,8 @@ def stop_daemon(root: str, is_all: bool = False) -> Tuple[bool, str]:
             if not is_pid_alive(pid):
                 break
         if is_pid_alive(pid):
-            os.kill(pid, signal.SIGKILL)
+            sig_kill = getattr(signal, "SIGKILL", signal.SIGTERM)
+            os.kill(pid, sig_kill)
             time.sleep(0.2)
         pid_path.unlink(missing_ok=True)
         return True, f"Successfully stopped SOT Watcher daemon (PID: {pid})."
