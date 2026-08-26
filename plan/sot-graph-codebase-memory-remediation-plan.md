@@ -106,7 +106,7 @@ Không chạy song song G2–G5 vì contract và evidence semantics của phase 
 - [x] `G0.1` Thêm `Any` vào `from typing import ...` tại `src/sot_graph/cli.py:12` (đã verify: walk-import toàn package 0 failure).
 - [x] `G0.2` Thêm smoke test import `sot_graph.cli` (`tests/test_cli_smoke.py`, 3 test). Lưu ý: `tests/test_cli_provider_wiring.py:16` và `tests/test_omp_integration.py:48` đã xanh lại sau P0-1.
 - [x] `G0.3` Đã chạy `sot --version` (`sot 0.3.0`), `--help`, `providers --help` từ source checkout, wheel VÀ sdist cài vào temp venv sạch.
-- [ ] `G0.4` Xác nhận package smoke trên Python 3.10, 3.11 và 3.12 — local wheel/sdist OK; chờ CI matrix run sau push.
+- [x] `G0.4` Xác nhận package smoke và test matrix 13/13 jobs xanh trên Python 3.10, 3.11, 3.12 × Linux, macOS, Windows (CI run `32944368819`, commit `7d03014`).
 - [x] `G0.5` Đã verify `.github/workflows/ci.yml` không có `continue-on-error`/`if: always` — job đỏ chặn merge theo cấu trúc.
 - [x] `G0.6` Đã xóa định nghĩa `ensure_index` thứ hai (`providers/codebase_memory.py:906-923`, byte-identical với bản giữ lại).
 
