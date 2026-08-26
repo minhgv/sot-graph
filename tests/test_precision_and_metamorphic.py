@@ -171,5 +171,8 @@ def test_scip_enclosing_symbol_attribution(workspace: Path):
         "SELECT src_symbol, dst_symbol, relation, line_start FROM provider_evidence WHERE relation = 'references'"
     ).fetchall()
     assert len(ev_rows) == 1
-    assert ev_rows[0][0] == "process_data"  # Enclosing symbol attributed, not raw file path!
-    assert ev_rows[0][1] == "helper"
+    # P3.2: enclosing attribution carries the qualified identity, not the
+    # bare short name (and never the raw file path).
+    assert ev_rows[0][0] == "client.process_data"
+    assert ev_rows[0][1] == "utils.helper"
+    assert ev_rows[0][2] == "references"  # a plain occurrence never becomes a call

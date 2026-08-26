@@ -2021,8 +2021,12 @@ class Database:
         for item in evidence_items:
             eid = item.get("id") or f"ev_{uuid.uuid4().hex}"
             path = item.get("path") or item.get("file_path", "")
+            # P3.2: canonical identity in src/dst, wire bare name in the
+            # symbol/target alias columns so both lookup shapes work.
             src_symbol = item.get("src_symbol") or item.get("symbol", "")
             dst_symbol = item.get("dst_symbol") or item.get("target_symbol")
+            bare_src = item.get("symbol") or src_symbol
+            bare_dst = item.get("target_symbol") or dst_symbol
             relation = item.get("relation") or item.get("role", "reference")
             line_start = item.get("line_start")
             line_end = item.get("line_end")
@@ -2037,8 +2041,8 @@ class Database:
                 meta = json.dumps(meta)
             snap = item.get("snapshot_hash")
             rows.append((
-                eid, run_id, prov_name, path, path, src_symbol, src_symbol,
-                dst_symbol, dst_symbol, relation, relation,
+                eid, run_id, prov_name, path, path, bare_src, src_symbol,
+                bare_dst, dst_symbol, relation, relation,
                 line_start, line_end, col_start, col_end,
                 syntax_kind, documentation, confidence, meta, snap, now, now
             ))

@@ -200,7 +200,8 @@ Structured parse thay text report; sync explicit; builtin capability trung thự
 
 ### P3.2 SCIP
 
-- [ ] Normalize definitions/references vào identity model chung; bind index metadata vào source snapshot; không suy call từ reference đơn thuần; invalidate khi commit/manifest lệch (`importer/scip.py:623-809`).
+- [x] Normalize definitions/references vào identity model chung; bind index metadata vào source snapshot; không suy call từ reference đơn thuần; invalidate khi commit/manifest lệch (`importer/scip.py:623-809`).
+  — Receipt: src/dst_symbol = qualified identity (`parse_scip_symbol().fqn`, không short-name normalization), bare name đi cột alias `symbol`/`target_symbol` (writer `db.record_provider_evidence` honor cả hai) → `get_symbol_evidence` resolve cả bare lẫn qualified. Occurrence thường luôn `relation='references'` — không có code path nào upgrade thành call (test invariant). Run bind journal: `manifest_digest` = sha256 của sorted (path, sha256) journal rows; doc text/disk lệch journal → `mark_evidence_stale("scip index stale: indexed content differs from file_journal")` ngay trong import; chưa reconcile → `journal_bound=False` (never-indexed ≠ stale). `tests/test_p3_scip_binding.py` (7 test) + `test_scip_enclosing_symbol_attribution` cập nhật sang qualified.
 
 ### P3.3 Builtin
 

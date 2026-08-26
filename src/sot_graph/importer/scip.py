@@ -7,6 +7,7 @@ binary (.scip) and JSON (.json) formats, with zero mandatory external dependenci
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -670,6 +671,7 @@ class ScipImporter:
                         def_spans.append({
                             "symbol_raw": symbol_raw,
                             "bare_name": sym_info["bare_name"],
+                            "fqn": sym_info.get("fqn") or sym_info["bare_name"],
                             "line_start": sp["line_start"],
                             "line_end": sp["line_end"],
                             "col_start": sp["col_start"],
@@ -690,6 +692,7 @@ class ScipImporter:
                 spans = translate_scip_range(range_ints, encoding=doc_encoding, source_text=doc_text)
                 sym_info = parse_scip_symbol(symbol_raw)
                 bare_symbol = sym_info["bare_name"]
+                fqn_symbol = sym_info.get("fqn") or bare_symbol
 
                 is_def = bool(roles & ROLE_DEFINITION)
                 is_imp = bool(roles & ROLE_IMPORT)
@@ -697,17 +700,24 @@ class ScipImporter:
                 if is_def:
                     definitions_count += 1
                     relation = "defines"
-                    src_sym = bare_symbol
+                    src_sym = fqn_symbol
+                    src_bare = bare_symbol
                     dst_sym = None
+                    dst_bare = None
                 elif is_imp:
                     relation = "imports"
                     src_sym = norm_path
-                    dst_sym = bare_symbol
+                    src_bare = norm_path
+                    dst_sym = fqn_symbol
+                    dst_bare = bare_symbol
                 else:
                     references_count += 1
+                    # P3.2 invariant: a plain occurrence is a REFERENCE,
+                    # never a call — no relation upgrade happens here.
                     relation = "references"
                     # Determine enclosing symbol if the reference occurs within a definition span
                     enclosing_sym = norm_path
+                    enclosing_bare = norm_path
                     occ_line = spans["line_start"]
                     if occ_line:
                         # Find the closest preceding definition (or exact range enclosing if line_end is set)
@@ -716,9 +726,12 @@ class ScipImporter:
                             if d["line_start"] and d["line_start"] <= occ_line and (d["line_end"] is None or d["line_end"] >= occ_line or d["line_end"] == d["line_start"])
                         ]
                         if candidates:
-                            enclosing_sym = candidates[-1]["bare_name"]
+                            enclosing_sym = candidates[-1]["fqn"]
+                            enclosing_bare = candidates[-1]["bare_name"]
                     src_sym = enclosing_sym
-                    dst_sym = bare_symbol
+                    src_bare = enclosing_bare
+                    dst_sym = fqn_symbol
+                    dst_bare = bare_symbol
 
                 override_doc = occ.get("override_documentation")
                 occ_doc = "\n".join(override_doc) if override_doc else sym_doc_map.get(symbol_raw)
@@ -726,7 +739,9 @@ class ScipImporter:
 
                 evidence_items.append({
                     "path": norm_path,
+                    "symbol": src_bare,
                     "src_symbol": src_sym,
+                    "target_symbol": dst_bare,
                     "dst_symbol": dst_sym,
                     "relation": relation,
                     "line_start": spans["line_start"],
@@ -741,6 +756,7 @@ class ScipImporter:
                         "symbol_roles": roles,
                         "syntax_kind": occ.get("syntax_kind", 0),
                         "fqn": sym_info.get("fqn"),
+                        "bare_name": bare_symbol,
                     },
                 })
             for sym in doc.get("symbols", []):
@@ -749,6 +765,7 @@ class ScipImporter:
                     continue
                 sym_parsed = parse_scip_symbol(sym_raw)
                 src_bare = sym_parsed["bare_name"]
+                src_fqn = sym_parsed.get("fqn") or src_bare
                 sym_kind = str(sym.get("kind", 0))
                 sym_doc = "\n".join(sym.get("documentation", [])) if sym.get("documentation") else None
 
@@ -757,6 +774,7 @@ class ScipImporter:
                     target_raw = rel.get("symbol", "")
                     target_parsed = parse_scip_symbol(target_raw)
                     target_bare = target_parsed["bare_name"]
+                    target_fqn = target_parsed.get("fqn") or target_bare
 
                     if rel.get("is_implementation"):
                         rel_type = "implements"
@@ -769,8 +787,10 @@ class ScipImporter:
 
                     evidence_items.append({
                         "path": norm_path,
-                        "src_symbol": src_bare,
-                        "dst_symbol": target_bare,
+                        "symbol": src_bare,
+                        "src_symbol": src_fqn,
+                        "target_symbol": target_bare,
+                        "dst_symbol": target_fqn,
                         "relation": rel_type,
                         "line_start": None,
                         "line_end": None,
@@ -782,19 +802,67 @@ class ScipImporter:
                         "metadata_json": {
                             "scip_src_symbol": sym_raw,
                             "scip_target_symbol": target_raw,
+                            "src_fqn": src_fqn,
+                            "target_fqn": target_fqn,
                             "relationship": rel,
                         },
                     })
-        # Batch insert provider run and evidence under write lock
-        # Compute manifest digest / snapshot_hash from file_journal if available
-        snapshot_hash = None
-        try:
-            row = self.db.conn.execute("SELECT MAX(generation) FROM file_journal").fetchone()
-            if row and row[0]:
-                snapshot_hash = f"gen_{row[0]}"
-        except Exception:
-            snapshot_hash = None
 
+        # P3.2 snapshot binding: tie this run to the reconciler's file
+        # journal. journal_bound means every indexed document matched a
+        # journal row; manifest_digest pins the (path, sha256) set; stale
+        # files (index text or disk state disagreeing with the journal)
+        # get their evidence invalidated immediately — never silently kept.
+        doc_paths: List[str] = []
+        doc_texts: Dict[str, Optional[str]] = {}
+        for doc in documents:
+            rel = (doc.get("relative_path") or "").replace("\\", "/")
+            if rel:
+                doc_paths.append(rel)
+                doc_texts[rel] = doc.get("text")
+        journal_hashes: Dict[str, str] = {}
+        stale_files: List[str] = []
+        for rel in doc_paths:
+            try:
+                journal = self.db.get_file_journal(rel)
+            except Exception:
+                journal = None
+            if journal is None:
+                continue
+            journal_hashes[rel] = journal["sha256"]
+            text = doc_texts.get(rel)
+            if isinstance(text, str):
+                doc_sha = hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
+                if doc_sha != journal["sha256"] and rel not in stale_files:
+                    stale_files.append(rel)
+        try:
+            for drifted in self.db.stale_journal_files(doc_paths, proj_root):
+                if drifted not in stale_files:
+                    stale_files.append(drifted)
+        except Exception:
+            pass
+        if journal_hashes:
+            manifest = json.dumps(
+                sorted(journal_hashes.items()), separators=(",", ":"), sort_keys=True
+            )
+            manifest_digest = "manifest:" + hashlib.sha256(
+                manifest.encode("utf-8")
+            ).hexdigest()
+        else:
+            manifest_digest = None
+        journal_bound = bool(journal_hashes)
+        # Bind the run to the journal manifest when available; the bare
+        # generation fallback only applies when no doc matched the journal.
+        snapshot_hash = manifest_digest
+        if snapshot_hash is None:
+            try:
+                row = self.db.conn.execute("SELECT MAX(generation) FROM file_journal").fetchone()
+                if row and row[0]:
+                    snapshot_hash = f"gen_{row[0]}"
+            except Exception:
+                snapshot_hash = None
+
+        stale_marked = 0
         with self.db.write_lock():
             rid = self.db.record_provider_run(
                 provider_name=prov_name,
@@ -807,6 +875,11 @@ class ScipImporter:
                 run_id=run_id,
             )
             recorded = self.db.record_provider_evidence(rid, evidence_items)
+        if stale_files:
+            stale_marked = self.db.mark_evidence_stale(
+                stale_files,
+                reason="scip index stale: indexed content differs from file_journal",
+            )
         duration_ms = int((time.monotonic() - started_at) * 1000)
         return {
             "run_id": rid,
@@ -818,6 +891,10 @@ class ScipImporter:
             "references_count": references_count,
             "relationships_count": relationships_count,
             "evidence_recorded": recorded,
+            "journal_bound": journal_bound,
+            "manifest_digest": manifest_digest,
+            "stale_files": stale_files,
+            "stale_marked": stale_marked,
             "duration_ms": duration_ms,
         }
 
