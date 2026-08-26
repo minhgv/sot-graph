@@ -9,13 +9,13 @@ by a hard subprocess timeout.
 """
 
 from __future__ import annotations
-
 import hashlib
+import os
 import sqlite3
 import subprocess
 import time
 import uuid
-
+from dataclasses import dataclass, field, replace
 GIT_TIMEOUT_SECONDS = 30
 
 
@@ -66,11 +66,34 @@ def get_head_sha(repo_root: str) -> str | None:
     return sha or None
 
 
+def dirty_state(repo_root: str) -> tuple[bool | None, str | None]:
+    """Tri-state worktree dirtiness with a content fingerprint.
+
+    Returns ``(dirty, fingerprint)``. ``dirty`` is None when git status
+    itself failed (unverifiable — callers must treat that as NOT clean),
+    False for a clean tree, True for any staged/unstaged/untracked change.
+    The fingerprint is a deterministic sha256 over the sorted status
+    entries (None only when git failed or the tree is clean).
+    """
+    entries = _status_entries(repo_root)
+    if entries is None:
+        return None, None
+    if not entries:
+        return False, None
+    return True, _fingerprint(entries)
+
+
+def _fingerprint(entries: list[str]) -> str:
+    hasher = hashlib.sha256()
+    for entry in sorted(entries):
+        hasher.update(entry.encode("utf-8"))
+        hasher.update(b"\x00")
+    return f"sha256:{hasher.hexdigest()}"
+
 def is_dirty(repo_root: str) -> bool:
     """True when the worktree has any staged, unstaged, or untracked change."""
     entries = _status_entries(repo_root)
     return entries is not None and len(entries) > 0
-
 
 def compute_dirty_fingerprint(repo_root: str) -> str | None:
     """Deterministic sha256 over all uncommitted changes.
@@ -81,11 +104,86 @@ def compute_dirty_fingerprint(repo_root: str) -> str | None:
     entries = _status_entries(repo_root)
     if entries is None:
         return None
+    return _fingerprint(entries)
+
+
+@dataclass(frozen=True)
+class WorktreeSnapshot:
+    """In-memory worktree snapshot descriptor (P1.b/P1.g).
+
+    ``snapshot_id`` is only set when the descriptor was persisted into the
+    ``snapshots`` table (``bind_snapshot``); read-only query paths carry the
+    content ``descriptor_digest`` instead so pre/post-change snapshots can
+    still be compared without a DB write.
+    """
+
+    repo_root: str
+    commit_sha: str | None
+    dirty: bool | None
+    dirty_fingerprint: str | None
+    captured_at: int
+    role: str = "query"  # query | pre_change | post_change
+    manifest_digest: str | None = None
+    generation: int | None = None
+    algo_version: str = "sha256-v1"
+    snapshot_id: str | None = None
+    descriptor_digest: str = field(default="", compare=False)
+
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "snapshot_id": self.snapshot_id,
+            "descriptor_digest": self.descriptor_digest,
+            "role": self.role,
+            "commit_sha": self.commit_sha,
+            "dirty": self.dirty,
+            "dirty_fingerprint": self.dirty_fingerprint,
+            "manifest_digest": self.manifest_digest,
+            "generation": self.generation,
+            "algo_version": self.algo_version,
+            "captured_at": self.captured_at,
+        }
+
+
+def capture_worktree_snapshot(
+    repo_root: str,
+    conn: sqlite3.Connection | None = None,
+    *,
+    role: str = "query",
+) -> WorktreeSnapshot:
+    """Capture the common snapshot descriptor shared by assured queries.
+
+    With ``conn`` the descriptor is ALSO persisted (reusing
+    ``bind_snapshot`` semantics); without it this stays a read-only capture
+    — no writes happen on read paths.
+    """
+    from sot_graph.envelope import compute_manifest_digest, compute_snapshot_generation
+
+    root = os.path.realpath(repo_root)
+    dirty, fingerprint = dirty_state(root)
+    snapshot = WorktreeSnapshot(
+        repo_root=root,
+        commit_sha=get_head_sha(root),
+        dirty=dirty,
+        dirty_fingerprint=fingerprint,
+        captured_at=int(time.time()),
+        role=role,
+        manifest_digest=compute_manifest_digest(conn) if conn is not None else None,
+        generation=compute_snapshot_generation(conn) if conn is not None else None,
+    )
     hasher = hashlib.sha256()
-    for entry in sorted(entries):
-        hasher.update(entry.encode("utf-8"))
+    for part in (
+        str(snapshot.commit_sha), str(snapshot.dirty),
+        str(snapshot.dirty_fingerprint), str(snapshot.manifest_digest),
+        str(snapshot.generation), snapshot.role,
+    ):
+        hasher.update(part.encode("utf-8"))
         hasher.update(b"\x00")
-    return f"sha256:{hasher.hexdigest()}"
+    digest = f"sha256:{hasher.hexdigest()}"
+    snapshot = replace(snapshot, descriptor_digest=digest)
+    if conn is not None:
+        return replace(snapshot, snapshot_id=bind_snapshot(conn, root))
+    return snapshot
 
 
 def bind_snapshot(conn: sqlite3.Connection, repo_root: str) -> str:

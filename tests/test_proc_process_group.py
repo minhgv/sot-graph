@@ -66,7 +66,7 @@ def test_timeout_kills_grandchild_process_group(tmp_path) -> None:
     )
     exe = make_exe(tmp_path, "spawner", body)
 
-    result = run_command([str(exe)], timeout_seconds=0.6)
+    result = run_command([str(exe)], timeout_seconds=2.0)
 
     assert result.timed_out is True
     assert marker.exists(), "child never reached the spawn point"

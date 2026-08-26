@@ -201,6 +201,8 @@ CREATE TABLE IF NOT EXISTS provider_evidence (
     confidence REAL DEFAULT 1.0,
     metadata_json TEXT,
     snapshot_hash TEXT,
+    invalidated_at INTEGER,
+    invalidation_reason TEXT,
     recorded_at INTEGER,
     created_at INTEGER NOT NULL,
     FOREIGN KEY(run_id) REFERENCES provider_runs(id) ON DELETE CASCADE
@@ -535,6 +537,16 @@ class Database:
                                 "provider_evidence",
                                 {"snapshot_hash": "TEXT"},
                             )
+                            # P1.e: evidence invalidation marking — set, never
+                            # deleted, so the ledger can distinguish pre/post
+                            # change evidence for conflict adjudication.
+                            self._ensure_columns(
+                                "provider_evidence",
+                                {
+                                    "invalidated_at": "INTEGER",
+                                    "invalidation_reason": "TEXT",
+                                },
+                            )
                             self.conn.execute("""
                                 CREATE TABLE IF NOT EXISTS provider_project_bindings (
                                     id TEXT PRIMARY KEY,
@@ -596,6 +608,16 @@ class Database:
         version = self._user_version()
         if version != SCHEMA_VERSION:
             self._migrate_database()
+        # P1.e: invalidation marking columns exist on every open, including
+        # databases already at SCHEMA_VERSION before this feature shipped.
+        try:
+            self._ensure_columns(
+                "provider_evidence",
+                {"invalidated_at": "INTEGER", "invalidation_reason": "TEXT"},
+            )
+        except Exception:
+            pass  # read-only connections degrade to no marking, not failure
+
     def _schema_objects_present(self) -> bool:
         row = self.conn.execute(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
@@ -657,6 +679,74 @@ class Database:
             }
             for r in rows
         }
+
+
+    def stale_journal_files(self, paths, root: str | None = None) -> List[str]:
+        """Paths whose disk state disagrees with the file journal (P1.c).
+
+        Relative paths are resolved against ``root`` (the reconciler stores
+        root-relative journal keys). A path is stale when size or mtime
+        differ from the journal, or when they match but the content hash no
+        longer does (mirrors the reconciler's scan semantics). Paths without
+        a journal row are NOT reported stale (never indexed ≠ stale).
+        """
+        import hashlib as _hashlib
+
+        stale: List[str] = []
+        for raw in paths:
+            if not raw:
+                continue
+            prior = self.get_file_journal(str(raw))
+            if prior is None:
+                continue
+            candidate = str(raw)
+            if not os.path.isabs(candidate) and root:
+                candidate = os.path.join(root, candidate)
+            try:
+                stat = os.stat(candidate)
+            except OSError:
+                stale.append(str(raw))  # deleted since reconcile
+                continue
+            if int(stat.st_size) != prior.get("size") or int(stat.st_mtime * 1000) != prior.get("mtime_ms"):
+                stale.append(str(raw))
+                continue
+            try:
+                with open(candidate, "rb") as fh:
+                    current_sha = _hashlib.sha256(fh.read()).hexdigest()
+            except OSError:
+                stale.append(str(raw))
+                continue
+            if prior.get("sha256") != current_sha:
+                stale.append(str(raw))
+        return stale
+
+    def mark_evidence_stale(self, paths, reason: str) -> int:
+        """Flag provider_evidence rows touching changed paths (P1.e).
+
+        Marks, never deletes: rows keep their original snapshot scope and
+        gain ``invalidated_at`` + ``invalidation_reason`` so the ledger can
+        separate pre-change from post-change evidence. Idempotent — rows
+        already invalidated keep their first reason.
+        """
+        import time as _time
+
+        candidates = [str(p).replace(os.sep, "/") for p in paths if p]
+        if not candidates:
+            return 0
+        now = int(_time.time())
+        marks: List[str] = []
+        params: List[Any] = []
+        for p in candidates:
+            marks.append("(path = ? OR file_path = ?)")
+            params.extend([p, p])
+        where = " OR ".join(marks)
+        with self.conn:
+            cur = self.conn.execute(
+                "UPDATE provider_evidence SET invalidated_at = ?, invalidation_reason = ? "
+                f"WHERE invalidated_at IS NULL AND ({where})",
+                [now, reason, *params],
+            )
+        return cur.rowcount or 0
 
     def all_journal_paths(self) -> List[str]:
         return [r[0] for r in self.conn.execute("SELECT path FROM file_journal ORDER BY path")]

@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
 from sot_graph.proc import RunResult, run_command
-from sot_graph.snapshot import get_head_sha
+from sot_graph.snapshot import dirty_state, get_head_sha
 
 from .base import (
     ArchitectureRequest,
@@ -135,6 +135,8 @@ class SnapshotMatch:
     sot_head_sha: str | None = None
     branch: str | None = None
     stale_paths: tuple[str, ...] = ()
+    dirty: bool | None = None  # P1.a: worktree dirty state (None = unverifiable)
+    dirty_fingerprint: str | None = None
 
     @property
     def freshness(self) -> str:
@@ -143,6 +145,8 @@ class SnapshotMatch:
             return "UNBOUND"
         if self.fresh:
             return "FRESH"
+        if self.dirty:
+            return "STALE"  # dirty worktree: content diverged from any commit
         if self.stale_paths or (
             self.cbm_head_sha is not None and self.sot_head_sha is not None
         ):
@@ -800,10 +804,13 @@ class CodebaseMemoryProvider:
         *,
         project: str | None = None,
     ) -> SnapshotMatch:
-        """Compare the CBM index state against the SOT worktree (P2).
+        """Compare the CBM index state against the SOT worktree (P2+P1.a).
 
-        (a) CBM ``head_sha`` (via index_status) vs SOT HEAD SHA; (b) when
-        ``paths`` are given, every ``check_index_coverage`` entry must report
+        (a) CBM ``head_sha`` (via index_status) vs SOT HEAD SHA; (b) SOT
+        worktree dirty state — checked unconditionally, even when ``paths``
+        is empty — because the index binds to the committed tree, so any
+        uncommitted change caps freshness at STALE; (c) when ``paths`` are
+        given, every ``check_index_coverage`` entry must report
         ``hash_status == "fresh"``. Fail-closed: any unprovable step yields
         ``fresh=False`` with a distinguishing ``detail``.
         """
@@ -833,6 +840,18 @@ class CodebaseMemoryProvider:
             else f"stale: cbm head_sha {binding.head_sha[:12]} != "
                  f"sot HEAD {sot_head[:12]}"
         )
+        # P1.a: the CBM index binds to the COMMITTED tree. A dirty worktree —
+        # checked unconditionally, including paths=() — means content the
+        # index cannot prove anything about, so freshness caps at STALE even
+        # when head_sha matches (blocker #1).
+        worktree_root = os.path.realpath(repo_root)
+        dirty, fingerprint = dirty_state(worktree_root)
+        if dirty is None:
+            fresh = False
+            detail += "; unknown: worktree dirty state unverifiable (git status failed)"
+        elif dirty:
+            fresh = False
+            detail += f"; stale: dirty worktree ({fingerprint or 'fingerprint unavailable'})"
         stale_paths: list[str] = []
         if paths:
             cov = self._invoke(
@@ -861,6 +880,7 @@ class CodebaseMemoryProvider:
             bound=True, fresh=fresh, detail=detail, project=resolved,
             cbm_head_sha=binding.head_sha, sot_head_sha=sot_head,
             branch=binding.branch, stale_paths=tuple(stale_paths),
+            dirty=dirty, dirty_fingerprint=fingerprint,
         )
 
     def ensure_index(self, request: IndexRequest) -> ProviderRunRecord:

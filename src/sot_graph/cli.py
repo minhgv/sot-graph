@@ -816,6 +816,48 @@ def _envelope_fed_kwargs(db: Database, fed: dict) -> dict:
         "conflicts_detected": fed["conflicts"],
     }
 
+def _assured_query_context(
+    db: Database, root: str, cited_paths
+) -> tuple[dict, list[str]]:
+    """P1.b/P1.c/P1.e shared pre-query assurance for builtin read paths.
+
+    Captures the common worktree snapshot descriptor (HEAD sha, tri-state
+    dirty flag, dirty fingerprint — read-only, no ledger write on a read
+    path) and validates every cited file against the file journal. Stale
+    files are MARKED in the evidence ledger (never deleted) so the ledger
+    can distinguish pre-change from post-change evidence.
+    """
+    from sot_graph.snapshot import capture_worktree_snapshot
+
+    snapshot = capture_worktree_snapshot(root)
+    unique = sorted({str(p) for p in cited_paths if p})
+    stale = db.stale_journal_files(unique, root=root) if unique else []
+    if stale:
+        try:
+            marked = db.mark_evidence_stale(
+                stale, reason="journal mismatch: file changed since last reconcile"
+            )
+            if marked:
+                print(
+                    f"  ⚠ Marked {marked} evidence row(s) stale "
+                    f"({len(stale)} file(s) changed since last reconcile)",
+                    file=sys.stderr,
+                )
+        except Exception as exc:  # pragma: no cover - ledger marking is best-effort
+            print(f"  ⚠ Evidence invalidation failed: {exc}", file=sys.stderr)
+    return snapshot.as_dict(), stale
+
+
+def _stale_files_warning(stale: list[str]) -> str | None:
+    if not stale:
+        return None
+    shown = ", ".join(stale[:5]) + ("…" if len(stale) > 5 else "")
+    return (
+        f"{len(stale)} cited file(s) changed since last reconcile ({shown}); "
+        "run 'sot reconcile' — evidence for these paths is UNVERIFIABLE until then"
+    )
+
+
 
 def cmd_providers_sync(args: argparse.Namespace, root: str) -> int:
     """Explicit-only index sync: P1 abstains, printing the honest next action."""
@@ -861,6 +903,9 @@ def cmd_explore(args: argparse.Namespace, db: Database, root: str = ".") -> int:
         print(f"❌ {fed['fail_message']}", file=sys.stderr)
         return 2
     relations = db.explore_node(node_id, depth=args.depth)
+    snapshot_dict, stale = _assured_query_context(
+        db, root, [path] + [r.get("path") for r in relations]
+    )
 
     if getattr(args, "json", False):
         import json
@@ -880,6 +925,8 @@ def cmd_explore(args: argparse.Namespace, db: Database, root: str = ".") -> int:
             "relations_count": len(relations),
             "hop_summary": hop_summary,
             "relations": relations,
+            "snapshot": snapshot_dict,
+            "stale_files": stale,
         }
         if fed is not None:
             _print_fed_warnings(fed)
@@ -892,6 +939,9 @@ def cmd_explore(args: argparse.Namespace, db: Database, root: str = ".") -> int:
 
     print(f"\n🌐 Graph Walk: [{label}] ({kind}) @ {path}:{line or 1}")
     print("=" * 80)
+    warning = _stale_files_warning(stale)
+    if warning:
+        print(f"  ⚠ {warning}")
 
     if not relations:
         print("  (No inbound or outbound connections found)")
@@ -954,8 +1004,15 @@ def cmd_usages(args: argparse.Namespace, db: Database, root: str = ".") -> int:
         return 2
 
     data = db.usages(node_id, symbol)
+    snapshot_dict, stale = _assured_query_context(
+        db, root,
+        [path] + [c.get("path") for c in data["callers"]]
+        + [r.get("path") for r in data.get("risk", [])],
+    )
     total = sum(len(c["sites"]) for c in data["callers"])
     unresolved_count = data.get("unresolved_count", len(data.get("risk", [])))
+    data["snapshot"] = snapshot_dict
+    data["stale_files"] = stale
 
     if getattr(args, "json", False):
         if fed is not None:
@@ -970,6 +1027,9 @@ def cmd_usages(args: argparse.Namespace, db: Database, root: str = ".") -> int:
     print(f"\n🔎 Usages of [{label}] ({kind}) — {total} site(s) across "
           f"{len(data['callers'])} caller(s)")
     print("=" * 80)
+    warning = _stale_files_warning(stale)
+    if warning:
+        print(f"  ⚠ {warning}")
     if not data["callers"]:
         if unresolved_count > 0:
             print(f"  ⚠ 0 confirmed usages, but {unresolved_count} UNRESOLVED/AMBIGUOUS candidate(s) exist in graph.")
@@ -1722,6 +1782,12 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
         format_diff_impact_json,
     )
 
+    from sot_graph.snapshot import capture_worktree_snapshot
+
+    # P1.g: capture PRE-change snapshot before any auto-reconcile mutates the
+    # index, and POST-change snapshot after — receipts can then prove which
+    # worktree state each half of the answer describes.
+    pre_snapshot = capture_worktree_snapshot(root, role="pre_change")
     if getattr(args, "auto_reconcile", False):
         try:
             reconciler = Reconciler(db, root)
@@ -1742,6 +1808,22 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
         staged=staged,
         working_tree=working_tree,
     )
+    post_snapshot = capture_worktree_snapshot(root, role="post_change")
+    # P1.c: every graph-derived citation must still match the journal; a
+    # file that changed since the last reconcile caps evidence trust.
+    cited = (
+        list(res.changed_files)
+        + [n.path for n in res.direct_nodes]
+        + [c.path for c in res.caller_impacts]
+    )
+    stale = db.stale_journal_files(sorted({p for p in cited if p}), root=root)
+    if stale:
+        try:
+            db.mark_evidence_stale(
+                stale, reason="journal mismatch: file changed since last reconcile"
+            )
+        except Exception:  # pragma: no cover - best-effort ledger marking
+            pass
 
     fed = federated_extras(args, root, "diff-impact", target)
     if fed is not None and fed["fail_message"]:
@@ -1753,12 +1835,26 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
             _print_fed_warnings(fed)
             payload = res.to_dict()
             payload["external_candidates"] = fed["candidates"]
-            envelope = wrap_envelope(payload, db=db, **_envelope_fed_kwargs(db, fed))
+            payload["snapshot"] = {
+                "pre_change": pre_snapshot.as_dict(),
+                "post_change": post_snapshot.as_dict(),
+            }
+            payload["stale_files"] = stale
             print(json.dumps(envelope, indent=2))
             _print_federation_notes(fed)
             return 0
         print(format_diff_impact_json(res))
+        print(
+            f"snapshot: pre {pre_snapshot.descriptor_digest} post {post_snapshot.descriptor_digest}",
+            file=sys.stderr,
+        )
         return 0
+
+    print(
+        f"_Snapshot: pre {pre_snapshot.descriptor_digest[:19]} "
+        f"(dirty={pre_snapshot.dirty}) → post {post_snapshot.descriptor_digest[:19]} "
+        f"(dirty={post_snapshot.dirty})_"
+    )
 
     md = format_diff_impact_markdown(res)
     if getattr(args, "output", None):

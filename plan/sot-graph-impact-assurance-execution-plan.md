@@ -120,27 +120,29 @@ Không evidence nào được FRESH/assured khi worktree đổi sau index/query;
 
 ### Việc
 
-- [ ] P1.a Wire dirty state vào external snapshot match: `codebase_memory.py:829-843` — khi `is_dirty()` (dùng sẵn `snapshot.py` dirty fingerprint), freshness tối đa là `STALE`/`UNVERIFIABLE` kể cả khi `head_sha` khớp; khi `paths=()` vẫn phải check dirty.
-- [ ] P1.b Snapshot chung trước mọi assured query: HEAD SHA + dirty flag + content-based dirty fingerprint + manifest digest + graph generation + snapshot ID (tái dùng `snapshots` table hiện có); gắn snapshot ID vào builtin và external runs.
-- [ ] P1.c Builtin path: `explore`/`usages`/`diff-impact` check journal hash/mtime của cited files trước khi trả kết quả (mở rộng JIT micro-reconcile hiện có của `search`).
-- [ ] P1.d TOCTOU guard trong `verify_subject` (`providers/verification.py:146-150`): capture (hash, mtime) khi query, so lại khi verify; lệch → abstain "snapshot race", không phát verdict mạnh.
-- [ ] P1.e Invalidation: edit/rename/delete làm invalidate evidence liên quan đến file đó (đánh dấu, không xóa — phục vụ P6 ledger phân biệt pre/post-change snapshot).
-- [ ] P1.f Streaming hard cap trong `proc.py`: reader drain 2 pipe theo chunk với byte cap; vượt cap → kill process group ngay (tái dùng `_kill_process_group` `proc.py:55-63`); giữ contract `RunResult` + `truncated=True`.
-- [ ] P1.g Phân biệt pre-change và post-change snapshot ID trong mọi receipt (nền cho P7).
+- [x] P1.a Dirty wire vào `snapshot_match` (`codebase_memory.py`): thêm `dirty_state()` tri-state (True/False/None-unverifiable) trong `snapshot.py`; dirty → `fresh=False` + `freshness="STALE"` **kể cả khi head_sha khớp và paths=()**; git-status fail → `fresh=False` ("unknown: unverifiable"). `SnapshotMatch` thêm field `dirty` + `dirty_fingerprint`. Blocker #1 reproduction: `tests/test_p1_snapshot_trust.py::test_matching_head_dirty_worktree_is_stale`.
+- [x] P1.b `capture_worktree_snapshot()` (`snapshot.py`) — descriptor chung (HEAD sha, tri-state dirty, sha256 dirty fingerprint, manifest digest + generation khi có conn, role, `descriptor_digest` so sánh được); read-path KHÔNG ghi DB (`snapshot_id=None`); persist qua `bind_snapshot` khi cần. `explore`/`usages` gắn `snapshot` vào envelope; external run rows đã có cột `snapshot_id` sẵn (wire active-Database vào provider thuộc P6/W1, ghi nhận trong P6).
+- [x] P1.c `db.stale_journal_files(paths, root)` (so size+mtime_ms rồi sha256 — mirror reconciler scan); wire vào `cmd_explore`, `cmd_usages`, `cmd_diff_impact` trên mọi cited file (target + relations/callers/risk; diff-impact: changed_files + direct_nodes + caller_impacts). Stale → warning + `stale_files` trong payload JSON.
+- [x] P1.d TOCTOU trong `verify_subject`: stat (size, mtime_ns) trước read + re-stat sau read; lệch → verdict mới `SNAPSHOT_RACE` (abstain). Test: fake stat giữa chừng → SNAPSHOT_RACE.
+- [x] P1.e `db.mark_evidence_stale(paths, reason)` — UPDATE `provider_evidence.invalidated_at/invalidation_reason` (columns thêm vào SCHEMA + ensure无条件 mỗi open), mark-không-xóa, idempotent; trigger từ stale-detection của P1.c. Nền cho P6 pre/post-change ledger.
+- [x] P1.f `proc.py` viết lại: `_StreamReader` (thread/pipe, `read1` 64KB chunk, buffer cap cứng) + supervisor poll 10ms — vượt cap → `_kill_process_group` **giữa chừng** (`truncated=True`, returncode thật vd -9), deadline → `timed_out=True`/returncode None. Contract `RunResult` giữ nguyên. Tests `tests/test_proc_streaming_cap.py` 5 test (flood stdout/stderr/grandchild, exact-cap boundary, small output).
+- [x] P1.g `diff-impact` capture `pre_change` snapshot TRƯỚC auto-reconcile + `post_change` SAU analysis (envelope JSON + stderr line cho plain JSON); `WorktreeSnapshot.role` ∈ {query, pre_change, post_change}. Nền cho P7 receipts.
 
 ### Test bắt buộc (từ roadmap R1)
 
-- Dirty unstaged/staged edit, untracked caller, rename, delete → không FRESH.
-- HEAD giữ nguyên nhưng file content đổi → STALE/UNVERIFIABLE (reproduction blocker #1 hiện tại).
-- Provider HEAD khớp nhưng cited path stale.
-- Output vô hạn/oversized bị kill giữa chừng, memory giữ ổn định.
-- Snapshot race: file đổi giữa query và verification → abstention.
+- Dirty unstaged/staged edit, untracked caller, rename, delete → không FRESH — `test_unstaged_staged_untracked_all_dirty`, `test_stale_journal_files_detects_edit_and_delete` (delete→stale; rename rơi vào dirty-status của P1.a).
+- HEAD giữ nguyên nhưng file content đổi → STALE/UNVERIFIABLE (reproduction blocker #1) — `test_matching_head_dirty_worktree_is_stale` + `test_dirty_unverifiable_state_caps_freshness`.
+- Provider HEAD khớp nhưng cited path stale — `test_clean_matching_head_is_fresh` (ngược) + `stale_journal_files` unit; end-to-end `test_explore_carries_snapshot_and_flags_stale`.
+- Output vô hạn/oversized bị kill giữa chừng, memory giữ ổn định — `test_proc_streaming_cap.py` (5 test, kill < 10s vs deadline 30s; buffer ≤ cap).
+- Snapshot race: file đổi giữa query và verification → abstention — `test_race_between_capture_and_verify_abstains` (SNAPSHOT_RACE).
 
-### Exit gate
+### Exit gate — receipts 2026-08-27
 
-- Zero `SUPPORTED`/`ASSURED_WITHIN_SCOPE` trên stale/unbound evidence (test rà toàn bộ verdict path).
-- Reproduction blocker #1 chuyển FRESH → STALE/UNVERIFIABLE.
-- `test_proc_process_group.py` xanh ổn định ≥5 lần chạy liên tiếp.
+- [x] Zero `SUPPORTED`/`ASSURED_WITHIN_SCOPE` trên stale/unbound evidence: dirty/stale ⇒ `fresh=False` từ cả 3 lớp (snapshot_match dirty gate, `stale_journal_files`, `SNAPSHOT_RACE` abstain).
+- [x] Reproduction blocker #1 chuyển FRESH → STALE/UNVERIFIABLE khi HEAD giữ nguyên + content đổi (`test_matching_head_dirty_worktree_is_stale`, `test_dirty_unverifiable_state_caps_freshness`).
+- [x] `test_proc_process_group.py` + streaming-cap xanh ổn định 5/5 runs liên tiếp (4.7-4.9s/run) sau bump grandchild timeout 0.6→2.0s (cùng fix class như P0.a).
+- [x] Full suite: **619 passed + 5 skipped, 0 failed** (11 test P1 trust + 5 streaming-cap mới).
+
 
 ## P2 — Shared assurance orchestrator (R2)
 

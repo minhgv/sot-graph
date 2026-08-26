@@ -9,20 +9,33 @@ reported as data instead of raised exceptions, so provider adapters can treat
 - ``timeout_seconds`` kills the whole process group on deadline
   (``timed_out=True``); the child is spawned in its own session so
   grandchildren never outlive the deadline.
-- Output larger than ``max_output_bytes`` is trimmed post-completion
-  (``truncated=True``); the process is never killed mid-stream for size.
+- Output is drained incrementally from both pipes with a hard per-stream
+  byte cap: the moment a stream exceeds ``max_output_bytes`` the process
+  group is SIGKILLed mid-stream (``truncated=True``). Memory stays bounded
+  regardless of how much the child produces.
 """
 from __future__ import annotations
 
 import os
 import signal
 import subprocess
+import threading
+import time
 from dataclasses import dataclass
 
 __all__ = ["RunResult", "run_command"]
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
 DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024
+
+#: Drain chunk size for the pipe reader threads.
+_READ_CHUNK = 65536
+
+#: Main-loop poll interval while waiting for exit / cap / deadline.
+_POLL_INTERVAL_SECONDS = 0.01
+
+#: Grace period to join reader threads after the child died (pipes EOF).
+_JOIN_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -38,18 +51,10 @@ class RunResult:
     error: str | None  # Short description of FileNotFoundError/OSError
 
 
-def _decode(data: bytes | None) -> bytes:
-    return data or b""
-
-
 def _short_error(exc: BaseException) -> str:
     text = str(exc).strip()
     name = type(exc).__name__
     return f"{name}: {text}" if text else name
-
-#: Extra seconds granted to reap output after the deadline kill, so buffered
-#: stdout/stderr produced before termination is still reported.
-_REAP_TIMEOUT_SECONDS = 5.0
 
 
 def _kill_process_group(proc: subprocess.Popen) -> None:
@@ -61,6 +66,56 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
         except (ProcessLookupError, PermissionError, OSError):
             pass  # already gone or unreachable; fall through to proc.kill()
     proc.kill()
+
+
+class _StreamReader:
+    """Drain one pipe into a capped buffer, signaling overflow immediately.
+
+    The reader never stores more than ``cap`` bytes; once the stream has
+    PRODUCED more than ``cap`` bytes it sets ``overflow`` so the supervisor
+    can kill the process group mid-stream.
+    """
+
+    def __init__(self, stream, cap: int, overflow: threading.Event) -> None:
+        self._stream = stream
+        self._cap = cap
+        self._buf = bytearray()
+        self._lock = threading.Lock()
+        self._overflow = overflow
+        self.exceeded_cap = False  # stream produced strictly more than cap
+
+    def start(self) -> threading.Thread:
+        thread = threading.Thread(target=self._drain, daemon=True)
+        thread.start()
+        return thread
+
+    def _drain(self) -> None:
+        try:
+            read1 = self._stream.read1  # BufferedReader; raises AttributeError on raw pipes
+        except AttributeError:
+            read1 = self._stream.read
+        try:
+            while True:
+                try:
+                    chunk = read1(_READ_CHUNK)
+                except (OSError, ValueError):
+                    return  # pipe closed or process gone
+                if not chunk:
+                    return  # EOF
+                with self._lock:
+                    room = self._cap - len(self._buf)
+                    if room > 0:
+                        self._buf.extend(chunk[:room])
+                    if len(chunk) > room:
+                        self.exceeded_cap = True
+                        self._overflow.set()
+                        return  # cap reached; supervisor kills the process
+        except Exception:  # pragma: no cover - reader must never crash the supervisor
+            return
+
+    def data(self) -> bytes:
+        with self._lock:
+            return bytes(self._buf)
 
 
 def run_command(
@@ -76,14 +131,17 @@ def run_command(
     Args:
         argv: Argument vector executed directly (no shell interpolation).
         cwd: Working directory; may contain spaces or non-ASCII characters.
-        timeout_seconds: Wall-clock budget; expiry kills the process.
-        max_output_bytes: Per-stream byte cap applied after completion.
+        timeout_seconds: Wall-clock budget; expiry kills the process group.
+        max_output_bytes: Hard per-stream byte cap enforced WHILE streaming;
+            overflow kills the process group immediately (``truncated=True``).
         env_extra: Extra environment variables merged over ``os.environ``.
 
     Returns:
         A :class:`RunResult`. ``returncode is None`` plus a populated
         ``error`` means the process never started; ``timed_out=True`` means
-        the deadline killed it; ``truncated=True`` means output was cut.
+        the deadline killed it; ``truncated=True`` means a stream exceeded
+        the cap and the process was killed mid-stream, with the first
+        ``max_output_bytes`` bytes retained.
     """
     frozen_argv = tuple(str(part) for part in argv)
     env: dict[str, str] | None = None
@@ -93,7 +151,7 @@ def run_command(
 
     try:
         # start_new_session detaches the child into its own process group so a
-        # timeout can SIGKILL grandchildren too (no orphaned helpers).
+        # timeout/cap kill can SIGKILL grandchildren too (no orphaned helpers).
         proc = subprocess.Popen(  # noqa: S603 - argv is caller-controlled, shell is never used
             list(frozen_argv),
             cwd=None if cwd is None else os.fspath(cwd),
@@ -113,38 +171,49 @@ def run_command(
             error=_short_error(exc),
         )
 
+    overflow = threading.Event()
+    stdout_reader = _StreamReader(proc.stdout, max_output_bytes, overflow)
+    stderr_reader = _StreamReader(proc.stderr, max_output_bytes, overflow)
+    stdout_thread = stdout_reader.start()
+    stderr_thread = stderr_reader.start()
+
+    timed_out = False
+    truncated = False
+    deadline = time.monotonic() + timeout_seconds
     try:
-        stdout_bytes, stderr_bytes = proc.communicate(timeout=timeout_seconds)
-    except subprocess.TimeoutExpired as exc:
-        _kill_process_group(proc)
+        while proc.poll() is None:
+            if time.monotonic() >= deadline:
+                timed_out = True
+                _kill_process_group(proc)
+                break
+            if overflow.is_set():
+                truncated = True
+                _kill_process_group(proc)
+                break
+            time.sleep(_POLL_INTERVAL_SECONDS)
+    finally:
         try:
-            stdout_bytes, stderr_bytes = proc.communicate(timeout=_REAP_TIMEOUT_SECONDS)
-        except (subprocess.TimeoutExpired, OSError):  # pragma: no cover - pathological reaper hang
-            stdout_bytes, stderr_bytes = _decode(exc.stdout), _decode(exc.stderr)
-        return RunResult(
-            argv=frozen_argv,
-            returncode=None,
-            stdout=stdout_bytes.decode("utf-8", errors="replace"),
-            stderr=stderr_bytes.decode("utf-8", errors="replace"),
-            timed_out=True,
-            truncated=False,
-            error=None,
-        )
+            proc.wait(timeout=_JOIN_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:  # pragma: no cover - pathological reaper hang
+            _kill_process_group(proc)
+            proc.wait(timeout=_JOIN_TIMEOUT_SECONDS)
+        stdout_thread.join(timeout=_JOIN_TIMEOUT_SECONDS)
+        for stream in (proc.stdout, proc.stderr):
+            if stream is None:
+                continue
+            try:
+                stream.close()
+            except OSError:
+                pass
 
-
-    stdout_bytes = _decode(stdout_bytes)
-    stderr_bytes = _decode(stderr_bytes)
-    truncated = len(stdout_bytes) > max_output_bytes or len(stderr_bytes) > max_output_bytes
-    if truncated:
-        stdout_bytes = stdout_bytes[:max_output_bytes]
-        stderr_bytes = stderr_bytes[:max_output_bytes]
+    truncated = truncated or stdout_reader.exceeded_cap or stderr_reader.exceeded_cap
 
     return RunResult(
         argv=frozen_argv,
-        returncode=int(proc.returncode),
-        stdout=stdout_bytes.decode("utf-8", errors="replace"),
-        stderr=stderr_bytes.decode("utf-8", errors="replace"),
-        timed_out=False,
+        returncode=None if timed_out else int(proc.returncode),
+        stdout=stdout_reader.data().decode("utf-8", errors="replace"),
+        stderr=stderr_reader.data().decode("utf-8", errors="replace"),
+        timed_out=timed_out,
         truncated=truncated,
         error=None,
     )

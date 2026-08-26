@@ -25,6 +25,7 @@ __all__ = [
     "MISSING",
     "AMBIGUOUS",
     "NOT_APPLICABLE",
+    "SNAPSHOT_RACE",
     "DEFINING_KINDS",
     "VerificationOutcome",
     "verify_subject",
@@ -37,7 +38,10 @@ SPAN_MISMATCH = "SPAN_MISMATCH"
 MISSING = "MISSING"
 AMBIGUOUS = "AMBIGUOUS"
 NOT_APPLICABLE = "NOT_APPLICABLE"
-
+#: The file changed on disk between capture and verification (P1.d) — the
+#: read may straddle a write, so the verdict would describe a torn snapshot.
+#: Abstain instead of guessing.
+SNAPSHOT_RACE = "SNAPSHOT_RACE"
 #: Kinds for which a definition-shaped line is required to count an
 #: occurrence as *the* definition of the symbol.
 DEFINING_KINDS = frozenset({"function", "method", "class"})
@@ -144,11 +148,32 @@ def verify_subject(subject: Any, repo_root: str) -> VerificationOutcome:
     if not os.path.isfile(resolved):
         return VerificationOutcome(MISSING, f"source file no longer exists: {path}")
 
+    # P1.d TOCTOU guard: capture the stat identity before reading and
+    # re-check after; a mismatch means the file was rewritten mid-verify and
+    # any verdict computed from this read describes a torn snapshot.
+    def _stat_key(p: str) -> tuple[int, int] | None:
+        try:
+            st = os.stat(p)
+            mtime_ns = getattr(st, "st_mtime_ns", None)
+            if mtime_ns is None:  # exotic stat_result without ns slots
+                mtime_ns = int(st.st_mtime * 1_000_000_000)
+            return (int(st.st_size), int(mtime_ns))
+        except OSError:
+            return None
+    before_stat = _stat_key(resolved)
+    if before_stat is None:
+        return VerificationOutcome(MISSING, f"source file unreadable: {path}")
     try:
         with open(resolved, "r", encoding="utf-8", errors="replace") as fh:
             lines = fh.readlines()
     except OSError as exc:
         return VerificationOutcome(MISSING, f"unreadable source {path}: {exc}")
+    after_stat = _stat_key(resolved)
+    if after_stat is None or after_stat != before_stat:
+        return VerificationOutcome(
+            SNAPSHOT_RACE,
+            f"file changed while verifying (snapshot race): {path}",
+        )
 
     try:
         start, end = int(start_line), int(end_line if end_line is not None else start_line)
