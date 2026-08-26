@@ -5,7 +5,10 @@ from __future__ import annotations
 import dataclasses
 import os
 import sys
-import tomllib
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # Python 3.10 — mirror sot_graph.config's tomli fallback
+    import tomli as tomllib
 from pathlib import Path
 
 import pytest

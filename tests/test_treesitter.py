@@ -1,6 +1,7 @@
 """Phase 5: tree-sitter AST extractors (Go/Rust/Java/Kotlin/Swift/PHP/TypeScript/JavaScript/Python/C#)."""
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -136,7 +137,7 @@ export const helper = (x) => x + 1;
 '''),
     "python": (".py", '''from typing import Optional
 
-type UserIdentifier = str | int
+UserIdentifier = str | int  # PEP 604 alias: ast-parseable on 3.10+ (PEP 695 covered below)
 
 class BaseHandler:
     pass
@@ -179,7 +180,7 @@ EXPECTED_NODES = {
     "php": ["PaymentStatus", "PaymentService", "PaymentService.process"],
     "typescript": ["IUserService", "UserId", "UserRole", "UserService", "UserService.find", "UserService.fetchUser", "calculateTax"],
     "javascript": ["ApiClient", "ApiClient.request", "ApiClient.send", "helper"],
-    "python": ["UserIdentifier", "BaseHandler", "AuthHandler", "AuthHandler.authenticate", "AuthHandler.verify"],
+    "python": ["BaseHandler", "AuthHandler", "AuthHandler.authenticate", "AuthHandler.verify"],
     "c_sharp": ["IOrderService", "OrderDto", "OrderService", "OrderService.SubmitAsync", "OrderService.ProcessAsync"],
 }
 
@@ -324,6 +325,25 @@ public class GenericRepo extends java.util.AbstractMap<String, String>
         found = {(s, d, r) for s, d, r in pending_rel | edge_rel
                  if r in ("extends", "implements")}
         self.assertIn(("AuthHandler", "BaseHandler", "extends"), found)
+
+    def test_python_pep695_type_alias_extracted(self):
+        """PEP 695 `type` statements extract as class-kind symbols (3.12+ only)."""
+        if not LANGS.get("python"):
+            self.skipTest("grammar for python not installed")
+        if sys.version_info < (3, 12):
+            self.skipTest("verifier ast.parse lacks PEP 695 support before 3.12")
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        root = Path(directory)
+        (root / "src").mkdir()
+        target = root / "src" / "sample_pep695.py"
+        target.write_text(
+            "type UserIdentifier = str | int\n",
+            encoding="utf-8",
+        )
+        parsed = parse_file_graph(str(target), str(root))
+        ids = {n["symbol"] for n in parsed["nodes"] if n["kind"] != "file"}
+        self.assertIn("UserIdentifier", ids)
 
     def test_go_method_qualified_by_receiver_type(self):
         if not LANGS.get("go"):
