@@ -45,7 +45,8 @@ class TestOMPIntegrationScenarios(unittest.TestCase):
             cwd=str(REPO_ROOT),
             env=self.env,
             capture_output=True,
-            text=True,
+            encoding="utf-8",  # the CLI reconfigures its streams to UTF-8
+            errors="replace",  # on every platform; never locale-decode them
         )
         if check and proc.returncode != 0:
             self.fail(f"sot command failed: {' '.join(cmd)}\nStdout: {proc.stdout}\nStderr: {proc.stderr}")

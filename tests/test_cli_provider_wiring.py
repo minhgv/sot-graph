@@ -21,6 +21,15 @@ from sot_graph.reconciler import Reconciler
 PY = sys.executable
 
 
+# These tests discover the fake CBM binary through PATH by bare name; on
+# Windows CreateProcess only auto-appends .exe for bare names, so the .cmd
+# fake cannot be spawned there. Adapter spawn behavior stays covered
+# cross-platform by tests/test_cbm_adapter.py (absolute command paths).
+requires_path_spawned_cbm = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="PATH-discovered bare-name fakes need PE executables on Windows",
+)
+
 def make_exe(directory: Path, name: str, body: str) -> str:
     if os.name == "nt":
         # CreateProcess cannot exec shebang scripts; install a .cmd wrapper
@@ -228,6 +237,7 @@ TRACE_REPORT = (
 
 
 class TestMergeOrderAndVerdict:
+    @requires_path_spawned_cbm
     def test_candidates_after_builtin_with_ceiling_and_provider_tag(
         self, repo, bin_dir, monkeypatch, capsys
     ):
@@ -253,6 +263,7 @@ class TestMergeOrderAndVerdict:
         assert "codebase-memory" in out["coverage"]
         assert out["known_gaps"], "snapshot-binding gap must be declared"
 
+    @requires_path_spawned_cbm
     def test_target_mismatch_recorded_as_conflict(
         self, repo, bin_dir, monkeypatch, capsys
     ):
@@ -286,6 +297,7 @@ class TestMergeOrderAndVerdict:
 
 
 class TestTruncationPropagation:
+    @requires_path_spawned_cbm
     def test_has_more_sets_truncated_true(self, repo, bin_dir, monkeypatch, capsys):
         allow_external(repo, True)
         # symbols-only capabilities force the search_symbols method
@@ -328,6 +340,7 @@ class TestProvidersSync:
 
 
 class TestRegistryAdapterProbe:
+    @requires_path_spawned_cbm
     def test_codebase_memory_probed_via_adapter(self, repo, bin_dir, monkeypatch):
         from sot_graph.config import load_config
         from sot_graph.providers_registry import detect_providers
