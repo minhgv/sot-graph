@@ -80,6 +80,8 @@ def search(q: str):
         "SELECT src, dst FROM graph_edges WHERE relation = 'calls'"
     ).fetchall()
     assert not any("execute_query" in src and "search" in dst for src, dst in resolved_calls)
+    db.close()  # release sot.db before TemporaryDirectory cleanup (Windows)
+
 def test_import_alias_resolution(temp_workspace: Path):
     """Verify that imported aliases correctly resolve to the actual target symbol."""
     (temp_workspace / "math_lib.py").write_text('''
@@ -106,6 +108,7 @@ def run_metric():
     # Check that the call resolved to calculate_metric
     assert any(dst == "calculate_metric" or "calculate_metric" in dst for src, dst, rel in edges)
 
+    db.close()
 
 def test_relative_import_and_reexport_resolution(temp_workspace: Path):
     """Verify multi-level relative imports and __init__.py re-exports."""
@@ -145,6 +148,7 @@ def entrypoint():
     # entrypoint calling do_heavy_work should be resolved
     assert any("do_heavy_work" in dst for src, dst, rel in edges)
 
+    db.close()
 
 def test_mro_and_receiver_inheritance_resolution(temp_workspace: Path):
     """Verify receiver method calls across class inheritance hierarchies (MRO)."""
@@ -171,3 +175,4 @@ class UserRepository(BaseRepository):
         "UserRepository.find_user" in src and "execute" in dst
         for src, dst, rel in edges
     )
+    db.close()
