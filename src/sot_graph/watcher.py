@@ -296,13 +296,37 @@ def run_watch_multi(
 # -----------------------------------------------------------------------------
 
 def is_pid_alive(pid: int) -> bool:
-    """Check if a process with given PID is currently active."""
+    """Return True when *pid* names a live process.
+
+    On Windows ``os.kill(pid, 0)`` does NOT probe: 0 is the numeric value
+    of CTRL_C_EVENT, so it broadcasts a console Ctrl+C (and any other sig
+    unconditionally terminates the target). Probe via the Win32 API
+    instead; POSIX keeps the signal-0 semantics.
+    """
     if pid <= 0:
         return False
     try:
+        if sys.platform == "win32":
+            import ctypes
+
+            process_query_limited_information = 0x1000
+            still_active = 259
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(
+                process_query_limited_information, False, pid
+            )
+            if not handle:
+                return False
+            try:
+                exit_code = ctypes.c_ulong()
+                if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                    return exit_code.value == still_active
+                return False
+            finally:
+                kernel32.CloseHandle(handle)
         os.kill(pid, 0)
         return True
-    except (OSError, ProcessLookupError):
+    except OSError:
         return False
 
 
