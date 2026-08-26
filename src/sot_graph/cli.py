@@ -1276,6 +1276,44 @@ def cmd_solution(args: argparse.Namespace, db: Database, root: str) -> int:
     print(f"Unknown solution subcommand: {sub}")
     return 1
 
+def cmd_scope_receipt(args: argparse.Namespace, db: Database, root: str) -> int:
+    """PRE-change scope receipt (P7): bounded evidence before an edit."""
+    import json
+
+    from sot_graph.assurance.receipts import scope_receipt
+
+    target = (args.target or "").strip()
+    payload = scope_receipt(
+        db, root, target,
+        depth=int(getattr(args, "depth", 2) or 2),
+        kind_of_change=getattr(args, "change_kind", "local-body"),
+        touches_auth=bool(getattr(args, "auth", False)),
+        dynamic_heavy=bool(getattr(args, "dynamic", False)),
+    )
+    if getattr(args, "json", False):
+        print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+        return 0
+    ass = payload["assurance"]
+    print(f"📋 Scope receipt — {payload['request']['target']} "
+          f"(schema v{payload['schema_version']}, digest {payload['digest'][:12]}…)")
+    print(f"   proof scope: {payload['proof_scope']} (never post-change proof)")
+    print(f"   snapshot: {(payload['snapshot'].get('commit_sha') or '?')[:12]} "
+          f"dirty={payload['snapshot'].get('dirty')} "
+          f"digest={str(payload['snapshot'].get('descriptor_digest'))[:12]}…")
+    print(f"   callers: {len(payload['direct_callers'])}  "
+          f"callees: {len(payload['direct_callees'])}  "
+          f"transitive(depth {payload['transitive_impact']['depth']}): "
+          f"{len(payload['transitive_impact']['nodes'])}")
+    print(f"   affected files: {len(payload['affected_files'])}  "
+          f"candidate tests: {len(payload['candidate_tests'])}")
+    print(f"   {payload['coverage']['note']}")
+    print(f"   assurance: {ass['status']} — {ass['risk']['rule']}")
+    if ass["rename_gate"].get("blocked"):
+        print(f"   🚫 rename gate BLOCKED: {ass['rename_gate']['reason']}")
+    for item in ass["omp_confirmations"]:
+        print(f"   ☐ {item}")
+    return 0 if ass["status"] != "BLOCKED" else 2
+
 
 def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
     from sot_graph.diff_impact import (
@@ -1927,7 +1965,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_sol_bun.add_argument("-o", "--output", default=None, help="Output file path (default: .sot/bundle/ContextBundle.md)")
     p_sol_bun.add_argument("--json", action="store_true", help="Output JSON format")
 
-    # providers
+
+    # scope-receipt (P7)
+    p_sr = subparsers.add_parser("scope-receipt", help="PRE-change bounded evidence receipt for one edit target")
+    p_sr.add_argument("target", help="Symbol to scope (e.g. 'Pipeline.process')")
+    p_sr.add_argument("--depth", type=int, default=2, help="Transitive impact walk depth (default: 2)")
+    p_sr.add_argument("--change-kind", default="local-body",
+                      choices=["local-body", "public-api", "rename", "delete"],
+                      help="Kind of change (default: local-body)")
+    p_sr.add_argument("--auth", action="store_true", help="Change touches auth/tenant logic")
+    p_sr.add_argument("--dynamic", action="store_true", help="Change is dynamic-heavy (dispatch/reflection)")
+    p_sr.add_argument("--json", action="store_true", help="Output raw JSON receipt")
     p_prov = subparsers.add_parser("providers", help="Detect, list, and diagnose evidence providers (read-only)")
     prov_subs = p_prov.add_subparsers(dest="providers_subcommand", required=True)
 
@@ -2081,6 +2129,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return cmd_be_flow(args, db)
         elif args.command == "solution":
             return cmd_solution(args, db, root)
+        elif args.command == "scope-receipt":
+            return cmd_scope_receipt(args, db, root)
         elif args.command == "diff-impact":
             return cmd_diff_impact(args, db, root)
         elif args.command in ("log", "commits"):
