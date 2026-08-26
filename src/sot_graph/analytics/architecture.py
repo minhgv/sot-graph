@@ -291,7 +291,7 @@ def detect_pattern_and_framework(
     has_fastapi = False
 
     labels_joined = " ".join([d.get("label", "") for d in graph.nodes.values()]).lower()
-    paths_joined = " ".join(all_paths).lower()
+    paths_joined = " ".join(all_paths).lower().replace("\\", "/")
 
     if "dart" in primary_lang.lower():
         if "bloc" in labels_joined or "cubit" in labels_joined or "/bloc/" in paths_joined:

@@ -95,10 +95,10 @@ def build_scip_index(db, project_root: str) -> bytes:
         "WHERE kind NOT IN ('file', 'note', 'markdown') AND path != ''"
     ).fetchall()
     for node_id, path, kind, symbol, fqn, body, line_start, line_end, col_start, col_end in rows:
-        rel = os.path.relpath(path, project_root) if os.path.isabs(path) else path
+        rel = (os.path.relpath(path, project_root) if os.path.isabs(path) else path).replace(os.sep, "/")
         ext = os.path.splitext(rel)[1].lower()
         language = _LANGUAGES.get(ext, "unknown")
-        module = (fqn or "").rsplit(".", 1)[0] if fqn and "." in (fqn or "") else os.path.splitext(rel)[0].replace(os.sep, ".")
+        module = (fqn or "").rsplit(".", 1)[0] if fqn and "." in (fqn or "") else os.path.splitext(rel)[0].replace("/", ".")
         sym = scip_symbol(language, root_uri, rel, module, symbol or node_id, kind)
         sym_strings[node_id] = sym
         node_doc[node_id] = rel

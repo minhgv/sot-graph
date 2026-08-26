@@ -218,7 +218,7 @@ class GitDeltaExtractor:
                 timeout=timeout_sec,
                 check=False,
             )
-            return proc.returncode, proc.stdout, proc.stderr
+            return proc.returncode, proc.stdout or "", proc.stderr or ""
         except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
             return -1, "", str(e)
 

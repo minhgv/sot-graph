@@ -22,7 +22,7 @@ def _display_path(path: str, root: Optional[str]) -> str:
     """Absolute journal paths are normalized so the budget is spent on code."""
     if root and os.path.isabs(path):
         try:
-            return os.path.relpath(path, root)
+            return os.path.relpath(path, root).replace(os.sep, "/")
         except ValueError:
             return path
     return path

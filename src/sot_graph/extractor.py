@@ -164,6 +164,7 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
     ext = p.suffix.lower()
     fn_name = EXT_DISPATCH.get(ext)
     rel_path = os.path.relpath(path, root_dir)
+    rel_posix = rel_path.replace(os.sep, "/")
     try:
         content_bytes = p.read_bytes()
         sha = hashlib.sha256(content_bytes).hexdigest()
@@ -187,9 +188,9 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
         "kind": "file",
         "symbol": p.name,
         "fqn": module,
-        "label": f"File: {rel_path}",
-        "body": f"File {rel_path} ({lang}, {file_size} bytes)\nPreview:\n{preview}",
-        "keywords": _decompose_keywords(p.name, p.stem, lang, "file", rel_path),
+        "label": f"File: {rel_posix}",
+        "body": f"File {rel_posix} ({lang}, {file_size} bytes)\nPreview:\n{preview}",
+        "keywords": _decompose_keywords(p.name, p.stem, lang, "file", rel_posix),
         "line_start": 1,
         "line_end": total_lines,
     }
@@ -263,7 +264,7 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
         label = rn.get("label", raw_id)
         kind = rn.get("kind", "symbol")
         doc = rn.get("doc", "")
-        body = f"{label} ({kind}) at {rel_path}:{line_no or 1}\n{doc}".strip()
+        body = f"{label} ({kind}) at {rel_posix}:{line_no or 1}\n{doc}".strip()
 
         nodes.append({
             "id": node_id,
@@ -271,7 +272,7 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
             "symbol": raw_id,
             "fqn": f"{module}.{raw_id}" if module else raw_id,
             "signature": rn.get("signature"),
-            "label": f"{label} — {rel_path}:{line_no or 1}",
+            "label": f"{label} — {rel_posix}:{line_no or 1}",
             "body": body,
             "keywords": _decompose_keywords(raw_id, rn.get("label"), kind, lang, p.name, p.stem),
             "line_start": line_no,
