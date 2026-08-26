@@ -84,7 +84,7 @@ def test_stderr_captured_when_timeout_kills(tmp_path) -> None:
         "import sys, time\nsys.stderr.write('before-sleep-marker\\n')\n"
         "sys.stderr.flush()\ntime.sleep(30)\n",
     )
-    result = run_command([str(exe)], timeout_seconds=0.5)
+    result = run_command([str(exe)], timeout_seconds=2.0)
     assert result.timed_out is True
     assert "before-sleep-marker" in result.stderr
 

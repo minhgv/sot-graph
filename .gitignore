@@ -30,6 +30,7 @@ graphify-out/
 .graphify*
 *.json
 !tests/fixtures/**/*.json
+!benchmarks/oracle/*.json
 sot_knowledge_graph.html
 sot_architecture_report.md
 GRAPH_REPORT.md

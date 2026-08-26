@@ -33,6 +33,15 @@ class GroundTruthEdge:
     src_symbol: str
     target_symbol: str
     relation: str = "calls"
+    target_file: str = ""
+    line: int = 0
+
+
+def _line_of(content: str, needle: str) -> int:
+    for idx, text in enumerate(content.splitlines(), start=1):
+        if needle in text:
+            return idx
+    raise AssertionError(f"needle {needle!r} not found")
 
 
 @dataclass
@@ -50,6 +59,10 @@ class BenchmarkResult:
 
 def generate_benchmark_corpus(root: Path) -> List[GroundTruthEdge]:
     """Populates an isolated directory with multi-pattern Python codebase."""
+    core = "pkg/core/math_ops.py"
+    engine = "pkg/internal/engine.py"
+    base = "pkg/data/base_store.py"
+
     # 1. Base calculator & helper
     (root / "pkg" / "core").mkdir(parents=True, exist_ok=True)
     (root / "pkg" / "core" / "__init__.py").write_text("", encoding="utf-8")
@@ -93,20 +106,20 @@ class BaseStore:
 """,
         encoding="utf-8",
     )
-    (root / "pkg" / "data" / "user_store.py").write_text(
+    user_store_body = (
         """\
 from .base_store import BaseStore
 
 class UserStore(BaseStore):
     def find_user(self, uid: str) -> str:
         return self.get_by_key(uid)
-""",
-        encoding="utf-8",
+"""
     )
+    (root / "pkg" / "data" / "user_store.py").write_text(user_store_body, encoding="utf-8")
 
     # 4. Service layer exercising multi-level relative imports, aliases, re-exports, MRO & typed annotations
-    (root / "pkg" / "services").mkdir(parents=True, exist_ok=True)
-    (root / "pkg" / "services" / "app_service.py").write_text(
+    svc = "pkg/services/app_service.py"
+    app_service_body = (
         """\
 from ..core.math_ops import add as sum_func, multiply as product_func
 from pkg import ExecutionEngine
@@ -122,22 +135,28 @@ def execute_pipeline(name: str):
 
 def get_user_profile(uid: str, store: UserStore) -> str:
     return store.get_by_key(uid)
-""",
-        encoding="utf-8",
+"""
     )
+    (root / "pkg" / "services").mkdir(parents=True, exist_ok=True)
+    (root / svc).write_text(app_service_body, encoding="utf-8")
 
-    # Ground Truth expected edges
+    # Ground Truth expected edges — exact identity (src, relation, target,
+    # target file) + exact call-site span. Multiple call sites of one pair
+    # collapse to one graph_edges row; a group is a TP iff the stored line is
+    # one of the true call lines.
     return [
-        # Relative import + alias inside process_order
-        GroundTruthEdge("pkg/services/app_service.py", "process_order", "multiply", "calls"),
-        GroundTruthEdge("pkg/services/app_service.py", "process_order", "add", "calls"),
-        # Re-export + constructor inside execute_pipeline
-        GroundTruthEdge("pkg/services/app_service.py", "execute_pipeline", "ExecutionEngine", "calls"),
-        GroundTruthEdge("pkg/services/app_service.py", "execute_pipeline", "ExecutionEngine.run_job", "calls"),
-        # Inheritance / MRO inside UserStore.find_user
-        GroundTruthEdge("pkg/data/user_store.py", "UserStore.find_user", "BaseStore.get_by_key", "calls"),
-        # Typed parameter receiver inside get_user_profile
-        GroundTruthEdge("pkg/services/app_service.py", "get_user_profile", "BaseStore.get_by_key", "calls"),
+        GroundTruthEdge(svc, "process_order", "multiply", "calls", core,
+                        _line_of(app_service_body, "subtotal = product_func")),
+        GroundTruthEdge(svc, "process_order", "add", "calls", core,
+                        _line_of(app_service_body, "return sum_func(subtotal, tax)")),
+        GroundTruthEdge(svc, "execute_pipeline", "ExecutionEngine", "calls", engine,
+                        _line_of(app_service_body, "engine = ExecutionEngine()")),
+        GroundTruthEdge(svc, "execute_pipeline", "ExecutionEngine.run_job", "calls", engine,
+                        _line_of(app_service_body, "return engine.run_job(name)")),
+        GroundTruthEdge("pkg/data/user_store.py", "UserStore.find_user", "BaseStore.get_by_key",
+                        "calls", base, _line_of(user_store_body, "return self.get_by_key(uid)")),
+        GroundTruthEdge(svc, "get_user_profile", "BaseStore.get_by_key", "calls", base,
+                        _line_of(app_service_body, "return store.get_by_key(uid)")),
     ]
 
 
@@ -159,10 +178,10 @@ def run_benchmark(
         reconciler = Reconciler(db, str(root_path))
         reconciler.reconcile()
 
-        # Query all resolved edges
+        # Query all resolved edges with exact identity + span
         resolved_rows = db.conn.execute(
             """
-            SELECT e.path, n1.symbol, n2.symbol, e.relation
+            SELECT e.path, e.relation, e.line, n1.symbol, n2.symbol, n2.path
             FROM graph_edges e
             JOIN graph_nodes n1 ON e.src = n1.id
             JOIN graph_nodes n2 ON e.dst = n2.id
@@ -170,38 +189,51 @@ def run_benchmark(
             """
         ).fetchall()
 
-        resolved_set: Set[Tuple[str, str, str]] = set()
-        for r_path, src_sym, dst_sym, _rel in resolved_rows:
-            # Normalize rel_path
-            rel_file = os.path.relpath(r_path, str(root_path))
-            resolved_set.add((rel_file, src_sym, dst_sym))
+        resolved_set: Dict[Tuple[str, str, str, str, str], Optional[int]] = {}
+        for r_path, _rel, r_line, src_sym, dst_sym, dst_path in resolved_rows:
+            rel_file = os.path.relpath(r_path, str(root_path)).replace("\\", "/")
+            rel_dst = os.path.relpath(dst_path, str(root_path)).replace("\\", "/")
+            resolved_set[(rel_file, src_sym, dst_sym, rel_dst, "calls")] = r_line
+
+        # Group GT by exact identity; span = set of true call lines
+        groups: Dict[Tuple[str, str, str, str, str], Set[int]] = {}
+        for gt in ground_truth:
+            key = (gt.src_file, gt.src_symbol, gt.target_symbol, gt.target_file, gt.relation)
+            groups.setdefault(key, set()).add(gt.line)
 
         tp = 0
         fn = 0
         matched_gt = []
         missed_gt = []
-
-        for gt in ground_truth:
-            key = (gt.src_file, gt.src_symbol, gt.target_symbol)
-            if key in resolved_set:
+        span_mismatches = []
+        for key, true_lines in groups.items():
+            db_line = resolved_set.get(key)
+            if db_line is not None and db_line in true_lines:
                 tp += 1
-                matched_gt.append(asdict(gt))
+                matched_gt.append(key)
             else:
                 fn += 1
-                missed_gt.append(asdict(gt))
+                missed_gt.append(key)
+                if db_line is not None:
+                    span_mismatches.append({"key": key, "db_line": db_line,
+                                            "expected_lines": sorted(true_lines)})
 
-        # False positives: resolved call edges in our test corpus that are not in GT
-        # Note: only consider call edges originating from our test functions
+        # False positives: resolved call edges from GT-covered sources that are
+        # not in GT (exact identity, any line).
         gt_src_keys = {(gt.src_file, gt.src_symbol) for gt in ground_truth}
         fp = 0
         unexpected_edges = []
-        for rel_file, src_sym, dst_sym in resolved_set:
-            if (rel_file, src_sym) in gt_src_keys:
-                if (rel_file, src_sym, dst_sym) not in {(gt.src_file, gt.src_symbol, gt.target_symbol) for gt in ground_truth}:
-                    fp += 1
-                    unexpected_edges.append({"file": rel_file, "src": src_sym, "target": dst_sym})
+        for key, db_line in resolved_set.items():
+            if (key[0], key[1]) not in gt_src_keys:
+                continue
+            if key in groups:
+                continue
+            fp += 1
+            unexpected_edges.append({"file": key[0], "src": key[1],
+                                     "target": key[2], "target_file": key[3],
+                                     "line": db_line})
 
-        total_gt = len(ground_truth)
+        total_gt = len(groups)
         precision = tp / (tp + fp) if (tp + fp) > 0 else 1.0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
@@ -219,8 +251,9 @@ def run_benchmark(
             recall=recall,
             f1_score=f1,
             details={
-                "matched_ground_truth": matched_gt,
-                "missed_ground_truth": missed_gt,
+                "matched_groups": [list(k) for k in matched_gt],
+                "missed_groups": [list(k) for k in missed_gt],
+                "span_mismatches": span_mismatches,
                 "unexpected_edges": unexpected_edges,
                 "min_precision_threshold": min_precision,
                 "min_recall_threshold": min_recall,

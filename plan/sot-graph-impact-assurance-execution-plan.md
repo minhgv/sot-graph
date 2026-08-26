@@ -14,7 +14,7 @@
 |---|---|---|
 | CLI/wheel/sdist/MCP smoke chạy được | CONFIRMED | G0 receipts; `sot 0.3.0` từ wheel+sdist |
 | 13/13 CI jobs xanh (py 3.10–3.12 × 3 OS) | CONFIRMED | `.github/workflows/ci.yml` = 1 lint + 9 test + 3 package-smoke + 1 release (không tag → không chạy) |
-| Full local suite "595 passed" | **REFUTED (số sai)** | Thực tế `595` là TỔNG: **589 passed + 1 failed + 5 skipped** (`pytest -q` 63.5s). Test fail `test_proc_process_group.py::test_stderr_captured_when_timeout_kills` là flaky timing: budget `timeout_seconds=0.5` (`tests/test_proc_process_group.py:87`) bị cold-start interpreter vượt dưới tải; pass khi chạy đơn lẻ |
+| Full local suite "595 passed" | **REFUTED (số sai)** | Thực tế `595` là TỔNG: 589 passed + 1 failed + 5 skipped. **Đã fix P0.a**: sau bump timeout, 595 = **590 passed + 5 skipped, 0 failed × 3 runs liên tiếp** (2026-08-26) |
 | Line coverage ~80% | NOT-VERIFIABLE-FROM-REPO | `pyproject.toml:139-146` không có `--cov`/`[tool.coverage]`; không artifact. Con số chỉ xuất hiện trong doc plan cũ |
 | Golden CBM 0.10.8 + capture receipts | CONFIRMED | `tests/fixtures/cbm_golden/_meta.json` — đủ 11 keys gồm `source_commit`, `os_arch`, `capture_command_digest`, `fixture_repo_digest` (G1.3 đã bổ sung xong) |
 | Adapter argv-only/args-file/timeout/killpg/redaction/version gate | CONFIRMED | `src/sot_graph/proc.py:66-150`; `providers/codebase_memory.py:378-450` |
@@ -27,7 +27,7 @@
 |---|---|---|---|
 | 1 | Dirty edit vẫn FRESH nếu HEAD khớp | CONFIRMED | `providers/codebase_memory.py:829-843` chỉ so `head_sha`; khi `paths=()` không gọi `is_dirty()`. Builtin `explore`/`usages` đọc SQLite không check dirty/hash (`cli.py:850-865`). **Lưu ý: snapshots table ĐÃ có dirty flag + sha256 dirty_fingerprint** (`snapshot.py:61-67`) — data model sẵn, chỉ thiếu wiring |
 | 2 | Benchmark không match đúng tuple | CONFIRMED | `scripts/benchmark_accuracy.py:165-201` match 3-tuple `(file, src, target)`, bỏ `relation` + span |
-| 3 | Oracle TS 61,5% / Go 41,7% | **NOT-FOUND-IN-REPO** | Evaluator đa ngôn ngữ có (`scripts/sot_evaluator.py`) nhưng KHÔNG có artifact/số liệu nào trong repo — phải đo lại ở P0 và commit machine-readable |
+| 3 | Oracle TS 61,5% / Go 41,7% | **MEASURED (P0.e)** | Exact oracle v2.0.0 trên corpus độc lập: TS **60,4%** / Go **40,9%** recall — xác nhận gần đúng claim roadmap. Rust phát hiện mới: R **2,3%**. `benchmarks/oracle/builtin-baseline.json` |
 | 4 | CBM text parser mất semantic fields | CONFIRMED | S1/S2/S3/S7 remediation plan (đã verify 2026-08-26) |
 | 5 | diff-impact không truyền target/depth/staged/worktree | CONFIRMED | S4 — `cli.py:383` |
 | 6 | Coverage chỉ là cờ `queried` | CONFIRMED | S5 — `cli.py:703,717` |
@@ -43,7 +43,7 @@
 
 - Test flaky stderr-capture (mục 1.1) — phải fix trước khi baseline P0 có ý nghĩa.
 - `snapshots` schema đã có dirty fingerprint → R1 nhẹ hơn roadmap dự đoán: chủ yếu là wiring + so sánh, không phải thiết kế schema mới.
-- Số "595 passed" phải sửa thành 589+1+5 tại thời điểm lập plan; sau khi fix flaky, commit lại baseline thật.
+- ~~Số "595 passed" phải sửa~~ Đã sửa: baseline thật 590+5 (P0.a, 3 runs). Số liệu oracle thật đã commit machine-readable (P0.e).
 
 ## 2. Thứ tự phase và mapping hai plan cũ
 
@@ -92,13 +92,14 @@ Thay proxy-test bằng evaluator phát hiện sai caller/target thật. Mọi co
 
 ### Việc
 
-- [ ] P0.a Vệ sinh baseline: fix flaky `test_stderr_captured_when_timeout_kills` (bump `timeout_seconds` 0.5→2.0 tại `tests/test_proc_process_group.py:87`; giữ nguyên kỳ vọng marker); chạy full suite 3 lần liên tiếp không fail; ghi lại baseline thật vào §1.1 plan này.
-- [ ] P0.b Chuyển oracle sang exact 6-tuple `(repo, path, source identity, relation, target identity, span)`: nâng cấp `scripts/sot_evaluator.py`; sửa/xóa match 3-tuple tại `scripts/benchmark_accuracy.py:165-201`; đổi tên metric sai semantics.
-- [ ] P0.c Xây 3 tập corpus: positive closed-world, negative/adversarial, dynamic/unsupported. Case bắt buộc mỗi language: same-name symbols ở 2 scope, alias import, shadowing, nested scope, overload, virtual/interface dispatch, reflection, DI, macros, function pointers, generated/excluded file, caller ngoài module.
-- [ ] P0.d Corpus tối thiểu 5 ngôn ngữ Tier-A: Python, TypeScript/JS, Go, Rust, Java.
-- [ ] P0.e Đo builtin per language × relation; reproduce/bác 2 con số roadmap TS 61,5% / Go 41,7% (hiện NOT-FOUND-IN-REPO); commit kết quả machine-readable `benchmarks/oracle/builtin-baseline.json` + freeze oracle version + corpus digest.
-- [ ] P0.f Thêm top-k symbol-search oracle (gold target trong top-k, k ∈ {1,5,10}).
-- [ ] P0.g Đo được provider riêng (CBM) khi binary 0.10.8 có sẵn — optional job, không chặn gate.
+- [x] P0.a Vệ sinh baseline: fix flaky `test_stderr_captured_when_timeout_kills` (bump `timeout_seconds` 0.5→2.0 tại `tests/test_proc_process_group.py:87`); full suite 3 lần liên tiếp **0 failed**: 590 passed + 5 skipped (61.65s / 52.87s / 53.56s) — receipt 2026-08-26.
+- [x] P0.b Oracle exact 6-tuple `(repo, path, src identity, relation, dst identity, span)`: viết lại `scripts/sot_evaluator.py` v2.0.0 (matching group-aware vì PK `(path,src,dst,relation)` collapse nhiều call-site; FN ladder: span_mismatch → identity_unqualified → wrong_target_same_bare_name → wrong_relation → pending_unresolved → edge_absent; legacy 3-tier matcher giữ lại CHỈ làm diagnostic `legacy_loose_recall_diagnostic`). `scripts/benchmark_accuracy.py` chuyển sang exact identity+span (6/6 TP, P=R=1.0 trên corpus Python).
+- [x] P0.c Corpus 3 tập polarity: static_positive (910→1012 sau khi thêm constructor-call) / static_negative (110) / dynamic_positive (26, claim optional — never merged vào static P/R). Đủ 12 case bắt buộc: same-name 2 scope, alias import, shadowing (param/local/for-target), nested scope, overload, virtual/interface dispatch, reflection, DI, macros, function pointers, generated file, caller ngoài module.
+- [x] P0.d 5 ngôn ngữ Tier-A: Python, TypeScript, Go, Rust, Java — 234 files, corpus digest sha256 frozen trong baseline JSON.
+- [x] P0.e `benchmarks/oracle/builtin-baseline.json` commit: overall P 99.2% / R 69.4% / F1 81.6%; per-language: python 99.7/99.7, java 100/98.5, typescript 98.5/**60.4**, go 98.5/**40.9**, rust 60.0/**2.3**. **Xác nhận 2 con số roadmap**: TS 60.4% ≈ claim 61.5%, Go 40.9% ≈ claim 41.7% (mặc dù corpus mới độc lập). Phát hiện mới ngoài roadmap: Rust impl-block gần như mất hết cạnh (R 2.3%); resolver bind cross-language (Go `Stage.Process→normalizeStage` vào node TypeScript); 3 false positive thật trên bẫy same-name-two-scopes (py/ts/rust).
+- [x] P0.f Top-k symbol-search oracle k∈{1,5,10} trên `search_fts`: hit@1 50%, hit@5 75%, hit@10 85% (20 probes: 12 unique + 8 ambiguous, tách riêng trong JSON).
+- [x] P0.g CBM probe (binary 0.10.8 có sẵn tại `~/.local/bin/codebase-memory-mcp`): `benchmarks/oracle/cbm-probe.json` — exploratory sample (hop-1 callees, qualified-name level, không check được span qua trace_path); CBM resolve đúng `run_pipeline→Pipeline.process` và CẢ HAI `Doc.save`/`Blob.save` Rust mà builtin sai/thiếu.
+- [x] P0 test bắt buộc: `tests/test_oracle_selfcheck.py` 13 test — synthetic discrimination (wrong-target ≠ TP; bare-name khác cạnh ≠ recall, legacy loose đếm được chính cạnh đó = chứng minh phân biệt; span mismatch; call-site collapse; negative FP; identity_unqualified không double-punish) + integration (JSON contract, per-language breakdown, confusion line-anchored, Go/TS defect visible). CI job `accuracy-oracle` (selfcheck + full run + corpus-digest guard + artifact).
 
 ### Test bắt buộc
 
@@ -252,7 +253,7 @@ Structured parse thay text report; sync explicit; builtin capability trung thự
 
 | Phase | Thêm job/step |
 |---|---|
-| P0 | Job accuracy-oracle chạy evaluator trên corpus (nhanh, fixture) |
+| P0 | ✅ Job `accuracy-oracle`: selfcheck + full corpus run + guard corpus digest khớp baseline đã commit + upload artifact |
 | P1 | Giữ matrix; thêm test streaming cap + dirty lifecycle vào suite thường |
 | P2 | Job CLI/MCP parity digest |
 | P3 | Golden contract từ clean clone; optional real-CBM job (Linux, non-blocking → blocking từ P9) |

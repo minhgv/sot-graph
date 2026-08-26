@@ -68,6 +68,48 @@ jobs:
       - name: Run test suite (pytest)
         run: uv run pytest tests/ -v --strict-markers
 
+  accuracy-oracle:
+    name: Accuracy Oracle (P0 exact 6-tuple)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Oracle self-check (discrimination proofs)
+        run: uv run python scripts/sot_evaluator.py --selfcheck
+
+      - name: Full corpus run (builtin baseline regeneration)
+        run: uv run python scripts/sot_evaluator.py --output /tmp/builtin-baseline-ci.json
+
+      - name: Committed baseline matches fresh corpus digest
+        run: |
+          uv run python - <<'EOF'
+          import json
+          committed = json.load(open("benchmarks/oracle/builtin-baseline.json"))
+          fresh = json.load(open("/tmp/builtin-baseline-ci.json"))
+          assert committed["corpus"]["digest"] == fresh["corpus"]["digest"], (
+              "corpus changed without re-committing benchmarks/oracle/builtin-baseline.json"
+          )
+          print("corpus digest stable:", fresh["corpus"]["digest"][:16])
+          EOF
+
+      - name: Upload baseline artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: builtin-baseline-${{ github.sha }}
+          path: /tmp/builtin-baseline-ci.json
+          retention-days: 30
+
   package-smoke:
     name: Package & Smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

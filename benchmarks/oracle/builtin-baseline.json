@@ -1,0 +1,1117 @@
+{
+  "oracle_version": "2.0.0",
+  "corpus": {
+    "repo": "oracle-corpus-v1",
+    "digest": "ce6feeb977f49b4d7403f97e3454b515bdbfa57a9b2c712de72ccf0ca8af253f",
+    "files": 234,
+    "edges": 1148,
+    "languages": [
+      "go",
+      "java",
+      "python",
+      "rust",
+      "typescript"
+    ],
+    "counts": {
+      "static_positive": 1012,
+      "static_negative": 110,
+      "dynamic_positive": 26
+    },
+    "relations_measured": [
+      "calls",
+      "extends",
+      "implements"
+    ]
+  },
+  "builtin": {
+    "counts": {
+      "static_positive": 1012,
+      "static_negative": 110,
+      "dynamic_positive": 26,
+      "true_positives": 702,
+      "false_negatives": 310,
+      "false_positives": 6,
+      "false_positive_negative_matches": 3,
+      "false_positive_unexpected_edges": 3,
+      "true_negatives": 107,
+      "precision": 0.9915,
+      "recall": 0.6937,
+      "f1": 0.8163
+    },
+    "per_language": {
+      "python": {
+        "calls": {
+          "tp": 376,
+          "fp": 1,
+          "fn": 1,
+          "tn": 44,
+          "precision": 0.9973,
+          "recall": 0.9973,
+          "f1": 0.9973
+        },
+        "extends": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "overall": {
+          "tp": 377,
+          "fp": 1,
+          "fn": 1,
+          "tn": 44,
+          "precision": 0.9974,
+          "recall": 0.9974,
+          "f1": 0.9974
+        }
+      },
+      "typescript": {
+        "calls": {
+          "tp": 127,
+          "fp": 2,
+          "fn": 84,
+          "tn": 32,
+          "precision": 0.9845,
+          "recall": 0.6019,
+          "f1": 0.7471
+        },
+        "implements": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "overall": {
+          "tp": 128,
+          "fp": 2,
+          "fn": 84,
+          "tn": 32,
+          "precision": 0.9846,
+          "recall": 0.6038,
+          "f1": 0.7485
+        }
+      },
+      "go": {
+        "calls": {
+          "tp": 65,
+          "fp": 1,
+          "fn": 94,
+          "tn": 11,
+          "precision": 0.9848,
+          "recall": 0.4088,
+          "f1": 0.5778
+        },
+        "overall": {
+          "tp": 65,
+          "fp": 1,
+          "fn": 94,
+          "tn": 11,
+          "precision": 0.9848,
+          "recall": 0.4088,
+          "f1": 0.5778
+        }
+      },
+      "rust": {
+        "calls": {
+          "tp": 3,
+          "fp": 2,
+          "fn": 128,
+          "tn": 10,
+          "precision": 0.6,
+          "recall": 0.0229,
+          "f1": 0.0441
+        },
+        "implements": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "tn": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "overall": {
+          "tp": 3,
+          "fp": 2,
+          "fn": 129,
+          "tn": 10,
+          "precision": 0.6,
+          "recall": 0.0227,
+          "f1": 0.0438
+        }
+      },
+      "java": {
+        "calls": {
+          "tp": 129,
+          "fp": 0,
+          "fn": 1,
+          "tn": 10,
+          "precision": 1.0,
+          "recall": 0.9923,
+          "f1": 0.9961
+        },
+        "implements": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "tn": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "overall": {
+          "tp": 129,
+          "fp": 0,
+          "fn": 2,
+          "tn": 10,
+          "precision": 1.0,
+          "recall": 0.9847,
+          "f1": 0.9923
+        }
+      }
+    },
+    "confusion": [
+      "py_pkg/scopes/scopes.py:19 run_pipeline -> Pipeline.process (calls) [identity_unqualified] same_name_two_scopes: Must resolve to Pipeline.process, never module-level process",
+      "ts_pkg/scopes/scopes.ts:17 Stage.normalizeStage -> normalize (calls) [edge_absent] nested_scope:",
+      "ts_pkg/scopes/scopes.ts:22 runStage -> Stage (calls) [edge_absent] constructor_call:",
+      "ts_pkg/scopes/scopes.ts:23 runStage -> Stage.process (calls) [identity_unqualified] same_name_two_scopes:",
+      "ts_pkg/alias/aliases.ts:5 verify -> validateOrder (calls) [edge_absent] alias_import:",
+      "ts_pkg/services/order_svc_1.ts:21 handleOrder1 -> OrderService1.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_1.ts:20 handleOrder1 -> OrderService1 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_2.ts:21 handleOrder2 -> OrderService2.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_2.ts:20 handleOrder2 -> OrderService2 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_3.ts:21 handleOrder3 -> OrderService3.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_3.ts:20 handleOrder3 -> OrderService3 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_4.ts:21 handleOrder4 -> OrderService4.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_4.ts:20 handleOrder4 -> OrderService4 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_5.ts:21 handleOrder5 -> OrderService5.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_5.ts:20 handleOrder5 -> OrderService5 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_6.ts:21 handleOrder6 -> OrderService6.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_6.ts:20 handleOrder6 -> OrderService6 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_7.ts:21 handleOrder7 -> OrderService7.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_7.ts:20 handleOrder7 -> OrderService7 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_8.ts:21 handleOrder8 -> OrderService8.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_8.ts:20 handleOrder8 -> OrderService8 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_9.ts:21 handleOrder9 -> OrderService9.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_9.ts:20 handleOrder9 -> OrderService9 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_10.ts:21 handleOrder10 -> OrderService10.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_10.ts:20 handleOrder10 -> OrderService10 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_11.ts:21 handleOrder11 -> OrderService11.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_11.ts:20 handleOrder11 -> OrderService11 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_12.ts:21 handleOrder12 -> OrderService12.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_12.ts:20 handleOrder12 -> OrderService12 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_13.ts:21 handleOrder13 -> OrderService13.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_13.ts:20 handleOrder13 -> OrderService13 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_14.ts:21 handleOrder14 -> OrderService14.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_14.ts:20 handleOrder14 -> OrderService14 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_15.ts:21 handleOrder15 -> OrderService15.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_15.ts:20 handleOrder15 -> OrderService15 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_16.ts:21 handleOrder16 -> OrderService16.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_16.ts:20 handleOrder16 -> OrderService16 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_17.ts:21 handleOrder17 -> OrderService17.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_17.ts:20 handleOrder17 -> OrderService17 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_18.ts:21 handleOrder18 -> OrderService18.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_18.ts:20 handleOrder18 -> OrderService18 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_19.ts:21 handleOrder19 -> OrderService19.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_19.ts:20 handleOrder19 -> OrderService19 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_20.ts:21 handleOrder20 -> OrderService20.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_20.ts:20 handleOrder20 -> OrderService20 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_21.ts:21 handleOrder21 -> OrderService21.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_21.ts:20 handleOrder21 -> OrderService21 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_22.ts:21 handleOrder22 -> OrderService22.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_22.ts:20 handleOrder22 -> OrderService22 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_23.ts:21 handleOrder23 -> OrderService23.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_23.ts:20 handleOrder23 -> OrderService23 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_24.ts:21 handleOrder24 -> OrderService24.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_24.ts:20 handleOrder24 -> OrderService24 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_25.ts:21 handleOrder25 -> OrderService25.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_25.ts:20 handleOrder25 -> OrderService25 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_26.ts:21 handleOrder26 -> OrderService26.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_26.ts:20 handleOrder26 -> OrderService26 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_27.ts:21 handleOrder27 -> OrderService27.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_27.ts:20 handleOrder27 -> OrderService27 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_28.ts:21 handleOrder28 -> OrderService28.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_28.ts:20 handleOrder28 -> OrderService28 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_29.ts:21 handleOrder29 -> OrderService29.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_29.ts:20 handleOrder29 -> OrderService29 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_30.ts:21 handleOrder30 -> OrderService30.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_30.ts:20 handleOrder30 -> OrderService30 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_31.ts:21 handleOrder31 -> OrderService31.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_31.ts:20 handleOrder31 -> OrderService31 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_32.ts:21 handleOrder32 -> OrderService32.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_32.ts:20 handleOrder32 -> OrderService32 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_33.ts:21 handleOrder33 -> OrderService33.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_33.ts:20 handleOrder33 -> OrderService33 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_34.ts:21 handleOrder34 -> OrderService34.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_34.ts:20 handleOrder34 -> OrderService34 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_35.ts:21 handleOrder35 -> OrderService35.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_35.ts:20 handleOrder35 -> OrderService35 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_36.ts:21 handleOrder36 -> OrderService36.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_36.ts:20 handleOrder36 -> OrderService36 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_37.ts:21 handleOrder37 -> OrderService37.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_37.ts:20 handleOrder37 -> OrderService37 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_38.ts:21 handleOrder38 -> OrderService38.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_38.ts:20 handleOrder38 -> OrderService38 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_39.ts:21 handleOrder39 -> OrderService39.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_39.ts:20 handleOrder39 -> OrderService39 (calls) [edge_absent] constructor_call:",
+      "ts_pkg/services/order_svc_40.ts:21 handleOrder40 -> OrderService40.process (calls) [pending_unresolved] call: pending dst_symbol='process'",
+      "ts_pkg/services/order_svc_40.ts:20 handleOrder40 -> OrderService40 (calls) [edge_absent] constructor_call:",
+      "go_pkg/scopes/scopes.go:15 Stage.Process -> Stage.normalizeStage (calls) [wrong_target_same_bare_name] call: db edge -> Stage.normalizeStage @ ts_pkg/scopes/scopes.ts:15",
+      "go_pkg/scopes/scopes.go:24 RunStage -> Stage.Process (calls) [pending_unresolved] same_name_two_scopes: pending dst_symbol='Process'",
+      "go_pkg/samename/samename.go:11 SaveAll -> Doc.Save (calls) [pending_unresolved] same_name_two_scopes: pending dst_symbol='Save'",
+      "go_pkg/samename/samename.go:11 SaveAll -> Blob.Save (calls) [pending_unresolved] same_name_two_scopes: pending dst_symbol='Save'",
+      "go_pkg/workers/worker_1.go:11 Worker1.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_1.go:16 Worker1.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_1.go:27 ExecuteWorker1 -> Worker1.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_2.go:11 Worker2.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_2.go:16 Worker2.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_2.go:27 ExecuteWorker2 -> Worker2.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_3.go:11 Worker3.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_3.go:16 Worker3.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_3.go:27 ExecuteWorker3 -> Worker3.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_4.go:11 Worker4.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_4.go:16 Worker4.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_4.go:27 ExecuteWorker4 -> Worker4.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_5.go:11 Worker5.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_5.go:16 Worker5.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_5.go:27 ExecuteWorker5 -> Worker5.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_6.go:11 Worker6.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_6.go:16 Worker6.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_6.go:27 ExecuteWorker6 -> Worker6.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_7.go:11 Worker7.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_7.go:16 Worker7.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_7.go:27 ExecuteWorker7 -> Worker7.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_8.go:11 Worker8.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_8.go:16 Worker8.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_8.go:27 ExecuteWorker8 -> Worker8.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_9.go:11 Worker9.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_9.go:16 Worker9.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_9.go:27 ExecuteWorker9 -> Worker9.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_10.go:11 Worker10.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_10.go:16 Worker10.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_10.go:27 ExecuteWorker10 -> Worker10.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_11.go:11 Worker11.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_11.go:16 Worker11.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_11.go:27 ExecuteWorker11 -> Worker11.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_12.go:11 Worker12.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_12.go:16 Worker12.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_12.go:27 ExecuteWorker12 -> Worker12.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_13.go:11 Worker13.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_13.go:16 Worker13.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_13.go:27 ExecuteWorker13 -> Worker13.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_14.go:11 Worker14.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_14.go:16 Worker14.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_14.go:27 ExecuteWorker14 -> Worker14.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_15.go:11 Worker15.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_15.go:16 Worker15.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_15.go:27 ExecuteWorker15 -> Worker15.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_16.go:11 Worker16.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_16.go:16 Worker16.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_16.go:27 ExecuteWorker16 -> Worker16.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_17.go:11 Worker17.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_17.go:16 Worker17.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_17.go:27 ExecuteWorker17 -> Worker17.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_18.go:11 Worker18.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_18.go:16 Worker18.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_18.go:27 ExecuteWorker18 -> Worker18.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_19.go:11 Worker19.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_19.go:16 Worker19.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_19.go:27 ExecuteWorker19 -> Worker19.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_20.go:11 Worker20.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_20.go:16 Worker20.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_20.go:27 ExecuteWorker20 -> Worker20.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_21.go:11 Worker21.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_21.go:16 Worker21.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_21.go:27 ExecuteWorker21 -> Worker21.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_22.go:11 Worker22.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_22.go:16 Worker22.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_22.go:27 ExecuteWorker22 -> Worker22.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_23.go:11 Worker23.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_23.go:16 Worker23.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_23.go:27 ExecuteWorker23 -> Worker23.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_24.go:11 Worker24.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_24.go:16 Worker24.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_24.go:27 ExecuteWorker24 -> Worker24.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_25.go:11 Worker25.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_25.go:16 Worker25.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_25.go:27 ExecuteWorker25 -> Worker25.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_26.go:11 Worker26.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_26.go:16 Worker26.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_26.go:27 ExecuteWorker26 -> Worker26.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_27.go:11 Worker27.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_27.go:16 Worker27.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_27.go:27 ExecuteWorker27 -> Worker27.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_28.go:11 Worker28.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_28.go:16 Worker28.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_28.go:27 ExecuteWorker28 -> Worker28.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_29.go:11 Worker29.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_29.go:16 Worker29.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_29.go:27 ExecuteWorker29 -> Worker29.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "go_pkg/workers/worker_30.go:11 Worker30.Check -> ValidateKey (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_30.go:16 Worker30.Process -> FormatRecord (calls) [edge_absent] call:",
+      "go_pkg/workers/worker_30.go:27 ExecuteWorker30 -> Worker30.Run (calls) [pending_unresolved] call: pending dst_symbol='Run'",
+      "rust_pkg/src/scopes.rs:14 Stage.process -> Stage.normalize_stage (calls) [edge_absent] call:",
+      "rust_pkg/src/scopes.rs:18 Stage.normalize_stage -> process (calls) [edge_absent] call:",
+      "rust_pkg/src/scopes.rs:24 run_stage -> Stage.process (calls) [identity_unqualified] same_name_two_scopes:",
+      "rust_pkg/src/alias.rs:5 digest -> hash_data (calls) [edge_absent] alias_import:",
+      "rust_pkg/src/samename.rs:14 save_all -> Doc.save (calls) [identity_unqualified] same_name_two_scopes:",
+      "rust_pkg/src/samename.rs:14 save_all -> Blob.save (calls) [identity_unqualified] same_name_two_scopes:",
+      "rust_pkg/src/shape.rs:8 Circle -> Shape (implements) [edge_absent] implements:",
+      "rust_pkg/src/shape.rs:13 Circle.describe -> Circle.area (calls) [edge_absent] call:",
+      "rust_pkg/src/main.rs:7 main -> process (calls) [pending_unresolved] caller_outside_module: pending dst_symbol='process'",
+      "rust_pkg/src/mod_1.rs:10 Engine1.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_1.rs:14 Engine1.process -> Engine1.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_1.rs:15 Engine1.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_1.rs:23 run_engine_1 -> Engine1.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_2.rs:10 Engine2.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_2.rs:14 Engine2.process -> Engine2.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_2.rs:15 Engine2.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_2.rs:23 run_engine_2 -> Engine2.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_3.rs:10 Engine3.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_3.rs:14 Engine3.process -> Engine3.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_3.rs:15 Engine3.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_3.rs:23 run_engine_3 -> Engine3.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_4.rs:10 Engine4.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_4.rs:14 Engine4.process -> Engine4.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_4.rs:15 Engine4.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_4.rs:23 run_engine_4 -> Engine4.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_5.rs:10 Engine5.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_5.rs:14 Engine5.process -> Engine5.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_5.rs:15 Engine5.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_5.rs:23 run_engine_5 -> Engine5.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_6.rs:10 Engine6.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_6.rs:14 Engine6.process -> Engine6.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_6.rs:15 Engine6.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_6.rs:23 run_engine_6 -> Engine6.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_7.rs:10 Engine7.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_7.rs:14 Engine7.process -> Engine7.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_7.rs:15 Engine7.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_7.rs:23 run_engine_7 -> Engine7.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_8.rs:10 Engine8.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_8.rs:14 Engine8.process -> Engine8.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_8.rs:15 Engine8.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_8.rs:23 run_engine_8 -> Engine8.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_9.rs:10 Engine9.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_9.rs:14 Engine9.process -> Engine9.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_9.rs:15 Engine9.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_9.rs:23 run_engine_9 -> Engine9.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_10.rs:10 Engine10.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_10.rs:14 Engine10.process -> Engine10.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_10.rs:15 Engine10.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_10.rs:23 run_engine_10 -> Engine10.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_11.rs:10 Engine11.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_11.rs:14 Engine11.process -> Engine11.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_11.rs:15 Engine11.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_11.rs:23 run_engine_11 -> Engine11.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_12.rs:10 Engine12.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_12.rs:14 Engine12.process -> Engine12.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_12.rs:15 Engine12.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_12.rs:23 run_engine_12 -> Engine12.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_13.rs:10 Engine13.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_13.rs:14 Engine13.process -> Engine13.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_13.rs:15 Engine13.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_13.rs:23 run_engine_13 -> Engine13.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_14.rs:10 Engine14.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_14.rs:14 Engine14.process -> Engine14.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_14.rs:15 Engine14.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_14.rs:23 run_engine_14 -> Engine14.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_15.rs:10 Engine15.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_15.rs:14 Engine15.process -> Engine15.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_15.rs:15 Engine15.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_15.rs:23 run_engine_15 -> Engine15.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_16.rs:10 Engine16.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_16.rs:14 Engine16.process -> Engine16.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_16.rs:15 Engine16.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_16.rs:23 run_engine_16 -> Engine16.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_17.rs:10 Engine17.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_17.rs:14 Engine17.process -> Engine17.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_17.rs:15 Engine17.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_17.rs:23 run_engine_17 -> Engine17.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_18.rs:10 Engine18.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_18.rs:14 Engine18.process -> Engine18.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_18.rs:15 Engine18.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_18.rs:23 run_engine_18 -> Engine18.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_19.rs:10 Engine19.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_19.rs:14 Engine19.process -> Engine19.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_19.rs:15 Engine19.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_19.rs:23 run_engine_19 -> Engine19.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_20.rs:10 Engine20.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_20.rs:14 Engine20.process -> Engine20.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_20.rs:15 Engine20.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_20.rs:23 run_engine_20 -> Engine20.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_21.rs:10 Engine21.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_21.rs:14 Engine21.process -> Engine21.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_21.rs:15 Engine21.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_21.rs:23 run_engine_21 -> Engine21.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_22.rs:10 Engine22.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_22.rs:14 Engine22.process -> Engine22.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_22.rs:15 Engine22.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_22.rs:23 run_engine_22 -> Engine22.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_23.rs:10 Engine23.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_23.rs:14 Engine23.process -> Engine23.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_23.rs:15 Engine23.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_23.rs:23 run_engine_23 -> Engine23.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_24.rs:10 Engine24.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_24.rs:14 Engine24.process -> Engine24.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_24.rs:15 Engine24.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_24.rs:23 run_engine_24 -> Engine24.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_25.rs:10 Engine25.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_25.rs:14 Engine25.process -> Engine25.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_25.rs:15 Engine25.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_25.rs:23 run_engine_25 -> Engine25.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_26.rs:10 Engine26.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_26.rs:14 Engine26.process -> Engine26.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_26.rs:15 Engine26.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_26.rs:23 run_engine_26 -> Engine26.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_27.rs:10 Engine27.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_27.rs:14 Engine27.process -> Engine27.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_27.rs:15 Engine27.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_27.rs:23 run_engine_27 -> Engine27.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_28.rs:10 Engine28.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_28.rs:14 Engine28.process -> Engine28.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_28.rs:15 Engine28.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_28.rs:23 run_engine_28 -> Engine28.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_29.rs:10 Engine29.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_29.rs:14 Engine29.process -> Engine29.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_29.rs:15 Engine29.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_29.rs:23 run_engine_29 -> Engine29.process (calls) [identity_unqualified] call:",
+      "rust_pkg/src/mod_30.rs:10 Engine30.check -> verify_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_30.rs:14 Engine30.process -> Engine30.check (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_30.rs:15 Engine30.process -> hash_data (calls) [edge_absent] call:",
+      "rust_pkg/src/mod_30.rs:23 run_engine_30 -> Engine30.process (calls) [identity_unqualified] call:",
+      "java_pkg/shapes/Circle.java:4 Circle -> Shape (implements) [pending_unresolved] implements: pending dst_symbol='Shape'",
+      "java_pkg/alias/UseStatic.java:8 UseStatic.check -> Validator.isValid (calls) [pending_unresolved] alias_import: pending dst_symbol='isValid'",
+      "py_pkg/scopes/scopes.py:19 run_pipeline -> process (calls) [false_positive] same_name_two_scopes: Module-level process must not be the target of p.process()",
+      "ts_pkg/scopes/scopes.ts:23 runStage -> process (calls) [false_positive] same_name_two_scopes: s.process() must resolve to Stage.process, not module process",
+      "rust_pkg/src/scopes.rs:24 run_stage -> process (calls) [false_positive] same_name_two_scopes: st.process() is the impl method, not the free fn",
+      "rust_pkg/src/scopes.rs:14 process -> normalize_stage (calls) [unexpected_edge]",
+      "ts_pkg/scopes/scopes.ts:17 Stage.normalizeStage -> Stage.inner (calls) [unexpected_edge]",
+      "go_pkg/scopes/scopes.go:15 Stage.Process -> Stage.normalizeStage (calls) [unexpected_edge]",
+      "py_pkg/dyn/dispatch.py:11 notify_dynamic -> LoudNotifier.send (calls) [dynamic_misresolution] virtual_dispatch: claimed Notifier.send @ py_pkg/dyn/inheritance.py instead of LoudNotifier.send @ py_pkg/dyn/dispatch.py",
+      "ts_pkg/models/shapes.ts:19 render -> Circle.area (calls) [dynamic_misresolution] interface_dispatch: claimed area @ rust_pkg/src/shape.rs instead of Circle.area @ ts_pkg/models/shapes.ts",
+      "ts_pkg/dyn/dispatch.ts:8 Renderer.draw -> Circle.area (calls) [dynamic_misresolution] di: claimed area @ rust_pkg/src/shape.rs instead of Circle.area @ ts_pkg/models/shapes.ts",
+      "java_pkg/shapes/Render.java:6 Render.render -> Circle.area (calls) [dynamic_misresolution] interface_dispatch: claimed area @ rust_pkg/src/shape.rs instead of Circle.area @ java_pkg/shapes/Circle.java"
+    ],
+    "false_positive_details": [
+      {
+        "anchor": "py_pkg/scopes/scopes.py:19 run_pipeline -> process (calls)",
+        "category": "same_name_two_scopes",
+        "db_line": 19,
+        "description": "Module-level process must not be the target of p.process()"
+      },
+      {
+        "anchor": "ts_pkg/scopes/scopes.ts:23 runStage -> process (calls)",
+        "category": "same_name_two_scopes",
+        "db_line": 23,
+        "description": "s.process() must resolve to Stage.process, not module process"
+      },
+      {
+        "anchor": "rust_pkg/src/scopes.rs:24 run_stage -> process (calls)",
+        "category": "same_name_two_scopes",
+        "db_line": 24,
+        "description": "st.process() is the impl method, not the free fn"
+      },
+      {
+        "anchor": "rust_pkg/src/scopes.rs:14 process -> normalize_stage (calls)",
+        "category": "unexpected_edge",
+        "db_line": 14,
+        "description": "resolved calls edge from a GT-covered source, absent from ground truth"
+      },
+      {
+        "anchor": "ts_pkg/scopes/scopes.ts:17 Stage.normalizeStage -> Stage.inner (calls)",
+        "category": "unexpected_edge",
+        "db_line": 17,
+        "description": "resolved calls edge from a GT-covered source, absent from ground truth"
+      },
+      {
+        "anchor": "go_pkg/scopes/scopes.go:15 Stage.Process -> Stage.normalizeStage (calls)",
+        "category": "unexpected_edge",
+        "db_line": 15,
+        "description": "resolved calls edge from a GT-covered source, absent from ground truth"
+      }
+    ],
+    "dynamic": {
+      "total": 26,
+      "claimed_exact": 3,
+      "claimed_same_bare_other": 4,
+      "unclaimed": 19
+    },
+    "diagnostics": {
+      "identity_only_recall": 0.6931,
+      "legacy_loose_recall_diagnostic": 0.8202
+    }
+  },
+  "search_topk": {
+    "queries": 20,
+    "unique_queries": 11,
+    "ambiguous_queries": 9,
+    "hit_at_1": 0.5,
+    "hit_at_5": 0.75,
+    "hit_at_10": 0.85,
+    "unique_hit_at_1": 0.8182,
+    "unique_hit_at_5": 1.0,
+    "unique_hit_at_10": 1.0,
+    "ambiguous_hit_at_1": 0.1111,
+    "ambiguous_hit_at_5": 0.4444,
+    "ambiguous_hit_at_10": 0.6667,
+    "details": [
+      {
+        "query": "compute_tax",
+        "language": "python",
+        "ambiguous": false,
+        "gold": [
+          "py_pkg.core.math_ops.compute_tax"
+        ],
+        "hit_at_1": true,
+        "hit_at_5": true,
+        "hit_at_10": true,
+        "top3": [
+          {
+            "fqn": "py_pkg.core.math_ops.compute_tax",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/core/math_ops.py",
+            "symbol": "compute_tax"
+          },
+          {
+            "fqn": "py_pkg.core.math_ops",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/core/math_ops.py",
+            "symbol": "math_ops.py"
+          },
+          {
+            "fqn": "py_pkg.generated.gen_models",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/generated/gen_models.py",
+            "symbol": "gen_models.py"
+          }
+        ]
+      },
+      {
+        "query": "verify_token",
+        "language": "python",
+        "ambiguous": false,
+        "gold": [
+          "py_pkg.core.security.verify_token"
+        ],
+        "hit_at_1": true,
+        "hit_at_5": true,
+        "hit_at_10": true,
+        "top3": [
+          {
+            "fqn": "py_pkg.core.security.verify_token",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/core/security.py",
+            "symbol": "verify_token"
+          },
+          {
+            "fqn": "py_pkg.core.security",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/core/security.py",
+            "symbol": "security.py"
+          },
+          {
+            "fqn": "py_pkg.services.service_1",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/services/service_1.py",
+            "symbol": "service_1.py"
+          }
+        ]
+      },
+      {
+        "query": "process",
+        "language": "python",
+        "ambiguous": true,
+        "gold": [
+          "py_pkg.scopes.scopes.Pipeline.process",
+          "py_pkg.scopes.scopes.process"
+        ],
+        "hit_at_1": false,
+        "hit_at_5": true,
+        "hit_at_10": true,
+        "top3": [
+          {
+            "fqn": "py_pkg.shadowed.shadowing.process_with_param_shadow",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/shadowed/shadowing.py",
+            "symbol": "process_with_param_shadow"
+          },
+          {
+            "fqn": "py_pkg.shadowed.shadowing.process_with_local_assign",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/shadowed/shadowing.py",
+            "symbol": "process_with_local_assign"
+          },
+          {
+            "fqn": "py_pkg.shadowed.shadowing.process_with_for_target",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/shadowed/shadowing.py",
+            "symbol": "process_with_for_target"
+          }
+        ]
+      },
+      {
+        "query": "normalize",
+        "language": "python",
+        "ambiguous": true,
+        "gold": [
+          "py_pkg.scopes.scopes.Pipeline.normalize_stage",
+          "py_pkg.scopes.scopes.normalize"
+        ],
+        "hit_at_1": false,
+        "hit_at_5": true,
+        "hit_at_10": true,
+        "top3": [
+          {
+            "fqn": "rust_pkg.src.scopes.rs.normalize_stage",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/rust_pkg/src/scopes.rs",
+            "symbol": "normalize_stage"
+          },
+          {
+            "fqn": "py_pkg.scopes.scopes.Pipeline.normalize_stage",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/scopes/scopes.py",
+            "symbol": "Pipeline.normalize_stage"
+          },
+          {
+            "fqn": "go_pkg.scopes.scopes.go.normalize",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/go_pkg/scopes/scopes.go",
+            "symbol": "normalize"
+          }
+        ]
+      },
+      {
+        "query": "formatOrder",
+        "language": "typescript",
+        "ambiguous": false,
+        "gold": [
+          "ts_pkg.models.order.ts.formatOrder"
+        ],
+        "hit_at_1": true,
+        "hit_at_5": true,
+        "hit_at_10": true,
+        "top3": [
+          {
+            "fqn": "ts_pkg.models.order.ts.formatOrder",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/ts_pkg/models/order.ts",
+            "symbol": "formatOrder"
+          },
+          {
+            "fqn": "ts_pkg.services.order_svc_1.ts",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/ts_pkg/services/order_svc_1.ts",
+            "symbol": "order_svc_1.ts"
+          },
+          {
+            "fqn": "ts_pkg.services.order_svc_2.ts",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/ts_pkg/services/order_svc_2.ts",
+            "symbol": "order_svc_2.ts"
+          }
+        ]
+      },
+      {
+        "query": "validateOrder",
+        "language": "typescript",
+        "ambiguous": false,
+        "gold": [
+          "ts_pkg.models.order.ts.validateOrder"
+        ],
+        "hit_at_1": true,
+        "hit_at_5": true,
+        "hit_at_10": true,
+        "top3": [
+          {
+            "fqn": "ts_pkg.models.order.ts.validateOrder",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/ts_pkg/models/order.ts",
+            "symbol": "validateOrder"
+          },
+          {
+            "fqn": "ts_pkg.generated.gen_api.generated.ts",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/ts_pkg/generated/gen_api.generated.ts",
+            "symbol": "gen_api.generated.ts"
+          },
+          {
+            "fqn": "ts_pkg.models.order.ts",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/ts_pkg/models/order.ts",
+            "symbol": "order.ts"
+          }
+        ]
+      },
+      {
+        "query": "process",
+        "language": "typescript",
+        "ambiguous": true,
+        "gold": [
+          "ts_pkg.scopes.scopes.ts.Stage.process",
+          "ts_pkg.scopes.scopes.ts.process"
+        ],
+        "hit_at_1": false,
+        "hit_at_5": false,
+        "hit_at_10": true,
+        "top3": [
+          {
+            "fqn": "py_pkg.shadowed.shadowing.process_with_param_shadow",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/shadowed/shadowing.py",
+            "symbol": "process_with_param_shadow"
+          },
+          {
+            "fqn": "py_pkg.shadowed.shadowing.process_with_local_assign",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/shadowed/shadowing.py",
+            "symbol": "process_with_local_assign"
+          },
+          {
+            "fqn": "py_pkg.shadowed.shadowing.process_with_for_target",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/shadowed/shadowing.py",
+            "symbol": "process_with_for_target"
+          }
+        ]
+      },
+      {
+        "query": "normalizeStage",
+        "language": "typescript",
+        "ambiguous": false,
+        "gold": [
+          "ts_pkg.scopes.scopes.ts.Stage.normalizeStage"
+        ],
+        "hit_at_1": false,
+        "hit_at_5": true,
+        "hit_at_10": true,
+        "top3": [
+          {
+            "fqn": "go_pkg.scopes.scopes.go.Stage.normalizeStage",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/go_pkg/scopes/scopes.go",
+            "symbol": "Stage.normalizeStage"
+          },
+          {
+            "fqn": "ts_pkg.scopes.scopes.ts.Stage.normalizeStage",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/ts_pkg/scopes/scopes.ts",
+            "symbol": "Stage.normalizeStage"
+          },
+          {
+            "fqn": "go_pkg.scopes.scopes.go",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/go_pkg/scopes/scopes.go",
+            "symbol": "scopes.go"
+          }
+        ]
+      },
+      {
+        "query": "ValidateKey",
+        "language": "go",
+        "ambiguous": false,
+        "gold": [
+          "go_pkg.storage.db.go.ValidateKey"
+        ],
+        "hit_at_1": true,
+        "hit_at_5": true,
+        "hit_at_10": true,
+        "top3": [
+          {
+            "fqn": "go_pkg.storage.db.go.ValidateKey",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/go_pkg/storage/db.go",
+            "symbol": "ValidateKey"
+          },
+          {
+            "fqn": "go_pkg.storage.db.go",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/go_pkg/storage/db.go",
+            "symbol": "db.go"
+          }
+        ]
+      },
+      {
+        "query": "FormatRecord",
+        "language": "go",
+        "ambiguous": false,
+        "gold": [
+          "go_pkg.storage.db.go.FormatRecord"
+        ],
+        "hit_at_1": true,
+        "hit_at_5": true,
+        "hit_at_10": true,
+        "top3": [
+          {
+            "fqn": "go_pkg.storage.db.go.FormatRecord",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/go_pkg/storage/db.go",
+            "symbol": "FormatRecord"
+          },
+          {
+            "fqn": "go_pkg.storage.db.go",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/go_pkg/storage/db.go",
+            "symbol": "db.go"
+          }
+        ]
+      },
+      {
+        "query": "Process",
+        "language": "go",
+        "ambiguous": true,
+        "gold": [
+          "go_pkg.scopes.scopes.go.Stage.Process"
+        ],
+        "hit_at_1": false,
+        "hit_at_5": false,
+        "hit_at_10": false,
+        "top3": [
+          {
+            "fqn": "py_pkg.shadowed.shadowing.process_with_param_shadow",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/shadowed/shadowing.py",
+            "symbol": "process_with_param_shadow"
+          },
+          {
+            "fqn": "py_pkg.shadowed.shadowing.process_with_local_assign",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/shadowed/shadowing.py",
+            "symbol": "process_with_local_assign"
+          },
+          {
+            "fqn": "py_pkg.shadowed.shadowing.process_with_for_target",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/shadowed/shadowing.py",
+            "symbol": "process_with_for_target"
+          }
+        ]
+      },
+      {
+        "query": "Save",
+        "language": "go",
+        "ambiguous": true,
+        "gold": [
+          "go_pkg.samename.samename.go.Blob.Save",
+          "go_pkg.samename.samename.go.Doc.Save"
+        ],
+        "hit_at_1": false,
+        "hit_at_5": true,
+        "hit_at_10": true,
+        "top3": [
+          {
+            "fqn": "go_pkg.samename.samename.go.SaveAll",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/go_pkg/samename/samename.go",
+            "symbol": "SaveAll"
+          },
+          {
+            "fqn": "rust_pkg.src.samename.rs.save_all",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/rust_pkg/src/samename.rs",
+            "symbol": "save_all"
+          },
+          {
+            "fqn": "go_pkg.dyn.dispatch.go.Saver",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/go_pkg/dyn/dispatch.go",
+            "symbol": "Saver"
+          }
+        ]
+      },
+      {
+        "query": "hash_data",
+        "language": "rust",
+        "ambiguous": false,
+        "gold": [
+          "rust_pkg.src.crypto.rs.hash_data"
+        ],
+        "hit_at_1": true,
+        "hit_at_5": true,
+        "hit_at_10": true,
+        "top3": [
+          {
+            "fqn": "rust_pkg.src.crypto.rs.hash_data",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/rust_pkg/src/crypto.rs",
+            "symbol": "hash_data"
+          },
+          {
+            "fqn": "rust_pkg.src.mod_1.rs",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/rust_pkg/src/mod_1.rs",
+            "symbol": "mod_1.rs"
+          },
+          {
+            "fqn": "rust_pkg.src.mod_2.rs",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/rust_pkg/src/mod_2.rs",
+            "symbol": "mod_2.rs"
+          }
+        ]
+      },
+      {
+        "query": "verify_data",
+        "language": "rust",
+        "ambiguous": false,
+        "gold": [
+          "rust_pkg.src.crypto.rs.verify_data"
+        ],
+        "hit_at_1": true,
+        "hit_at_5": true,
+        "hit_at_10": true,
+        "top3": [
+          {
+            "fqn": "rust_pkg.src.crypto.rs.verify_data",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/rust_pkg/src/crypto.rs",
+            "symbol": "verify_data"
+          },
+          {
+            "fqn": "rust_pkg.src.mod_1.rs",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/rust_pkg/src/mod_1.rs",
+            "symbol": "mod_1.rs"
+          },
+          {
+            "fqn": "rust_pkg.src.mod_2.rs",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/rust_pkg/src/mod_2.rs",
+            "symbol": "mod_2.rs"
+          }
+        ]
+      },
+      {
+        "query": "process",
+        "language": "rust",
+        "ambiguous": true,
+        "gold": [
+          "rust_pkg.src.scopes.rs.Stage.process",
+          "rust_pkg.src.scopes.rs.process"
+        ],
+        "hit_at_1": false,
+        "hit_at_5": false,
+        "hit_at_10": true,
+        "top3": [
+          {
+            "fqn": "py_pkg.shadowed.shadowing.process_with_param_shadow",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/shadowed/shadowing.py",
+            "symbol": "process_with_param_shadow"
+          },
+          {
+            "fqn": "py_pkg.shadowed.shadowing.process_with_local_assign",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/shadowed/shadowing.py",
+            "symbol": "process_with_local_assign"
+          },
+          {
+            "fqn": "py_pkg.shadowed.shadowing.process_with_for_target",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/shadowed/shadowing.py",
+            "symbol": "process_with_for_target"
+          }
+        ]
+      },
+      {
+        "query": "save",
+        "language": "rust",
+        "ambiguous": true,
+        "gold": [
+          "rust_pkg.src.samename.rs.Blob.save",
+          "rust_pkg.src.samename.rs.Doc.save"
+        ],
+        "hit_at_1": false,
+        "hit_at_5": false,
+        "hit_at_10": false,
+        "top3": [
+          {
+            "fqn": "go_pkg.samename.samename.go.SaveAll",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/go_pkg/samename/samename.go",
+            "symbol": "SaveAll"
+          },
+          {
+            "fqn": "rust_pkg.src.samename.rs.save_all",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/rust_pkg/src/samename.rs",
+            "symbol": "save_all"
+          },
+          {
+            "fqn": "go_pkg.dyn.dispatch.go.Saver",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/go_pkg/dyn/dispatch.go",
+            "symbol": "Saver"
+          }
+        ]
+      },
+      {
+        "query": "sanitize",
+        "language": "java",
+        "ambiguous": false,
+        "gold": [
+          "java_pkg.core.Validator.java.Validator.sanitize"
+        ],
+        "hit_at_1": true,
+        "hit_at_5": true,
+        "hit_at_10": true,
+        "top3": [
+          {
+            "fqn": "java_pkg.core.Validator.java.Validator.sanitize",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/java_pkg/core/Validator.java",
+            "symbol": "Validator.sanitize"
+          },
+          {
+            "fqn": "java_pkg.core.Validator.java",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/java_pkg/core/Validator.java",
+            "symbol": "Validator.java"
+          }
+        ]
+      },
+      {
+        "query": "isValid",
+        "language": "java",
+        "ambiguous": true,
+        "gold": [
+          "java_pkg.core.Validator.java.Validator.isValid"
+        ],
+        "hit_at_1": true,
+        "hit_at_5": true,
+        "hit_at_10": true,
+        "top3": [
+          {
+            "fqn": "java_pkg.core.Validator.java.Validator.isValid",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/java_pkg/core/Validator.java",
+            "symbol": "Validator.isValid"
+          },
+          {
+            "fqn": "java_pkg.overload.Overload.java.Overload.isValid",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/java_pkg/overload/Overload.java",
+            "symbol": "Overload.isValid"
+          },
+          {
+            "fqn": "java_pkg.overload.Overload.java",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/java_pkg/overload/Overload.java",
+            "symbol": "Overload.java"
+          }
+        ]
+      },
+      {
+        "query": "area",
+        "language": "java",
+        "ambiguous": false,
+        "gold": [
+          "java_pkg.shapes.Circle.java.Circle.area"
+        ],
+        "hit_at_1": false,
+        "hit_at_5": true,
+        "hit_at_10": true,
+        "top3": [
+          {
+            "fqn": "rust_pkg.src.shape.rs.area",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/rust_pkg/src/shape.rs",
+            "symbol": "area"
+          },
+          {
+            "fqn": "java_pkg.shapes.Circle.java.Circle.area",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/java_pkg/shapes/Circle.java",
+            "symbol": "Circle.area"
+          },
+          {
+            "fqn": "java_pkg.shapes.Shape.java.Shape.area",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/java_pkg/shapes/Shape.java",
+            "symbol": "Shape.area"
+          }
+        ]
+      },
+      {
+        "query": "process",
+        "language": "java",
+        "ambiguous": true,
+        "gold": [
+          "java_pkg.scopes.Scopes.java.Scopes.process"
+        ],
+        "hit_at_1": false,
+        "hit_at_5": false,
+        "hit_at_10": false,
+        "top3": [
+          {
+            "fqn": "py_pkg.shadowed.shadowing.process_with_param_shadow",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/shadowed/shadowing.py",
+            "symbol": "process_with_param_shadow"
+          },
+          {
+            "fqn": "py_pkg.shadowed.shadowing.process_with_local_assign",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/shadowed/shadowing.py",
+            "symbol": "process_with_local_assign"
+          },
+          {
+            "fqn": "py_pkg.shadowed.shadowing.process_with_for_target",
+            "path": "/var/folders/47/qlv2mtk93jv08t892fhbks680000gn/T/tmpkg9fwhym/oracle-corpus-v1/py_pkg/shadowed/shadowing.py",
+            "symbol": "process_with_for_target"
+          }
+        ]
+      }
+    ]
+  }
+}

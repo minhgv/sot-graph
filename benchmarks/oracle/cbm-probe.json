@@ -1,0 +1,652 @@
+{
+  "oracle_version": "2.0.0",
+  "kind": "cbm-exploratory-probe",
+  "binary": "/Users/giapminh79/.local/bin/codebase-memory-mcp",
+  "cbm_version": "codebase-memory-mcp 0.10.8",
+  "corpus": {
+    "repo": "oracle-corpus-v1",
+    "digest": "ce6feeb977f49b4d7403f97e3454b515bdbfa57a9b2c712de72ccf0ca8af253f",
+    "files": 234
+  },
+  "sample_rule": "all mandatory-case static positives + non-calls relations + first 2 scalable 'call' edges per language; hop-1 callees only; qualified-name level, span not checkable via trace_path",
+  "per_language": {
+    "python": {
+      "sampled": 74,
+      "qualified_claim": 72,
+      "name_only_claim": 0,
+      "unclaimed": 2
+    },
+    "typescript": {
+      "sampled": 50,
+      "qualified_claim": 0,
+      "name_only_claim": 47,
+      "unclaimed": 3
+    },
+    "go": {
+      "sampled": 7,
+      "qualified_claim": 0,
+      "name_only_claim": 7,
+      "unclaimed": 0
+    },
+    "rust": {
+      "sampled": 9,
+      "qualified_claim": 0,
+      "name_only_claim": 7,
+      "unclaimed": 2
+    },
+    "java": {
+      "sampled": 10,
+      "qualified_claim": 0,
+      "name_only_claim": 8,
+      "unclaimed": 2
+    }
+  },
+  "details": [
+    {
+      "anchor": "py_pkg/core/math_ops.py:9 compute_tax -> multiply (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/core/math_ops.py:13 discount -> compute_tax (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/shadowed/shadowing.py:23 Worker.legit_call -> multiply (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/scopes/scopes.py:14 Pipeline.normalize_stage.inner -> normalize (calls)",
+      "reason": "unclaimed"
+    },
+    {
+      "anchor": "py_pkg/scopes/scopes.py:18 run_pipeline -> Pipeline (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/scopes/scopes.py:19 run_pipeline -> Pipeline.process (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/alias/aliases.py:6 compute -> add (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/alias/aliases.py:9 guarded -> verify_token (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/alias/aliases.py:10 guarded -> add (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/dyn/inheritance.py:6 LoudNotifier -> Notifier (extends)",
+      "reason": "unclaimed"
+    },
+    {
+      "anchor": "py_pkg/dyn/inheritance.py:11 notify_straight -> LoudNotifier (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "scripts/run_all.py:6 main -> compute_tax (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "scripts/run_all.py:7 main -> discount (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "scripts/run_all.py:8 main -> run_pipeline (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_1.py:19 run_service_1 -> Service1 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_2.py:19 run_service_2 -> Service2 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_3.py:19 run_service_3 -> Service3 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_4.py:19 run_service_4 -> Service4 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_5.py:19 run_service_5 -> Service5 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_6.py:19 run_service_6 -> Service6 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_7.py:19 run_service_7 -> Service7 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_8.py:19 run_service_8 -> Service8 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_9.py:19 run_service_9 -> Service9 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_10.py:19 run_service_10 -> Service10 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_11.py:19 run_service_11 -> Service11 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_12.py:19 run_service_12 -> Service12 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_13.py:19 run_service_13 -> Service13 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_14.py:19 run_service_14 -> Service14 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_15.py:19 run_service_15 -> Service15 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_16.py:19 run_service_16 -> Service16 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_17.py:19 run_service_17 -> Service17 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_18.py:19 run_service_18 -> Service18 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_19.py:19 run_service_19 -> Service19 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_20.py:19 run_service_20 -> Service20 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_21.py:19 run_service_21 -> Service21 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_22.py:19 run_service_22 -> Service22 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_23.py:19 run_service_23 -> Service23 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_24.py:19 run_service_24 -> Service24 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_25.py:19 run_service_25 -> Service25 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_26.py:19 run_service_26 -> Service26 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_27.py:19 run_service_27 -> Service27 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_28.py:19 run_service_28 -> Service28 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_29.py:19 run_service_29 -> Service29 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_30.py:19 run_service_30 -> Service30 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_31.py:19 run_service_31 -> Service31 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_32.py:19 run_service_32 -> Service32 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_33.py:19 run_service_33 -> Service33 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_34.py:19 run_service_34 -> Service34 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_35.py:19 run_service_35 -> Service35 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_36.py:19 run_service_36 -> Service36 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_37.py:19 run_service_37 -> Service37 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_38.py:19 run_service_38 -> Service38 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_39.py:19 run_service_39 -> Service39 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_40.py:19 run_service_40 -> Service40 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_41.py:19 run_service_41 -> Service41 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_42.py:19 run_service_42 -> Service42 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_43.py:19 run_service_43 -> Service43 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_44.py:19 run_service_44 -> Service44 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_45.py:19 run_service_45 -> Service45 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_46.py:19 run_service_46 -> Service46 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_47.py:19 run_service_47 -> Service47 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_48.py:19 run_service_48 -> Service48 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_49.py:19 run_service_49 -> Service49 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_50.py:19 run_service_50 -> Service50 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_51.py:19 run_service_51 -> Service51 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_52.py:19 run_service_52 -> Service52 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_53.py:19 run_service_53 -> Service53 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_54.py:19 run_service_54 -> Service54 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_55.py:19 run_service_55 -> Service55 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_56.py:19 run_service_56 -> Service56 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_57.py:19 run_service_57 -> Service57 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_58.py:19 run_service_58 -> Service58 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_59.py:19 run_service_59 -> Service59 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "py_pkg/services/service_60.py:19 run_service_60 -> Service60 (calls)",
+      "reason": "qualified_claim"
+    },
+    {
+      "anchor": "ts_pkg/models/order.ts:12 formatOrder -> validateOrder (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/models/shapes.ts:6 Circle -> Shape (implements)",
+      "reason": "unclaimed"
+    },
+    {
+      "anchor": "ts_pkg/models/shapes.ts:14 Circle.describe -> Circle.area (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/scopes/scopes.ts:17 Stage.normalizeStage -> normalize (calls)",
+      "reason": "unclaimed"
+    },
+    {
+      "anchor": "ts_pkg/scopes/scopes.ts:22 runStage -> Stage (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/scopes/scopes.ts:23 runStage -> Stage.process (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/alias/aliases.ts:5 verify -> validateOrder (calls)",
+      "reason": "unclaimed"
+    },
+    {
+      "anchor": "ts_pkg/overload/poly.ts:5 fmt -> pad (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/overload/poly.ts:13 callBoth -> fmt (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/overload/poly.ts:13 callBoth -> fmt (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_1.ts:20 handleOrder1 -> OrderService1 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_2.ts:20 handleOrder2 -> OrderService2 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_3.ts:20 handleOrder3 -> OrderService3 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_4.ts:20 handleOrder4 -> OrderService4 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_5.ts:20 handleOrder5 -> OrderService5 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_6.ts:20 handleOrder6 -> OrderService6 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_7.ts:20 handleOrder7 -> OrderService7 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_8.ts:20 handleOrder8 -> OrderService8 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_9.ts:20 handleOrder9 -> OrderService9 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_10.ts:20 handleOrder10 -> OrderService10 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_11.ts:20 handleOrder11 -> OrderService11 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_12.ts:20 handleOrder12 -> OrderService12 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_13.ts:20 handleOrder13 -> OrderService13 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_14.ts:20 handleOrder14 -> OrderService14 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_15.ts:20 handleOrder15 -> OrderService15 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_16.ts:20 handleOrder16 -> OrderService16 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_17.ts:20 handleOrder17 -> OrderService17 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_18.ts:20 handleOrder18 -> OrderService18 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_19.ts:20 handleOrder19 -> OrderService19 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_20.ts:20 handleOrder20 -> OrderService20 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_21.ts:20 handleOrder21 -> OrderService21 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_22.ts:20 handleOrder22 -> OrderService22 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_23.ts:20 handleOrder23 -> OrderService23 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_24.ts:20 handleOrder24 -> OrderService24 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_25.ts:20 handleOrder25 -> OrderService25 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_26.ts:20 handleOrder26 -> OrderService26 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_27.ts:20 handleOrder27 -> OrderService27 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_28.ts:20 handleOrder28 -> OrderService28 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_29.ts:20 handleOrder29 -> OrderService29 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_30.ts:20 handleOrder30 -> OrderService30 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_31.ts:20 handleOrder31 -> OrderService31 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_32.ts:20 handleOrder32 -> OrderService32 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_33.ts:20 handleOrder33 -> OrderService33 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_34.ts:20 handleOrder34 -> OrderService34 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_35.ts:20 handleOrder35 -> OrderService35 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_36.ts:20 handleOrder36 -> OrderService36 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_37.ts:20 handleOrder37 -> OrderService37 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_38.ts:20 handleOrder38 -> OrderService38 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_39.ts:20 handleOrder39 -> OrderService39 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "ts_pkg/services/order_svc_40.ts:20 handleOrder40 -> OrderService40 (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "go_pkg/storage/db.go:14 FormatRecord -> ValidateKey (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "go_pkg/scopes/scopes.go:5 process -> normalize (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "go_pkg/scopes/scopes.go:24 RunStage -> Stage.Process (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "go_pkg/alias/alias.go:7 Check -> ValidateKey (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "go_pkg/samename/samename.go:11 SaveAll -> Doc.Save (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "go_pkg/samename/samename.go:11 SaveAll -> Blob.Save (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "cmd/main.go:9 main -> ValidateKey (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "rust_pkg/src/crypto.rs:7 verify_data -> hash_data (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "rust_pkg/src/scopes.rs:3 process -> normalize (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "rust_pkg/src/scopes.rs:24 run_stage -> Stage.process (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "rust_pkg/src/alias.rs:5 digest -> hash_data (calls)",
+      "reason": "unclaimed"
+    },
+    {
+      "anchor": "rust_pkg/src/samename.rs:14 save_all -> Doc.save (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "rust_pkg/src/samename.rs:14 save_all -> Blob.save (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "rust_pkg/src/shape.rs:8 Circle -> Shape (implements)",
+      "reason": "unclaimed"
+    },
+    {
+      "anchor": "rust_pkg/src/main.rs:6 main -> hash_data (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "rust_pkg/src/main.rs:7 main -> process (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "java_pkg/core/Validator.java:10 Validator.sanitize -> Validator.isValid (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "java_pkg/shapes/Circle.java:4 Circle -> Shape (implements)",
+      "reason": "unclaimed"
+    },
+    {
+      "anchor": "java_pkg/shapes/Circle.java:11 Circle.describe -> Circle.area (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "java_pkg/scopes/Scopes.java:18 Scopes.run -> Scopes.process (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "java_pkg/scopes/Scopes.java:14 Scopes.process -> Scopes.process (calls)",
+      "reason": "unclaimed"
+    },
+    {
+      "anchor": "java_pkg/alias/UseStatic.java:8 UseStatic.check -> Validator.isValid (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "java_pkg/overload/Overload.java:9 Overload.checkBoth -> Overload.isValid (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "java_pkg/overload/Overload.java:9 Overload.checkBoth -> Overload.isValid (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "java_pkg/Main.java:8 Main.run -> Validator.isValid (calls)",
+      "reason": "name_only_claim"
+    },
+    {
+      "anchor": "java_pkg/Main.java:9 Main.run -> Validator.sanitize (calls)",
+      "reason": "name_only_claim"
+    }
+  ],
+  "totals": {
+    "sampled": 150,
+    "qualified_claim": 72,
+    "name_only_claim": 69,
+    "unclaimed": 9
+  }
+}
