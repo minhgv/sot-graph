@@ -27,7 +27,7 @@ def make_exe(directory: Path, name: str, body: str) -> str:
     return str(path)
 
 
-def make_cbm_fake(bin_dir: Path, *, version: str | None = "9.9.9-fake",
+def make_cbm_fake(bin_dir: Path, *, version: str | None = "0.10.8",
                   projects: str = "cwd", search_report: str | None = None,
                   trace_report: str | None = None, changes=None) -> None:
     """Install a fake `codebase-memory-mcp` handling the tools sot calls.

@@ -33,6 +33,10 @@ __all__ = [
     "CANONICAL_RELATIONS",
     "MAPPING_TABLE_VERSION",
     "TESTED_CBM_VERSION",
+    "VERSION_COMPATIBLE",
+    "VERSION_UNTESTED",
+    "VERSION_INCOMPATIBLE",
+    "VERSION_UNKNOWN",
     "RelationMapping",
     "CanonicalSubject",
     "NormalizedAssertion",
@@ -56,6 +60,17 @@ CANONICAL_RELATIONS: frozenset[str] = frozenset(
 
 #: CBM release the mapping table below was verified against.
 TESTED_CBM_VERSION = "0.10.8"
+
+#: Wire-compatibility states for the probed provider binary (G1.5).
+#: COMPATIBLE   — exact match with TESTED_CBM_VERSION (golden-verified wire).
+#: UNTESTED     — same major.minor, different patch; wire *may* still match,
+#:                so queries run but every verdict is capped at UNVERIFIABLE.
+#: INCOMPATIBLE — different major.minor; the adapter must fail closed.
+#: UNKNOWN      — probe has not produced a parsable version yet.
+VERSION_COMPATIBLE = "COMPATIBLE"
+VERSION_UNTESTED = "UNTESTED"
+VERSION_INCOMPATIBLE = "INCOMPATIBLE"
+VERSION_UNKNOWN = "UNKNOWN"
 
 #: Version of THIS mapping table; bump when entries change semantics.
 MAPPING_TABLE_VERSION = 1
@@ -228,12 +243,15 @@ def trust_ceiling(
     source_changed: bool = False,
     verification: Any = None,
     snapshot_match: Any = None,
+    version_compatibility: str = VERSION_COMPATIBLE,
 ) -> tuple[str, ResolutionStatus]:
     """Apply the ordered trust ceilings to one provable assertion.
 
     Returns ``(verdict, resolution)``. Unbound snapshots can never reach
     SUPPORTED; missing spans cap at HEURISTIC/INFERRED; multi-target usage is
     AMBIGUOUS regardless of other evidence.
+    Evidence from an UNTESTED/UNKNOWN/INCOMPATIBLE wire (version
+    gate, G1.5) caps at UNVERIFIABLE before any other rule applies.
 
     P2 additive parameters (both optional; ``None`` preserves the legacy
     behaviour exactly):
@@ -267,6 +285,10 @@ def trust_ceiling(
         resolution = ResolutionStatus.INFERRED
     else:
         resolution = ResolutionStatus.AMBIGUOUS
+    if version_compatibility != VERSION_COMPATIBLE:
+        # G1.5: an untested/incompatible wire contract can never publish
+        # verified evidence, regardless of snapshot or span state.
+        return VERDICT_UNVERIFIABLE, resolution
 
     if not snapshot_bound:
         # Structure still informs resolution; the verdict can never rise.
@@ -315,6 +337,7 @@ def normalize_assertion(
     repo_id: str | None = None,
     snapshot_bound: bool = False,
     source_changed: bool = False,
+    version_compatibility: str = VERSION_COMPATIBLE,
 ) -> NormalizedAssertion:
     """Map one CBM assertion to canonical form and apply trust ceilings.
 
@@ -348,6 +371,7 @@ def normalize_assertion(
         has_span=proves_span,
         unique_target=len(unique_targets) == 1,
         source_changed=source_changed,
+        version_compatibility=version_compatibility,
     )
     metadata: dict[str, Any] = {}
     if mapping is not None:

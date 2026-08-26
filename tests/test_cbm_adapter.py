@@ -318,6 +318,59 @@ class TestSchemaDrift:
         assert outcome.payload["relation"] == "teleports"
 
 
+class TestVersionGate:
+    """G1.5 strict wire-compatibility gate against golden-tested 0.10.8."""
+
+    @staticmethod
+    def _gated_exe(tmp_path, version, payload):
+        body = (
+            "import json, sys\n"
+            "if '--version' in sys.argv[1:]:\n"
+            f"    print('codebase-memory-mcp {version}')\n"
+            "    sys.exit(0)\n"
+            "env = {'content': [{'type': 'text', 'text': json.dumps("
+            + repr(payload) + ")}], 'isError': False, 'structuredContent': {}}\n"
+            "print(json.dumps(env))\n"
+        )
+        return make_exe(tmp_path, "cbm-gated", body)
+
+    def test_incompatible_version_fails_closed(self, tmp_path):
+        exe = self._gated_exe(tmp_path, "0.11.0", {"total": 0})
+        provider = CodebaseMemoryProvider(command=[exe])
+        assert provider.probe(str(tmp_path)).healthy
+        assert provider.version_compatibility() == "INCOMPATIBLE"
+        outcome = provider.search_symbols(_sym_request(str(tmp_path), "q"))
+        assert outcome.ok is False
+        assert outcome.metadata["wire_status"] == "version_incompatible"
+        assert "0.10.8" in (outcome.next_action or "")
+        assert "0.10.8" in (outcome.error or "")
+
+    def test_untested_patch_version_runs_but_is_flagged(self, tmp_path):
+        exe = self._gated_exe(tmp_path, "0.10.9", {"total": 0})
+        provider = CodebaseMemoryProvider(command=[exe])
+        provider.probe(str(tmp_path))
+        assert provider.version_compatibility() == "UNTESTED"
+        outcome = provider.search_symbols(_sym_request(str(tmp_path), "q"))
+        assert outcome.ok is True
+        assert outcome.metadata["version_compatibility"] == "UNTESTED"
+
+    def test_compatible_version_runs_compatible(self, tmp_path):
+        exe = self._gated_exe(tmp_path, "0.10.8", {"total": 0})
+        provider = CodebaseMemoryProvider(command=[exe])
+        provider.probe(str(tmp_path))
+        assert provider.version_compatibility() == "COMPATIBLE"
+        outcome = provider.search_symbols(_sym_request(str(tmp_path), "q"))
+        assert outcome.ok is True
+        assert outcome.metadata["version_compatibility"] == "COMPATIBLE"
+
+    def test_unprobed_provider_reports_unknown_without_refusing(self, tmp_path):
+        exe = argv_echo_exe(tmp_path)
+        provider = CodebaseMemoryProvider(command=[exe])
+        assert provider.version_compatibility() == "UNKNOWN"
+        outcome = provider.search_symbols(_sym_request(str(tmp_path), "q"))
+        assert outcome.ok is True
+        assert outcome.metadata["version_compatibility"] == "UNKNOWN"
+
 class TestTimeoutAndOrphans:
     def test_timeout_kills_whole_group_and_reports(self, tmp_path):
         grandchild_file = tmp_path / "grand.pid"
@@ -328,11 +381,16 @@ class TestTimeoutAndOrphans:
             "time.sleep(30)\n"
         )
         exe = make_exe(tmp_path, "cbm-slow", body)
-        provider = CodebaseMemoryProvider(command=[exe], query_timeout_seconds=0.5)
+        provider = CodebaseMemoryProvider(command=[exe], query_timeout_seconds=2.0)
         outcome = provider.search_symbols(_sym_request(str(tmp_path), "q"))
         assert outcome.ok is False
         assert outcome.metadata["wire_status"] == "timeout"
 
+        # The child must record its grandchild before the group kill fires;
+        # wait out interpreter-startup jitter instead of racing the 2s budget.
+        pid_deadline = time.monotonic() + 5.0
+        while not grandchild_file.exists() and time.monotonic() < pid_deadline:
+            time.sleep(0.05)
         grand_pid = int(grandchild_file.read_text())
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:

@@ -20,6 +20,8 @@ from sot_graph.providers.normalization import (
     normalize_assertion,
     normalize_subject,
     resolve_mapping,
+    VERSION_UNTESTED,
+    VERSION_UNKNOWN,
     trust_ceiling,
 )
 
@@ -134,6 +136,27 @@ class TestTrustCeiling:
         )
         assert verdict == "HEURISTIC"
         assert resolution is ResolutionStatus.INFERRED
+
+    def test_untested_wire_caps_at_unverifiable(self):
+        verdict, resolution = trust_ceiling(
+            snapshot_bound=True, has_span=True, unique_target=True,
+            version_compatibility=VERSION_UNTESTED,
+        )
+        assert verdict == "UNVERIFIABLE"
+        assert resolution == ResolutionStatus.EXACT
+
+    def test_unknown_wire_caps_at_unverifiable(self):
+        verdict, _ = trust_ceiling(
+            snapshot_bound=True, has_span=True, unique_target=True,
+            version_compatibility=VERSION_UNKNOWN,
+        )
+        assert verdict == "UNVERIFIABLE"
+
+    def test_default_version_compatibility_preserves_legacy(self):
+        verdict, _ = trust_ceiling(
+            snapshot_bound=True, has_span=True, unique_target=True,
+        )
+        assert verdict == "SUPPORTED"
 
 
 class TestNormalizeAssertion:

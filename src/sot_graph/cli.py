@@ -504,10 +504,18 @@ def _cbm_candidates_from_outcome(outcome, method: str, provider_name: str,
     bound+fresh candidates may reach SUPPORTED. Candidates gain ``verified``
     and ``detail`` fields describing the on-disk verification result.
     """
-    from sot_graph.providers.normalization import normalize_assertion, trust_ceiling
+    from sot_graph.providers.normalization import (
+        VERSION_COMPATIBLE,
+        normalize_assertion,
+        trust_ceiling,
+    )
     from sot_graph.providers.verification import verify_subject
 
     snapshot_match = _snapshot_match_of(outcome)
+    version_compatibility = (
+        (outcome.metadata or {}).get("version_compatibility")
+        or VERSION_COMPATIBLE
+    )
 
     def _finish(assertion):
         cand = _candidate_entry(assertion, provider_name)
@@ -530,6 +538,7 @@ def _cbm_candidates_from_outcome(outcome, method: str, provider_name: str,
             unique_target=len(assertion.targets) == 1,
             verification=verification,
             snapshot_match=snapshot_match,
+            version_compatibility=version_compatibility,
         )
         cand["verdict"] = verdict
         cand["resolution"] = str(getattr(resolution, "value", resolution))
@@ -557,6 +566,7 @@ def _cbm_candidates_from_outcome(outcome, method: str, provider_name: str,
                 provider_relation="detect_changes",
                 targets=(path,),
                 snapshot_bound=False,
+                version_compatibility=version_compatibility,
             )
             candidates.append(_finish(assertion))
         return candidates, truncated, None
@@ -572,6 +582,7 @@ def _cbm_candidates_from_outcome(outcome, method: str, provider_name: str,
                 provider_relation="call",
                 targets=(qn,),
                 snapshot_bound=False,
+                version_compatibility=version_compatibility,
             )
             candidates.append(_finish(assertion))
         return candidates, truncated, None
@@ -587,6 +598,7 @@ def _cbm_candidates_from_outcome(outcome, method: str, provider_name: str,
             provider_relation="define",
             targets=(row["qualified_name"],),
             snapshot_bound=False,
+            version_compatibility=version_compatibility,
         )
         candidates.append(_finish(assertion))
     return candidates, (truncated or has_more), None

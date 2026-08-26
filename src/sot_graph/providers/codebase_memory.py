@@ -44,11 +44,19 @@ from .base import (
     SymbolRequest,
     TraceRequest,
 )
+from .normalization import (
+    TESTED_CBM_VERSION,
+    VERSION_COMPATIBLE,
+    VERSION_INCOMPATIBLE,
+    VERSION_UNTESTED,
+    VERSION_UNKNOWN,
+)
 
 __all__ = [
     "CodebaseMemoryProvider",
     "PROVIDER_NAME",
     "NEXT_ACTION_SYNC",
+    "NEXT_ACTION_VERSION_PIN",
     "SnapshotBinding",
     "SnapshotMatch",
     "snapshot_flags",
@@ -60,6 +68,12 @@ PROVIDER_NAME = "codebase-memory"
 
 #: Actionable fix attached to every index-missing/stale abstention (P1).
 NEXT_ACTION_SYNC = "run sot providers sync codebase-memory"
+
+#: Actionable fix attached to every wire-incompatible fail-close (G1.5).
+NEXT_ACTION_VERSION_PIN = (
+    f"pin codebase-memory-mcp=={TESTED_CBM_VERSION} (golden-verified wire) "
+    "or re-capture tests/fixtures/cbm_golden for the new release"
+)
 
 #: ``codebase-memory-mcp <semver>`` — anchored at start of first stdout line.
 _VERSION_PATTERN = re.compile(r"^codebase-memory-mcp\s+(\S+)")
@@ -284,6 +298,23 @@ class CodebaseMemoryProvider:
         self._project_cache: dict[str, tuple[str | None, str | None, str | None]] = {}
         self._version: str | None = provider_version
 
+    def version_compatibility(self) -> str:
+        """Classify the probed binary release against the golden-tested one.
+
+        COMPATIBLE   — exact match; the golden fixtures prove this wire.
+        UNTESTED     — same major.minor, different patch; queries still run
+                       but downstream verdicts cap at UNVERIFIABLE.
+        INCOMPATIBLE — different major.minor; queries fail closed.
+        UNKNOWN      — probe has not produced a parsable version yet.
+        """
+        if self._version is None:
+            return VERSION_UNKNOWN
+        if self._version == TESTED_CBM_VERSION:
+            return VERSION_COMPATIBLE
+        if self._version.split(".")[:2] == TESTED_CBM_VERSION.split(".")[:2]:
+            return VERSION_UNTESTED
+        return VERSION_INCOMPATIBLE
+
     def probe(self, repo_root: str) -> ProviderStatus:
         """Probe ``<command> --version``; never raises."""
         started = time.monotonic()
@@ -328,7 +359,7 @@ class CodebaseMemoryProvider:
             installed=True,
             healthy=True,
             version=self._version,
-            detail="ok",
+            detail=f"ok; wire-compat={self.version_compatibility()}",
             capabilities=self.capabilities,
         )
 
@@ -360,6 +391,28 @@ class CodebaseMemoryProvider:
         ``snapshot_bind=True`` a successful call additionally fetches
         ``index_status`` (P2) and records the snapshot match with the run.
         """
+        if self.version_compatibility() == VERSION_INCOMPATIBLE:
+            detail = (
+                f"probed version {self._version!r} is wire-incompatible "
+                f"with golden-tested {TESTED_CBM_VERSION!r}; refusing to query"
+            )
+            record = ProviderRunRecord(
+                run_id=f"run_{int(time.time())}_{uuid.uuid4().hex[:8]}",
+                provider_name=PROVIDER_NAME,
+                provider_version=self._version,
+                capability=tool,
+                status="version_incompatible",
+                exit_code=None,
+                duration_ms=0,
+                arguments_redacted=(tool, repo_root),
+                next_action=NEXT_ACTION_VERSION_PIN,
+                detail=detail,
+            )
+            logger.info("cbm %s refused: %s", tool, detail)
+            return _InvokeOutcome(
+                ok=False, status="version_incompatible",
+                error=detail, run=record,
+            )
         cwd = os.path.realpath(repo_root)
         args_file: str | None = None
         try:
@@ -582,16 +635,25 @@ class CodebaseMemoryProvider:
         index_related = outcome.status in (
             "provider_error", "jsonrpc_error", "spawn_failed", "bad_arguments",
         )
-        metadata = {"wire_status": outcome.status}
+        metadata = {
+            "wire_status": outcome.status,
+            "version_compatibility": self.version_compatibility(),
+        }
         # Fail-closed: every outcome carries an explicit freshness marker;
         # unbound/unknown defaults cap downstream trust at UNVERIFIABLE.
         metadata.update(self._match_metadata(outcome.match))
+        if outcome.status == "version_incompatible":
+            next_action = NEXT_ACTION_VERSION_PIN
+        elif index_related:
+            next_action = NEXT_ACTION_SYNC
+        else:
+            next_action = None
         return QueryOutcome(
             ok=outcome.ok,
             run=outcome.run,  # type: ignore[arg-type]
             payload=outcome.payload,
             error=outcome.error,
-            next_action=NEXT_ACTION_SYNC if index_related else None,
+            next_action=next_action,
             metadata=metadata,
         )
 
@@ -902,25 +964,6 @@ class CodebaseMemoryProvider:
             error=shaped.error, next_action=shaped.next_action,
             metadata=metadata,
         )
-
-    def ensure_index(self, request: IndexRequest) -> ProviderRunRecord:
-        """P1 abstention: indexing is NEVER triggered implicitly."""
-        record = ProviderRunRecord(
-            run_id=f"run_{int(time.time())}_{uuid.uuid4().hex[:8]}",
-            provider_name=PROVIDER_NAME,
-            provider_version=self._version,
-            capability="ensure_index",
-            status="abstained",
-            exit_code=None,
-            duration_ms=0,
-            arguments_redacted=(
-                "ensure_index", request.repo_root, f"force={request.force}",
-            ),
-            next_action=NEXT_ACTION_SYNC,
-            detail="P1 adapter does not invoke index_repository; sync explicitly.",
-        )
-        logger.info("cbm ensure_index abstained: %s", NEXT_ACTION_SYNC)
-        return record
 
     def impact(self, request: ImpactRequest) -> QueryOutcome:
         """Blast-radius query via the ``detect_changes`` tool."""

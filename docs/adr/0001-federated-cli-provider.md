@@ -123,3 +123,54 @@ binding is honestly `UNVERIFIABLE` until either (a) CBM exposes git metadata aga
 or (b) a future version adds a manifest/file-set digest we can bind. Path-level
 freshness via `check_index_coverage` (`hash_status`) is used as the staleness
 authority for coverage but never elevates a verdict past `UNVERIFIABLE` on its own.
+
+### G1 addendum — wire-contract receipts, version gate, fixture provenance (2026-08-26)
+
+**Golden capture receipts (G1.1/G1.2).** All seven fixtures
+(`tests/fixtures/cbm_golden/{list_projects,index_status,search_graph,trace_path,detect_changes,get_architecture,check_index_coverage}.json`)
+are verbatim stdout captures of binary `codebase-memory-mcp 0.10.8` against the committed
+`tests/fixtures/cbm_sample_repo/` (9 tracked files). Full argv/cwd/exit receipts live in
+`_meta.json` (`captures[]`); all seven exited 0. Root cause of the earlier "missing from Git"
+state: a repo-wide `*.json` ignore rule (`.gitignore:31`) silently excluded the fixtures —
+fixed by an explicit `!tests/fixtures/**/*.json` exception, so the golden suite now runs from
+a clean clone (`tests/test_cbm_golden.py`, 17 tests).
+
+**Strict version compatibility gate (G1.5).** The probed binary release is now classified
+against `TESTED_CBM_VERSION` ("0.10.8") and the code gate shares this single vocabulary:
+
+| State | Rule | Behavior |
+|---|---|---|
+| `COMPATIBLE` | exact match with golden-tested release | adapter runs normally |
+| `UNTESTED` | same major.minor, different patch | queries run, but every verdict caps at `UNVERIFIABLE` |
+| `INCOMPATIBLE` | different major.minor | fail closed: no query is issued; `next_action` = pin binary |
+| `UNKNOWN` | probe never produced a parsable version | queries run, verdicts capped at `UNVERIFIABLE` |
+
+Anchors: `src/sot_graph/providers/codebase_memory.py::version_compatibility` (classification),
+`_invoke` (`version_incompatible` fail-close), `_query_outcome` (metadata stamping),
+`src/sot_graph/providers/normalization.py::trust_ceiling(version_compatibility=...)` (ceiling
+rule 0, before snapshot/span rules; default preserves the legacy matrix),
+`src/sot_graph/cli.py::_cbm_candidates_from_outcome` (threads the outcome metadata into
+every ceiling/normalize call). Tests: `tests/test_cbm_adapter.py::TestVersionGate`
+(fail-closed / untested-runs / compatible / unprobed-unknown) and
+`tests/test_cbm_normalization.py` (`test_untested_wire_caps_at_unverifiable`,
+`test_unknown_wire_caps_at_unverifiable`, `test_default_version_compatibility_preserves_legacy`).
+
+**Failure-mode matrix coverage (G1.6)** — wire envelope behaviors and their pinning tests:
+
+| Case | Test anchor |
+|---|---|
+| nonzero exit after valid envelope | `test_cbm_adapter.py::test_exit_nonzero_after_ok_envelope_fails_closed` |
+| malformed stdout / logs mixed into stdout | `...::test_...invalid_json` cases (`test_cbm_adapter.py:225-266`) |
+| multiple JSON documents | `...::test_multiple_json_documents` |
+| payload over cap | `...::test_oversized_payload_truncated_not_parsed` |
+| schema drift (5 envelope shapes) | `...::TestSchemaDrift::test_drifted_envelopes_fail_closed` |
+| version output unparseable / probe nonzero | `...::test_unparseable_version_output_is_unhealthy`, `...::test_nonzero_version_probe_is_unhealthy` |
+| binary missing | `...::TestProbe::test_missing_executable_not_installed` + wiring optional-mode fallback tests |
+| untested/unknown release | `...::TestVersionGate` (above) |
+| pagination truncation propagation | `test_cli_provider_wiring.py::TestTruncationPropagation` |
+
+**Fixture provenance (G1.3).** `_meta.json` now pins: CBM source commit `010569f`, capture
+OS/arch, `capture_command_digest` (sha256 over canonical `captures[]`), and
+`fixture_repo_digest` (sha256 over the git-tracked sample repo) with the exact recomputation
+recipe, so any future drift of either the commands or the fixture repo is detectable from a
+clean clone.
