@@ -47,12 +47,24 @@ COMPUTE_TOTAL = {
 }
 
 
-def _search_payload(*rows: str, has_more: bool = False) -> str:
-    text = "\n".join(rows) + f"\nhas_more: {'true' if has_more else 'false'}\n"
-    return text
+def _search_payload(*rows: str, has_more: bool = False) -> dict:
+    """Build a structured ``search_graph`` format=json payload (P3.1).
+
+    Row strings keep the test-friendly ``qn kind path lines rank`` shape and
+    are compiled into the wire's cols/rows model here.
+    """
+    cols = ["qn", "label", "file", "lines", "rank"]
+    compiled = []
+    for row in rows:
+        qn, kind, path, lines, rank = row.rsplit(" ", 4)
+        compiled.append([qn, kind, path, lines, float(rank)])
+    return {
+        "total": len(compiled), "search_mode": "bm25",
+        "cols": cols, "rows": compiled, "has_more": has_more,
+    }
 
 
-def _fake_outcome(payload: str, snapshot_match=None, ok: bool = True):
+def _fake_outcome(payload, snapshot_match=None, ok: bool = True):
     ns = SimpleNamespace(ok=ok, payload=payload, metadata={}, error=None,
                          next_action=None)
     if snapshot_match is not None:
@@ -510,7 +522,7 @@ class TestFederatedExtrasGaps:
             )
             monkeypatch.setattr(
                 orch, "run_federated_query",
-                lambda plan, root, kind, sym: (outcome, "search"),
+                lambda plan, root, kind, sym, **kwargs: (outcome, "search"),
             )
             return orch.federated_extras(
                 "prefer:cbm", str(FIXTURE_REPO), "explore", "compute_total"

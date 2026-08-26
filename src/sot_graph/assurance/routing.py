@@ -32,9 +32,8 @@ COMMAND_CAPABILITY: Dict[str, str] = {
     "explore": "callgraph",
     "usages": "symbols",
     "diff-impact": "impact",
+    "architecture": "architecture",
 }
-
-
 def parse_provider_spec(value: Optional[str]) -> Tuple[str, Optional[str]]:
     """Validate a provider spec string; returns ``(mode, name)``.
 

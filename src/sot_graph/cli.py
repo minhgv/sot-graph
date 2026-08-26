@@ -259,10 +259,18 @@ def _print_federation_notes(fed: Optional[dict]) -> None:
 
 
 def cmd_providers_sync(args: argparse.Namespace, root: str) -> int:
-    """Explicit-only index sync: P1 abstains, printing the honest next action."""
+    """Explicit index sync with its own budget, lock, progress, and receipt.
+
+    Wraps the provider's ``index_repository`` (P3.1): never triggered from a
+    read path, guarded by the project write lock so concurrent sot writes
+    cannot interleave with an external reindex, and always emits a receipt
+    (JSON or text) recording what ran and how it ended.
+    """
     from dataclasses import asdict
 
     from sot_graph.config import load_config
+    from sot_graph.db import Database
+    from sot_graph.locking import LockBusy, WriteLock
     from sot_graph.providers.base import IndexRequest
     from sot_graph.providers.codebase_memory import CodebaseMemoryProvider
     from sot_graph.providers_registry import ADAPTER_PROBED_PROVIDERS
@@ -275,16 +283,43 @@ def cmd_providers_sync(args: argparse.Namespace, root: str) -> int:
             f"supported: {', '.join(sorted(ADAPTER_PROBED_PROVIDERS))}"
         )
         return 1
-    provider = CodebaseMemoryProvider(config=pcfg)
-    record = provider.ensure_index(IndexRequest(repo_root=root))
-    print(f"🔁 sot providers sync {name}: {record.status} "
-          f"(P1 never triggers indexing implicitly)")
-    print(f"   detail      : {record.detail}")
-    print(f"   next_action : install/index explicitly via "
-          f"codebase-memory-mcp cli index_repository, then re-run "
-          f"sot providers sync {name}")
-    print("   run_record  : " + json.dumps(asdict(record), indent=2))
-    return 0
+
+    timeout = float(getattr(args, "timeout", 0) or 0) or None
+    progress = bool(getattr(args, "progress", False))
+    lock_path = os.path.join(root, ".sot", "write.lock")
+    try:
+        with WriteLock(lock_path, timeout_ms=60_000):
+            # The ledger connection is opened only for the sync itself, so
+            # the provider records the index run it just executed.
+            db = Database(os.path.join(root, ".sot", "sot.db"))
+            try:
+                provider = CodebaseMemoryProvider(config=pcfg, db=db)
+                record = provider.index(
+                    IndexRequest(repo_root=root, timeout_seconds=timeout),
+                    progress=progress,
+                )
+            finally:
+                db.close()
+    except LockBusy:
+        print(
+            "❌ another sot writer holds the project lock; "
+            "retry 'sot providers sync' once it finishes"
+        )
+        return 1
+
+    receipt = asdict(record)
+    if getattr(args, "json", False):
+        print(json.dumps({"providers_sync": receipt}, indent=2))
+    else:
+        status_icon = "✅" if record.status == "ok" else "⚠️ "
+        print(f"{status_icon} sot providers sync {name}: {record.status}")
+        print(f"   capability   : {record.capability}")
+        print(f"   exit_code    : {record.exit_code}")
+        print(f"   duration_ms  : {record.duration_ms}")
+        print(f"   detail       : {record.detail}")
+        if record.next_action:
+            print(f"   next_action  : {record.next_action}")
+    return 0 if record.status == "ok" else 1
 
 
 def cmd_explore(args: argparse.Namespace, db: Database, root: str = ".") -> int:
@@ -1229,6 +1264,9 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
     fed = federated_extras(
         resolve_federated_spec(getattr(args, "provider", None), root),
         root, "diff-impact", target,
+        staged=bool(getattr(args, "staged", False)),
+        working_tree=bool(getattr(args, "working_tree", False)),
+        depth=int(getattr(args, "depth", 2) or 2),
     )
     if fed is not None and fed["fail_message"]:
         print(f"❌ {fed['fail_message']}", file=sys.stderr)
@@ -1839,8 +1877,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_prov_res.add_argument("--capability", required=True, help="Capability to resolve (e.g. impact, symbols, callgraph)")
     p_prov_res.add_argument("--format", default="text", choices=["text", "json"], help="Output format (default: text)")
 
-    p_prov_sync = prov_subs.add_parser("sync", help="Explicit index sync for one provider (P1: abstains, prints next action)")
+    p_prov_sync = prov_subs.add_parser(
+        "sync",
+        help="Explicit index sync for one provider (own timeout, lock, receipt)",
+    )
     p_prov_sync.add_argument("provider_name", help="Provider name (e.g. codebase-memory)")
+    p_prov_sync.add_argument("--json", action="store_true", help="Emit the run receipt as JSON")
+    p_prov_sync.add_argument("--progress", action="store_true", help="Forward the provider's progress stream")
+    p_prov_sync.add_argument("--timeout", type=float, default=0, help="Index budget in seconds (0 = adapter default)")
 
     # diff-impact
     p_diff = subparsers.add_parser("diff-impact", help="Git diff blast radius, upstream caller traversal, and API impact analysis")

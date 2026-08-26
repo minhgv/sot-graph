@@ -77,10 +77,20 @@ class TraceRequest:
 
 @dataclass(frozen=True)
 class ImpactRequest:
-    """Estimate blast radius of changing one file/module."""
+    """Estimate blast radius of a change set (P3.1: git-ref scoped).
+
+    ``since`` is the git ref CBM compares from (e.g. ``HEAD~1``); the wire
+    tool diffs ``since...HEAD``. Staged/working-tree scopes are NOT
+    representable on that wire and must surface as a scope conflict, never
+    silently merged.
+    """
 
     repo_root: str
     path: str
+    since: str | None = None
+    depth: int = 2
+    staged: bool = False
+    working_tree: bool = False
     project: str | None = None  # explicit provider-side project name override
     timeout_seconds: float | None = None
 
@@ -99,6 +109,7 @@ class CoverageRequest:
 
     repo_root: str
     paths: tuple[str, ...] = ()
+    project: str | None = None  # explicit provider-side project name
     timeout_seconds: float | None = None
 
 

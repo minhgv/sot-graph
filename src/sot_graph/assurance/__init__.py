@@ -6,7 +6,8 @@ One engine behind both surfaces:
   descriptor, stale-journal detection, ledger invalidation marking).
 - :mod:`.routing` — provider spec parsing + capability routing tables.
 - :mod:`.orchestrator` — federated provider negotiation, typed outcomes,
-  candidate normalization, target-conflict adjudication.
+  structured (JSON) wire parsing, candidate normalization, target-conflict
+  adjudication.
 
 CLI handlers and McpService import from here; no orchestration logic lives
 in presentation layers. identity/normalization/coverage/verification
@@ -16,13 +17,16 @@ package in their owning phases (P4-P7).
 
 from .engine import assured_query_context, resolve_symbol, stale_files_warning
 from .orchestrator import (
+    architecture,
     cbm_candidates_from_outcome,
     envelope_fed_kwargs,
     federated_extras,
     federation_plan,
     resolve_federated_spec,
     run_federated_query,
+    search_rows_from_payload,
     target_conflicts,
+    trace_edges_from_payload,
 )
 from .routing import (
     COMMAND_CAPABILITY,
@@ -36,12 +40,15 @@ __all__ = [
     "assured_query_context",
     "resolve_symbol",
     "stale_files_warning",
+    "architecture",
     "cbm_candidates_from_outcome",
     "envelope_fed_kwargs",
     "federated_extras",
     "federation_plan",
     "resolve_federated_spec",
     "run_federated_query",
+    "search_rows_from_payload",
+    "trace_edges_from_payload",
     "target_conflicts",
     "COMMAND_CAPABILITY",
     "QUERYABLE_PROVIDERS",

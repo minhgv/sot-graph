@@ -883,8 +883,16 @@ class CodebaseMemoryProvider:
             dirty=dirty, dirty_fingerprint=fingerprint,
         )
 
+    #: Explicit index sync budget: indexing is heavyweight, queries are not.
+    _INDEX_TIMEOUT_SECONDS = 900.0
+
     def ensure_index(self, request: IndexRequest) -> ProviderRunRecord:
-        """P1 abstention: indexing is NEVER triggered implicitly."""
+        """Implicit-path abstention: queries NEVER trigger indexing.
+
+        The explicit admin path is :meth:`index` (``sot providers sync``);
+        keeping this hook abstaining preserves the no-implicit-index
+        invariant for every read-side caller.
+        """
         record = ProviderRunRecord(
             run_id=f"run_{int(time.time())}_{uuid.uuid4().hex[:8]}",
             provider_name=PROVIDER_NAME,
@@ -897,13 +905,163 @@ class CodebaseMemoryProvider:
                 "ensure_index", request.repo_root, f"force={request.force}",
             ),
             next_action=NEXT_ACTION_SYNC,
-            detail="P1 adapter does not invoke index_repository; sync explicitly.",
+            detail="implicit indexing refused; run 'sot providers sync "
+                   "codebase-memory' for the explicit index path",
         )
         logger.info("cbm ensure_index abstained: %s", NEXT_ACTION_SYNC)
         return record
 
+    def index(self, request: IndexRequest, *, progress: bool = False) -> ProviderRunRecord:
+        """EXPLICIT index sync: invoke ``index_repository`` and record it.
+
+        Never called from a read path. Own time budget (heavyweight), args
+        travel via --args-file, and the run is persisted whatever the exit
+        status so the ledger keeps the receipt. ``--progress`` forwards the
+        provider's own progress stream for interactive syncs.
+        """
+        timeout = request.timeout_seconds or self._INDEX_TIMEOUT_SECONDS
+        args: dict[str, Any] = {"repo_path": os.path.realpath(request.repo_root)}
+        argv = [
+            *self.command, "cli",
+            *(["--progress"] if progress else []),
+            "--json", "index_repository", "--args-file", "@ARGS@",
+        ]
+        # run_command takes a closed argv; splice the real args-file in below.
+        args_file: str | None = None
+        started = time.monotonic()
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", prefix="cbm-index-", delete=False,
+                encoding="utf-8",
+            ) as handle:
+                json.dump(args, handle, ensure_ascii=False)
+                args_file = handle.name
+            argv[argv.index("@ARGS@")] = args_file
+            result = run_command(
+                argv, cwd=os.path.realpath(request.repo_root),
+                timeout_seconds=timeout,
+                max_output_bytes=self._max_output_bytes,
+            )
+            duration_ms = int((time.monotonic() - started) * 1000)
+        except OSError as exc:
+            duration_ms = int((time.monotonic() - started) * 1000)
+            return self._index_record(
+                request, result=None, status="spawn_failed",
+                duration_ms=duration_ms, detail=str(exc), redacted=("index_repository",),
+            )
+        finally:
+            if args_file is not None:
+                try:
+                    os.unlink(args_file)
+                except OSError:  # pragma: no cover - best-effort cleanup
+                    pass
+        if result.timed_out:
+            status, detail = "timeout", (
+                "index_repository exceeded its time budget and was killed; "
+                "re-run 'sot providers sync codebase-memory' to resume"
+            )
+        elif result.error is not None:
+            status, detail = "spawn_failed", result.error
+        elif result.truncated:
+            status, detail = "truncated", (
+                "index_repository output exceeded the byte cap; index state unknown"
+            )
+        elif result.returncode not in (0, None):
+            status, detail = (
+                "bad_arguments" if result.returncode == 2 else "provider_error"
+            ), f"index_repository exited {result.returncode}; stderr={result.stderr.strip()[:200]!r}"
+        else:
+            status, detail = "ok", "index_repository completed"
+        return self._index_record(
+            request, result=result, status=status, duration_ms=duration_ms,
+            detail=detail, redacted=tuple(redact_argv(result.argv)),
+        )
+
+    def _index_record(
+        self, request: IndexRequest, *, result, status: str,
+        duration_ms: int, detail: str, redacted: tuple,
+    ) -> ProviderRunRecord:
+        record = ProviderRunRecord(
+            run_id=f"run_{int(time.time())}_{uuid.uuid4().hex[:8]}",
+            provider_name=PROVIDER_NAME,
+            provider_version=self._version,
+            capability="index_repository",
+            status=status,
+            exit_code=(result.returncode if result is not None else None),
+            duration_ms=duration_ms,
+            arguments_redacted=redacted,
+            next_action=None if status == "ok" else NEXT_ACTION_SYNC,
+            detail=detail,
+        )
+        if result is not None and self._db is not None:
+            try:
+                self._db.record_provider_run(
+                    PROVIDER_NAME,
+                    provider_version=self._version,
+                    capability="index_repository",
+                    snapshot_hash=None,
+                    project_root=os.path.realpath(request.repo_root),
+                    position_encoding="UTF-8",
+                    arguments_json=json.dumps(list(record.arguments_redacted)),
+                    run_id=record.run_id,
+                    status=status,
+                    exit_code=result.returncode,
+                    duration_ms=duration_ms,
+                    command_digest=_command_digest(record.arguments_redacted),
+                )
+            except Exception as exc:  # pragma: no cover - defensive ledger guard
+                logger.warning(
+                    "cbm ledger persistence failed for index run %s: %s",
+                    record.run_id, exc,
+                )
+        else:
+            logger.info("cbm index_repository %s: %s", status, detail)
+        return record
+
+    def _structured_payload(self, shaped: QueryOutcome, tool: str) -> QueryOutcome:
+        """Decode the ``format=json`` payload of a successful outcome (P3.1).
+
+        The wire's JSON body arrives as the envelope text content, so this
+        adapter owns the str -> object decode: any drift (non-JSON text,
+        non-object body) is a fail-closed ``schema_drift`` outcome — never
+        parsed leniently, never passed through as text for someone else to
+        guess at.
+        """
+        if not shaped.ok:
+            return shaped
+        payload = shaped.payload
+        if isinstance(payload, Mapping):
+            return shaped
+        if not isinstance(payload, str):
+            return self._drift_outcome(tool, "payload is not JSON text")
+        try:
+            decoded = json.loads(payload)
+        except ValueError:
+            return self._drift_outcome(
+                tool, "format=json payload is not valid JSON text"
+            )
+        if not isinstance(decoded, Mapping):
+            return self._drift_outcome(
+                tool, f"format=json payload is {type(decoded).__name__}, expected object"
+            )
+        return QueryOutcome(
+            ok=shaped.ok, run=shaped.run, payload=decoded,
+            error=shaped.error, next_action=shaped.next_action,
+            metadata=shaped.metadata,
+        )
+
+    def _drift_outcome(self, tool: str, detail: str) -> QueryOutcome:
+        return QueryOutcome(
+            ok=False, run=None, payload=None,
+            error=f"{tool} schema drift: {detail}; abstaining",
+            next_action=None,
+            metadata={"wire_status": "schema_drift",
+                      "version_compatibility": self.version_compatibility(),
+                      "freshness": "UNBOUND", "snapshot_bound": False},
+        )
+
     def search_symbols(self, request: SymbolRequest) -> QueryOutcome:
-        """Free-text symbol search via the ``search_graph`` tool."""
+        """Structured symbol search via ``search_graph`` with format=json."""
         project, problem, next_action = self._project_for(
             request.repo_root, getattr(request, "project", None)
         )
@@ -912,7 +1070,8 @@ class CodebaseMemoryProvider:
                 "search_graph", request.repo_root, problem, next_action
             )
         args: dict[str, Any] = {
-            "query": request.query, "limit": request.limit, "project": project,
+            "query": request.query, "limit": request.limit,
+            "project": project, "format": "json",
         }
         if request.language is not None:
             args["language"] = request.language
@@ -922,10 +1081,10 @@ class CodebaseMemoryProvider:
             timeout_seconds=request.timeout_seconds or self._query_timeout,
             project=project, snapshot_bind=True,
         )
-        return self._query_outcome(outcome)
+        return self._structured_payload(self._query_outcome(outcome), "search_graph")
 
     def trace(self, request: TraceRequest) -> QueryOutcome:
-        """Call-path trace via the ``trace_path`` tool."""
+        """Structured call-path trace via ``trace_path`` with format=json."""
         project, problem, next_action = self._project_for(
             request.repo_root, getattr(request, "project", None)
         )
@@ -936,17 +1095,20 @@ class CodebaseMemoryProvider:
         outcome = self._invoke(
             "trace_path",
             {
-                # The real wire expects ``function_name`` (ADR-0001 §6).
+                # The real wire expects ``function_name`` (ADR-0001 §6) and
+                # ``depth`` (P3.1: map the request's max_depth).
                 "function_name": request.symbol,
                 "direction": request.direction,
-                "max_depth": request.max_depth,
+                "depth": request.max_depth,
                 "project": project,
+                "format": "json",
+                "include_evidence": True,
             },
             repo_root=request.repo_root,
             timeout_seconds=request.timeout_seconds or self._query_timeout,
             project=project, snapshot_bind=True,
         )
-        return self._query_outcome(outcome)
+        return self._structured_payload(self._query_outcome(outcome), "trace_path")
 
     def _refine_coverage_freshness(self, shaped: QueryOutcome) -> QueryOutcome:
         """Downgrade a bound coverage outcome whose entries are not fresh.
@@ -986,7 +1148,26 @@ class CodebaseMemoryProvider:
         )
 
     def impact(self, request: ImpactRequest) -> QueryOutcome:
-        """Blast-radius query via the ``detect_changes`` tool."""
+        """Blast-radius query via ``detect_changes`` with format=json.
+
+        The wire diffs git refs (``since...HEAD``). A staged or working-tree
+        scope cannot be represented there — the adapter records an honest
+        scope conflict instead of merging scopes builtin never asked for.
+        """
+        if request.staged or request.working_tree:
+            scopes = ", ".join(
+                s for s, on in (
+                    ("staged", request.staged),
+                    ("working-tree", request.working_tree),
+                ) if on
+            )
+            return self._abstained_outcome(
+                "detect_changes", request.repo_root,
+                f"scope conflict: detect_changes compares git refs "
+                f"(since...HEAD) only; {scopes} scope is builtin-only and is "
+                f"never merged into external evidence",
+                next_action=None,
+            )
         project, problem, next_action = self._project_for(
             request.repo_root, getattr(request, "project", None)
         )
@@ -994,13 +1175,22 @@ class CodebaseMemoryProvider:
             return self._abstained_outcome(
                 "detect_changes", request.repo_root, problem, next_action
             )
+        args: dict[str, Any] = {
+            "project": project,
+            "scope": "impact",
+            "direction": "inbound",
+            "depth": request.depth,
+            "format": "json",
+        }
+        if request.since is not None:
+            args["since"] = request.since
         outcome = self._invoke(
-            "detect_changes", {"path": request.path, "project": project},
+            "detect_changes", args,
             repo_root=request.repo_root,
             timeout_seconds=request.timeout_seconds or self._query_timeout,
             project=project, snapshot_bind=True,
         )
-        return self._query_outcome(outcome)
+        return self._structured_payload(self._query_outcome(outcome), "detect_changes")
 
     def architecture(self, request: ArchitectureRequest) -> QueryOutcome:
         """Module structure via the ``get_architecture`` tool."""
@@ -1020,20 +1210,22 @@ class CodebaseMemoryProvider:
         return self._query_outcome(outcome)
 
     def coverage(self, request: CoverageRequest) -> QueryOutcome:
-        """Index-coverage check via the ``check_index_coverage`` tool.
-
-        Coverage is itself an index probe: a failure here is exactly the
-        missing/stale-index signal, so ``next_action`` is always attached.
-        The query payload doubles as the coverage half of the snapshot
-        match: any entry not ``hash_status == "fresh"`` downgrades the run
-        to STALE (fail-closed).
-        """
-        args: dict[str, Any] = {"paths": list(request.paths)}
+        """Index-coverage check via ``check_index_coverage`` (P3.1: explicit project)."""
+        project, problem, next_action = self._project_for(
+            request.repo_root, getattr(request, "project", None)
+        )
+        if project is None:
+            return self._abstained_outcome(
+                "check_index_coverage", request.repo_root, problem, next_action
+            )
+        args: dict[str, Any] = {
+            "paths": list(request.paths), "project": project,
+        }
         outcome = self._invoke(
             "check_index_coverage", args,
             repo_root=request.repo_root,
             timeout_seconds=request.timeout_seconds or self._query_timeout,
-            snapshot_bind=True,
+            project=project, snapshot_bind=True,
         )
         shaped = self._query_outcome(outcome)
         if not shaped.ok:

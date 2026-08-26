@@ -302,8 +302,9 @@ class TestSchemaDrift:
         assert outcome.metadata["wire_status"] == expected_status
         assert outcome.next_action is None  # drift is not an index problem
 
-    def test_non_json_text_report_passes_through_verbatim(self, tmp_path):
-        """Text-report tools (ADR-0001 §6) surface their report verbatim."""
+    def test_non_json_text_report_fails_closed_as_drift(self, tmp_path):
+        """P3.1: search_graph is queried with format=json; a text report is
+        schema drift and must abstain — no lenient text parsing, ever."""
         body = (
             "import json, sys\n"
             "env = {'content': [{'type': 'text', 'text': 'total: 0\\nhas_more: false'}],\n"
@@ -314,8 +315,9 @@ class TestSchemaDrift:
         outcome = CodebaseMemoryProvider(command=[exe]).search_symbols(
             _sym_request(str(tmp_path), "q")
         )
-        assert outcome.ok is True
-        assert outcome.payload == "total: 0\nhas_more: false"
+        assert outcome.ok is False
+        assert outcome.metadata["wire_status"] == "schema_drift"
+        assert "not valid JSON" in outcome.error
 
     def test_unknown_enum_like_field_preserved_verbatim(self, tmp_path):
         """Unknown payload vocabulary passes through untouched — no guessing."""
@@ -505,7 +507,7 @@ class TestEnsureIndexAbstainsP1:
         assert record.status == "abstained"
         assert record.exit_code is None
         assert record.next_action == NEXT_ACTION_SYNC
-        assert "does not invoke index_repository" in record.detail
+        assert "implicit indexing refused" in record.detail
 
     def test_coverage_failure_points_at_sync(self, tmp_path):
         exe = make_exe(tmp_path, "cbm", "import sys; sys.exit(7)\n")

@@ -79,18 +79,29 @@ def make_cbm_fake(bin_dir: Path, *, version: str | None = "0.10.8",
     if search_report is not None:
         lines += [f"    payload = {search_report!r}"]
     else:
-        lines += ["    payload = 'total: 0\\nhas_more: false'"]
+        # P3.1: search_graph is queried with format=json; the empty answer
+        # is the structured zero-row model, not a text report.
+        lines += ["    payload = {'total': 0, 'search_mode': 'bm25',"
+                  " 'cols': ['qn', 'label', 'file', 'lines', 'rank'],"
+                  " 'rows': [], 'has_more': False}"]
     lines += ["elif tool == 'trace_path':"]
     if trace_report is not None:
         lines += [f"    payload = {trace_report!r}"]
     else:
-        lines += ["    payload = 'callees_total: 0\\ncallers_total: 0'"]
+        lines += [
+            "    payload = {'function': '', 'direction': 'both',"
+            " 'callees_total': 0, 'callees': {'cols': ['name', 'hop'],"
+            " 'groups': []}, 'callers_total': 0,"
+            " 'callers': {'cols': ['name', 'hop'], 'groups': []}}",
+        ]
     lines += ["elif tool == 'detect_changes':"]
     if changes is not None:
         lines += [f"    payload = {changes!r}"]
     else:
         lines += ["    payload = {'changed_files': [], 'impacted': []}"]
     lines += [
+        "elif tool == 'index_repository':",
+        "    payload = {'ok': True, 'indexed': True}",
         "else:",
         "    payload = ''",
         "text = payload if isinstance(payload, str) else json.dumps(payload)",
@@ -227,13 +238,17 @@ class TestRequireFailsClosedUnhealthy:
         assert "unavailable" in captured.err
 
 
-TRACE_REPORT = (
-    "function: target\ndirection: both\n"
-    "callees_total: 1\ncallees: 1  (rows: name hop)\n"
-    "fake-proj.core:\n  helper 1\n"
-    "callers_total: 1\ncallers: 1  (rows: name hop)\n"
-    "fake-proj.app:\n  caller 1\n"
-)
+TRACE_REPORT = {
+    "function": "target", "direction": "both",
+    "callees_total": 1,
+    "callees": {"cols": ["name", "hop", "strategy", "confidence"],
+                "groups": [{"qn_prefix": "fake-proj.core",
+                            "rows": [["helper", 1, "lsp", 0.95]]}]},
+    "callers_total": 1,
+    "callers": {"cols": ["name", "hop", "strategy", "confidence"],
+                "groups": [{"qn_prefix": "fake-proj.app",
+                            "rows": [["caller", 1, "lsp", 0.93]]}]},
+}
 
 
 class TestMergeOrderAndVerdict:
@@ -277,12 +292,12 @@ class TestMergeOrderAndVerdict:
             'capabilities = ["symbols"]\n'
         )
         # CBM claims `target` lives in app2.py while builtin says app.py
-        report = (
-            "total: 1\nsearch_mode: bm25\n"
-            "results: 1  (cols: qn label file lines rank)\n"
-            "  fake-proj.app2.target Function app2.py 9-9 -5.0\n"
-            "has_more: false\n"
-        )
+        report = {
+            "total": 1, "search_mode": "bm25",
+            "cols": ["qn", "label", "file", "lines", "rank"],
+            "rows": [["fake-proj.app2.target", "Function", "app2.py", "9-9", -5.0]],
+            "has_more": False,
+        }
         make_cbm_fake(bin_dir, search_report=report)
         monkeypatch.setenv("PATH", str(bin_dir))
         rc = cli_main([
@@ -308,12 +323,12 @@ class TestTruncationPropagation:
             "[providers.codebase-memory]\n"
             'capabilities = ["symbols"]\n'
         )
-        report = (
-            "total: 2\nsearch_mode: bm25\n"
-            "results: 2  (cols: qn label file lines rank)\n"
-            "  fake-proj.app.target Function app.py 1-2 -5.0\n"
-            "has_more: true\n"
-        )
+        report = {
+            "total": 2, "search_mode": "bm25",
+            "cols": ["qn", "label", "file", "lines", "rank"],
+            "rows": [["fake-proj.app.target", "Function", "app.py", "1-2", -5.0]],
+            "has_more": True,
+        }
         make_cbm_fake(bin_dir, search_report=report)
         monkeypatch.setenv("PATH", str(bin_dir))
         rc = cli_main([
@@ -326,13 +341,33 @@ class TestTruncationPropagation:
 
 
 class TestProvidersSync:
-    def test_sync_prints_abstention_and_next_action(self, repo, monkeypatch, capsys):
-        no_spawn(monkeypatch)  # ensure_index must never spawn anything
-        rc = cli_main(["--root", str(repo), "providers", "sync", "codebase-memory"])
+    @requires_path_spawned_cbm
+    def test_sync_invokes_index_and_emits_receipt(self, repo, bin_dir, monkeypatch, capsys):
+        """P3.1: explicit sync wraps index_repository with lock + receipt."""
+        allow_external(repo, True)
+        make_cbm_fake(bin_dir)  # answers index_repository with ok
+        monkeypatch.setenv("PATH", str(bin_dir))
+        rc = cli_main([
+            "--root", str(repo), "providers", "sync", "codebase-memory",
+            "--json",
+        ])
         captured = capsys.readouterr()
-        assert rc == 0
-        assert "abstained" in captured.out
-        assert "index_repository" in captured.out
+        assert rc == 0, captured.err + captured.out
+        receipt = json.loads(captured.out)["providers_sync"]
+        assert receipt["capability"] == "index_repository"
+        assert receipt["status"] == "ok"
+        assert receipt["run_id"].startswith("run_")
+
+    def test_sync_never_runs_without_explicit_command(self, repo, monkeypatch, capsys):
+        """The implicit path (ensure_index) still abstains — no spawn."""
+        no_spawn(monkeypatch)
+        from sot_graph.providers.base import IndexRequest
+        from sot_graph.providers.codebase_memory import CodebaseMemoryProvider
+
+        provider = CodebaseMemoryProvider()
+        record = provider.ensure_index(IndexRequest(repo_root=str(repo)))
+        assert record.status == "abstained"
+        assert "implicit indexing refused" in record.detail
 
     def test_sync_unknown_provider_fails_cleanly(self, repo):
         rc = cli_main(["--root", str(repo), "providers", "sync", "gitnexus"])

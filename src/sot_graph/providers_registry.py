@@ -45,6 +45,19 @@ CAPABILITY_PRIORITY: dict[str, tuple[str, ...]] = {
     "broad-language-discovery": ("codebase-memory", "gitnexus", "sot-builtin"),
 }
 
+#: sot-builtin measured per language x relation F1 (oracle P0 baseline,
+#: benchmarks/oracle/builtin-baseline.json, corpus digest ce6feeb9). The
+#: builtin does NOT advertise a blanket callgraph capability: it declares
+#: where it is strong (python/java), moderate (typescript/go calls) and
+#: weak (rust; java implements) so routing and reports stay honest.
+BUILTIN_LANGUAGE_SCORECARD: dict[str, dict[str, float]] = {
+    "python": {"calls": 0.997, "extends": 1.0},
+    "java": {"calls": 0.996, "implements": 0.0},
+    "typescript": {"calls": 0.747, "implements": 1.0},
+    "go": {"calls": 0.578},
+    "rust": {"calls": 0.044, "implements": 0.0},
+}
+
 
 
 @dataclass
@@ -61,6 +74,8 @@ class ProviderStatus:
     #: which engine produced this status: "manual" (<cmd> --version here) or
     #: "adapter" (the provider's own EvidenceProvider.probe). Additive field.
     probe_engine: str = "manual"
+    #: measured per language x relation F1 (P3.3); None for non-extractors.
+    language_capability: dict[str, dict[str, float]] | None = None
 
 
 def _package_version() -> str:
@@ -190,6 +205,11 @@ def _probe_executable(pcfg: ProviderConfig, repo_root: str) -> ProviderStatus:
 
 def _status_for(pcfg: ProviderConfig, repo_root: str) -> ProviderStatus:
     if pcfg.name == "sot-builtin":
+        weak = sorted(
+            f"{lang}.{rel}"
+            for lang, rels in BUILTIN_LANGUAGE_SCORECARD.items()
+            for rel, f1 in rels.items() if f1 < 0.5
+        )
         status = ProviderStatus(
             name="sot-builtin",
             mode=pcfg.integration,
@@ -197,7 +217,13 @@ def _status_for(pcfg: ProviderConfig, repo_root: str) -> ProviderStatus:
             version=_package_version(),
             healthy=True,
             capabilities=list(pcfg.capabilities),
-            detail="built-in verifier",
+            language_capability={
+                lang: dict(rels) for lang, rels in BUILTIN_LANGUAGE_SCORECARD.items()
+            },
+            detail=(
+                "built-in verifier; measured F1 per language x relation "
+                "(oracle P0)" + (f"; weak: {', '.join(weak)}" if weak else "")
+            ),
         )
     elif pcfg.name == "scip":
         status = _probe_scip(pcfg, repo_root)

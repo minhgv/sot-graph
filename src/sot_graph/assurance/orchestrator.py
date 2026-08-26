@@ -9,7 +9,6 @@ federation result contract.
 from __future__ import annotations
 
 import os
-import re
 from typing import Mapping, Optional
 
 from .routing import (
@@ -27,9 +26,10 @@ __all__ = [
     "cbm_candidates_from_outcome",
     "target_conflicts",
     "envelope_fed_kwargs",
+    "architecture",
+    "search_rows_from_payload",
+    "trace_edges_from_payload",
 ]
-
-_SEARCH_ROW_LINES = re.compile(r"^\d+-\d+$")
 
 
 def federation_plan(provider_spec: Optional[str], root: str, command_kind: str) -> dict:
@@ -108,7 +108,10 @@ def federation_plan(provider_spec: Optional[str], root: str, command_kind: str) 
     return plan
 
 
-def run_federated_query(plan: dict, root: str, command_kind: str, symbol: str):
+def run_federated_query(
+    plan: dict, root: str, command_kind: str, symbol: str,
+    *, staged: bool = False, working_tree: bool = False, depth: int = 2,
+):
     """Invoke the negotiated provider method; returns ``(outcome, method)``."""
     from sot_graph.providers.base import ImpactRequest, SymbolRequest, TraceRequest
 
@@ -124,7 +127,13 @@ def run_federated_query(plan: dict, root: str, command_kind: str, symbol: str):
     if method is None:
         return None, None
     if method == "impact":
-        outcome = provider.impact(ImpactRequest(repo_root=root, path=root))
+        # P3.1: the wire tool diffs git refs; ``symbol`` carries the SOT
+        # diff target (e.g. HEAD~1) and staged/working-tree scopes surface
+        # as an adapter-side scope conflict, never a merged guess.
+        outcome = provider.impact(ImpactRequest(
+            repo_root=root, path=root, since=symbol,
+            depth=depth, staged=staged, working_tree=working_tree,
+        ))
     elif method == "trace":
         outcome = provider.trace(TraceRequest(repo_root=root, symbol=symbol))
     else:
@@ -134,58 +143,89 @@ def run_federated_query(plan: dict, root: str, command_kind: str, symbol: str):
     return outcome, method
 
 
-def parse_cbm_search_report(text: str) -> tuple:
-    """Parse a search_graph text report; returns (rows, has_more)."""
-    rows: list = []
-    has_more = False
-    for raw in text.splitlines():
-        line = raw.strip()
-        if line.lower().startswith("has_more:"):
-            has_more = line.split(":", 1)[1].strip().lower() == "true"
+def _span_from_lines(value) -> Optional[tuple[int, int]]:
+    """Wire ``lines`` cell (``"38-54"``) -> ``(start, end)``; None on drift."""
+    if not isinstance(value, str):
+        return None
+    start_s, sep, end_s = value.partition("-")
+    if not (start_s.isdigit() and (not sep or end_s.isdigit())):
+        return None
+    return int(start_s), int(end_s) if sep else int(start_s)
+
+
+def search_rows_from_payload(payload: Mapping) -> tuple:
+    """Structured ``search_graph`` rows: ``(rows, has_more, drift)``.
+
+    Columns are addressed by NAME (``cols``), never by position, and rows
+    missing the ``qn`` or ``file`` column are skipped — never guessed. A
+    malformed ``cols``/``rows`` shape reports ``drift=True`` so callers
+    abstain instead of guessing.
+    """
+    cols = payload.get("cols")
+    rows = payload.get("rows")
+    if not isinstance(cols, list) or not isinstance(rows, list):
+        return [], bool(payload.get("has_more")), True
+    try:
+        idx = {name: i for i, name in enumerate(cols)}
+    except TypeError:
+        return [], True, True
+    if "qn" not in idx or "file" not in idx:
+        return [], True, True
+    out: list = []
+    for row in rows:
+        if not isinstance(row, list) or len(row) < len(cols):
             continue
-        tokens = line.split()
-        if len(tokens) < 5 or not _SEARCH_ROW_LINES.match(tokens[-2]):
-            continue
-        rank = tokens[-1]
-        try:
-            float(rank)
-        except ValueError:
-            continue
-        start_s, _, end_s = tokens[-2].partition("-")
-        rows.append({
-            "qualified_name": " ".join(tokens[:-4]),
-            "kind": tokens[-4],
-            "path": tokens[-3],
-            "start_line": int(start_s),
-            "end_line": int(end_s),
+        span = _span_from_lines(row[idx["lines"]]) if "lines" in idx else None
+        out.append({
+            "qualified_name": row[idx["qn"]],
+            "kind": row[idx["label"]] if "label" in idx else None,
+            "path": row[idx["file"]],
+            "start_line": span[0] if span else None,
+            "end_line": span[1] if span else None,
+            "rank": row[idx["rank"]] if "rank" in idx else None,
         })
-    return rows, has_more
+    return out, bool(payload.get("has_more")), False
 
 
-def parse_cbm_trace_report(text: str) -> list:
-    """Parse a trace_path text report; returns rows of group/name/hop/direction."""
-    section = None
-    group = None
-    rows: list = []
-    for raw in text.splitlines():
-        line = raw.strip()
-        low = line.lower()
-        if low.startswith(("callees_total:", "callers_total:")):
-            section = "callees" if low.startswith("callees_total:") else "callers"
-            group = None
+def trace_edges_from_payload(payload: Mapping) -> list:
+    """Structured ``trace_path`` edges: directed rows with evidence metadata.
+
+    Every row keeps its side (``callees`` = root -> callee, ``callers`` =
+    caller -> root), hop, and the resolver evidence columns when present.
+    Edge type separation (CALLS vs CALL_REFERENCE vs USAGE) travels through
+    the ``edge_type`` column when the wire provides it.
+    """
+    edges: list = []
+    root_name = payload.get("function")
+    for side in ("callees", "callers"):
+        section = payload.get(side)
+        if not isinstance(section, Mapping):
             continue
-        if low.startswith(("function:", "direction:", "callees:", "callers:")):
+        cols = section.get("cols")
+        if not isinstance(cols, list) or "name" not in cols:
             continue
-        if line.endswith(":"):
-            group = line[:-1].strip()
+        idx = {name: i for i, name in enumerate(cols)}
+        groups = section.get("groups")
+        if not isinstance(groups, list):
             continue
-        parts = line.split()
-        if group and section and len(parts) == 2 and parts[1].isdigit():
-            rows.append({
-                "group_qn": group, "name": parts[0],
-                "hop": int(parts[1]), "direction": section,
-            })
-    return rows
+        for group in groups:
+            if not isinstance(group, Mapping):
+                continue
+            prefix = str(group.get("qn_prefix") or "")
+            for row in group.get("rows") or []:
+                if not isinstance(row, list) or len(row) < len(cols):
+                    continue
+                edge = {
+                    "direction": side,
+                    "qualified_name": f"{prefix}.{row[idx['name']]}" if prefix else str(row[idx["name"]]),
+                    "hop": row[idx["hop"]] if "hop" in idx else None,
+                    "edge_type": row[idx["edge_type"]] if "edge_type" in idx else None,
+                    "strategy": row[idx["strategy"]] if "strategy" in idx else None,
+                    "confidence": row[idx["confidence"]] if "confidence" in idx else None,
+                }
+                edge["root"] = root_name
+                edges.append(edge)
+    return edges
 
 
 def _candidate_entry(assertion, provider_name: str) -> dict:
@@ -293,12 +333,22 @@ def cbm_candidates_from_outcome(outcome, method: str, provider_name: str,
     truncated = bool((outcome.metadata or {}).get("wire_status") == "truncated")
     payload = outcome.payload
 
+    if not isinstance(payload, Mapping):
+        # P3.1 exit gate: no production evidence parser reads whitespace
+        # text reports. A non-structured payload is drift, not a guess.
+        return candidates, truncated, (
+            f"{provider_name} payload is not structured JSON; abstaining "
+            "(text-report parsing was removed in P3.1)"
+        )
+
     if method == "impact":
         # detect_changes carries no mappable relation; record each impacted
-        # path as an explicitly UNMAPPED advisory candidate.
-        paths = payload.get("impacted") if isinstance(payload, dict) else None
-        paths = paths if isinstance(paths, list) else []
-        for entry in paths:
+        # path as an explicitly UNMAPPED advisory candidate. diff_identity
+        # rides in metadata so builtin and CBM sides of one comparison are
+        # pinned to the same diff before anyone merges them.
+        impacted = payload.get("impacted")
+        impacted = impacted if isinstance(impacted, list) else []
+        for entry in impacted:
             path = entry.get("path") if isinstance(entry, dict) else entry
             if not isinstance(path, str):
                 continue
@@ -310,38 +360,52 @@ def cbm_candidates_from_outcome(outcome, method: str, provider_name: str,
                 version_compatibility=version_compatibility,
             )
             candidates.append(_finish(assertion))
-        return candidates, truncated, None
-
-    if not isinstance(payload, str):
-        return candidates, truncated, "unexpected CBM payload type; ignored"
+        return candidates, truncated or bool(payload.get("truncated")), None
 
     if method == "trace":
-        for row in parse_cbm_trace_report(payload):
-            qn = f"{row['group_qn']}.{row['name']}"
+        for edge in trace_edges_from_payload(payload):
+            # Directed evidence: callees are root -> callee, callers are
+            # caller -> root. The subject is always the far side and the
+            # target is the root symbol; direction/hop/strategy/confidence
+            # travel on the candidate without invention (missing -> None).
             assertion = normalize_assertion(
-                raw_subject={"qualified_name": qn, "kind": "unknown"},
+                raw_subject={"qualified_name": edge["qualified_name"], "kind": "unknown"},
                 provider_relation="call",
-                targets=(qn,),
+                targets=(str(edge["root"]),),
                 snapshot_bound=False,
                 version_compatibility=version_compatibility,
             )
-            candidates.append(_finish(assertion))
+            cand = _finish(assertion)
+            cand["direction"] = edge["direction"]
+            cand["hop"] = edge["hop"]
+            cand["edge_type"] = edge["edge_type"]
+            cand["strategy"] = edge["strategy"]
+            cand["confidence"] = edge["confidence"]
+            candidates.append(cand)
         return candidates, truncated, None
 
-    rows, has_more = parse_cbm_search_report(payload)
+    rows, has_more, drift = search_rows_from_payload(payload)
+    if drift:
+        return candidates, True, (
+            f"{provider_name} search payload missing valid cols/rows; abstaining"
+        )
     for row in rows:
+        raw: dict = {
+            "qualified_name": row["qualified_name"], "kind": row["kind"],
+            "path": row["path"],
+        }
+        if row["start_line"] is not None:
+            raw["span"] = {"start_line": row["start_line"], "end_line": row["end_line"]}
         assertion = normalize_assertion(
-            raw_subject={
-                "qualified_name": row["qualified_name"], "kind": row["kind"],
-                "path": row["path"],
-                "span": {"start_line": row["start_line"], "end_line": row["end_line"]},
-            },
+            raw_subject=raw,
             provider_relation="define",
             targets=(row["qualified_name"],),
             snapshot_bound=False,
             version_compatibility=version_compatibility,
         )
-        candidates.append(_finish(assertion))
+        cand = _finish(assertion)
+        cand["rank"] = row["rank"]
+        candidates.append(cand)
     return candidates, (truncated or has_more), None
 
 
@@ -421,29 +485,84 @@ def target_conflicts(builtin_target, candidates: list,
     return conflicts
 
 
+def _diff_identity(root: str, target: str) -> Optional[str]:
+    """Pin a diff to its commit pair: ``<base-sha>..<head-sha>``.
+
+    Both builtin and CBM sides of one impact comparison must carry the same
+    identity before anyone merges them; unresolvable refs yield None and the
+    gap is declared rather than guessed.
+    """
+    import subprocess
+
+    def _sha(ref: str) -> Optional[str]:
+        try:
+            proc = subprocess.run(
+                ["git", "-C", root, "rev-parse", "--verify", ref],
+                capture_output=True, text=True, timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if proc.returncode != 0:
+            return None
+        return proc.stdout.strip() or None
+
+    base = _sha(target)
+    head = _sha("HEAD")
+    if base is None or head is None:
+        return None
+    return f"{base[:12]}..{head[:12]}"
+
+
 def federated_extras(
     provider_spec: Optional[str],
     root: str,
     command_kind: str,
     symbol: str,
     builtin_target=None,
+    *,
+    staged: bool = False,
+    working_tree: bool = False,
+    depth: int = 2,
 ) -> Optional[dict]:
     """Run the optional external-provider evidence path for one command.
 
     Returns ``None`` for an absent/builtin spec so the caller proceeds
     completely untouched; otherwise a dict with warnings, fail_message,
-    candidates, conflicts, providers_extra, coverage, known_gaps, truncated.
+    candidates, conflicts, providers_extra, coverage, known_gaps, truncated,
+    and (for diff-impact) the diff_identity both sides must share.
     """
     plan = federation_plan(provider_spec, root, command_kind)
     result = {
         "warnings": list(plan["warnings"]), "fail_message": plan["fail_message"],
         "candidates": [], "conflicts": [], "providers_extra": [],
         "coverage": None, "known_gaps": None, "truncated": False,
+        "diff_identity": None,
     }
     if plan["mode"] == "builtin":
         return None
     if plan["fail_message"]:
         return result
+    if command_kind == "diff-impact":
+        result["diff_identity"] = _diff_identity(root, symbol)
+        if result["diff_identity"] is None:
+            result["warnings"].append(
+                f"cannot resolve diff identity for {symbol!r}; "
+                "builtin and external impact sets are not directly comparable"
+            )
+        if staged or working_tree:
+            scopes = ", ".join(
+                s for s, on in (("staged", staged), ("working-tree", working_tree))
+                if on
+            )
+            result["warnings"].append(
+                f"scope conflict: {scopes} analysis is builtin-only; external "
+                "evidence for git-ref scopes is never merged with it"
+            )
+            result["known_gaps"] = [
+                f"scope conflict: {scopes} scope unsupported by external "
+                "providers; builtin evidence only"
+            ]
+            return result
 
     status = plan["status"] or {}
     pname = status.get("name", plan["name"] or "codebase-memory")
@@ -461,7 +580,10 @@ def federated_extras(
         result["known_gaps"] = gaps
         return result
 
-    outcome, method = run_federated_query(plan, root, command_kind, symbol)
+    outcome, method = run_federated_query(
+        plan, root, command_kind, symbol,
+        staged=staged, working_tree=working_tree, depth=depth,
+    )
     cov = {"queried": bool(outcome is not None and outcome.ok), "method": method}
     if outcome is None:
         gaps.append("capability negotiation found no invocable CBM method")
@@ -514,6 +636,23 @@ def federated_extras(
     result["coverage"] = {pname: cov}
     result["known_gaps"] = gaps
     return result
+
+def architecture(provider_spec: Optional[str], root: str):
+    """Expose ``get_architecture`` through the same negotiated plan (P3.1).
+
+    Returns a QueryOutcome (or an abstained outcome when the spec is
+    builtin/blocked). Inference claims without source anchors are the
+    provider's own; the orchestrator does not re-label them verified.
+    """
+    from sot_graph.providers.base import ArchitectureRequest
+
+    plan = federation_plan(provider_spec, root, "architecture")
+    if plan["mode"] == "builtin":
+        return None
+    provider = plan["provider"]
+    if provider is None:
+        return None
+    return provider.architecture(ArchitectureRequest(repo_root=root))
 
 
 def envelope_fed_kwargs(db, fed: dict) -> dict:

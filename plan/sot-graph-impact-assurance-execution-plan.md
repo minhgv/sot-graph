@@ -185,12 +185,18 @@ Structured parse thay text report; sync explicit; builtin capability trung thự
 
 ### P3.1 Codebase Memory (≈ G2 + G6.2)
 
-- [ ] `search_graph`: gửi `format=json` qua `--args-file`; parse `cols`/rows/groups/`total`/`offset`/`has_more`; giữ qualified name + span + rank; không đồng nhất short name (thay `codebase_memory.py:832`, `cli.py:394-415`).
-- [ ] `trace_path`: map `max_depth`→`depth`; `format=json` + `include_evidence=true`; directed edge root→callee / caller→root; giữ direction/hop/strategy/confidence/cursor/total; tách `CALLS`/`CALL_REFERENCE`/`USAGE`; thiếu span → low-resolution, không tự tạo (thay `codebase_memory.py:856-861`, `cli.py:437-440,571-576`).
-- [ ] `detect_changes`: `format=json`; map SOT target→`since`/`base_branch` + `depth`; staged/working-tree không hỗ trợ → ghi scope conflict, không merge; parse `changed_files`/seeds/impacted/modules/truncated; `diff_identity` chung trước khi so builtin+CBM (thay `codebase_memory.py:935`, `cli.py:549-550`, `cli.py:383`).
-- [ ] `architecture()`: expose qua orchestrator (thay `codebase_memory.py:942`); inference thiếu anchor không được source-verified.
-- [ ] `check_index_coverage`: args-file + explicit project (dùng cho P5).
-- [ ] `sot providers sync codebase-memory`: bọc `index_repository` explicit — có timeout riêng, progress, cancellation, lock (tái dùng WriteLock), receipt; không bắt user chạy CLI CBM tay (thay `codebase_memory.py:804-818`, `cli.py:826-833`).
+- [x] `search_graph`: gửi `format=json` qua `--args-file`; parse `cols`/rows/groups/`total`/`offset`/`has_more`; giữ qualified name + span + rank; không đồng nhất short name (thay `codebase_memory.py:832`, `cli.py:394-415`).
+  — Receipt: adapter gửi `format=json`; `orchestrator.search_rows_from_payload` cols-by-NAME (yêu cầu `qn`+`file`), giữ full qualified name + span (`_span_from_lines`) + rank; row thiếu col → skip, payload thiếu cols → abstain. `tests/test_p3_adapters.py::TestSearchStructuredParse` (7 test), wire shapes khớp binary thật v0.10.8 (probe 2026-08-27).
+- [x] `trace_path`: map `max_depth`→`depth`; `format=json` + `include_evidence=true`; directed edge root→callee / caller→root; giữ direction/hop/strategy/confidence/cursor/total; tách `CALLS`/`CALL_REFERENCE`/`USAGE`; thiếu span → low-resolution, không tự tạo (thay `codebase_memory.py:856-861`, `cli.py:437-440,571-576`).
+  — Receipt: adapter gửi `depth`/`format=json`/`include_evidence`; `orchestrator.trace_edges_from_payload` → directed edges `{direction, qualified_name=qn_prefix.name, root, hop, edge_type, strategy, confidence}`; col `edge_type` đi theo khi có, strategy thiếu → None. `TestTraceStructuredParse` (4 test) asserts source/target/direction/hop đúng chiều callees/callers.
+- [x] `detect_changes`: `format=json`; map SOT target→`since`/`base_branch` + `depth`; staged/working-tree không hỗ trợ → ghi scope conflict, không merge; parse `changed_files`/seeds/impacted/modules/truncated; `diff_identity` chung trước khi so builtin+CBM (thay `codebase_memory.py:935`, `cli.py:549-550`, `cli.py:383`).
+  — Receipt: `ImpactRequest` + `since/depth/staged/working_tree`; adapter gửi `{project, scope:"impact", direction:"inbound", depth, format:"json", since}`; `orchestrator._diff_identity` (`git rev-parse` → `base12..head12`) vào envelope cho mọi diff-impact; staged/working_tree → `federated_extras` trả warnings + known_gaps scope-conflict KHÔNG gọi provider (`TestImpactScoping::test_staged/working_tree_scope_conflicts_not_merges`).
+- [x] `architecture()`: expose qua orchestrator (thay `codebase_memory.py:942`); inference thiếu anchor không được source-verified.
+  — Receipt: `orchestrator.architecture(provider_spec, root)` passthrough (CBM text-only wire — không `--format` flag trên binary thật v0.10.8); `routing.COMMAND_CAPABILITY["architecture"]`.
+- [x] `check_index_coverage`: args-file + explicit project (dùng cho P5).
+  — Receipt: `CoverageRequest.project`; `CodebaseMemoryProvider.coverage` yêu cầu explicit project qua args-file, không auto-detect ngầm.
+- [x] `sot providers sync codebase-memory`: bọc `index_repository` explicit — có timeout riêng, progress, cancellation, lock (tái dùng WriteLock), receipt; không bắt user chạy CLI CBM tay (thay `codebase_memory.py:804-818`, `cli.py:826-833`).
+  — Receipt: `cli.cmd_providers_sync` = `WriteLock(.sot/write.lock)` + `provider.index(IndexRequest, progress)` (timeout riêng `--timeout`, `--progress`, `LockBusy`→exit 1); receipt qua ledger `record_provider_run`; `ensure_index` vẫn abstain mọi implicit path (`test_sync_never_runs_without_explicit_command`); smoke thật trên /tmp/p2dbg rc 0.
 
 ### P3.2 SCIP
 
@@ -198,7 +204,8 @@ Structured parse thay text report; sync explicit; builtin capability trung thự
 
 ### P3.3 Builtin
 
-- [ ] Capability theo từng language×relation (không quảng bá chung), dựa trên scorecard P0.
+- [x] Capability theo từng language×relation (không quảng bá chung), dựa trên scorecard P0.
+  — Receipt: `providers_registry.BUILTIN_LANGUAGE_SCORECARD` (F1 từng language×relation từ oracle P0, test lock số liệu vs `builtin-baseline.json`); `ProviderStatus.language_capability` + detail "weak: rust.calls, java.implements, …" trong `sot providers detect`/doctor. `TestBuiltinCapabilityHonesty` (2 test).
 - [ ] Sửa Go/TS recall theo exact oracle; nâng canonical qualified identity Rust/Go/TS methods; regex fallback giữ ở heuristic ceiling.
 
 ### P3.4 Plugin contract
