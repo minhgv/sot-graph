@@ -210,14 +210,16 @@ Structured parse thay text report; sync explicit; builtin capability trung thự
   — Receipt: baseline oracle regen: **P 99.8 / R 99.2 / F1 99.5** (trước: 99.2/69.4/81.6). Go calls 100/100/100, TS 99.5, Rust 98.5 (trước 4.4), Java/Py giữ. Cơ chế (đều AST-anchored, không đụng regex fallback — PARTIAL_AST vẫn cap 0.45/WEAK ở verifier): (1) `module_form_of_import` — Go slash-package 'go_pkg/storage'→dotted (trước bị prune external), TS relative absolutize theo dir-module; (2) receiver typing TS `const v = new C()`/typed params, Go receiver+value params `r *T` + `r := &T{}`, Rust `let r = T{..}`/unit + `r: &T` → `v.m()` resolve `C.m` TRƯỚC bare-match (module-level same-name không bao giờ thắng — sửa 3 FP same_name_two_scopes); (3) Rust `impl T` container → method canonical `T.save`; (4) TS constructor edge (`new C()`→C), `this.m()`, alias import `{x as y}` retarget. Tests: `tests/test_p3_builtin_recall.py` (12 test) + treesitter rust canonical update + tripwire P0 đổi sang lock fix (go/ts ≥0.99, rust ≥0.95) + residual (rust implements <0.5). Residual 8 FN + 2 FP (python annotation binding, TS closure nested scope, rust `use ... as` alias, `impl Trait for T`, java static import, virtual dispatch dynamic) — từng cái một cơ chế riêng, để lại cho phase sau, có anchor trong confusion list.
 
 ### P3.4 Plugin contract
-
-- [ ] Entry-point versioned; adapter mới phải qua contract tests (dùng golden capture pattern G1); không sửa orchestrator core; không auto-install trong read query.
+- [x] Entry-point versioned; adapter mới phải qua contract tests (dùng golden capture pattern G1); không sửa orchestrator core; không auto-install trong read query.
+  — Receipt: `providers/contract.py` — `PROVIDER_CONTRACT_VERSION=1` + `static_contract_problems` (gate load-time, spawn-free: version match, capabilities shape, advertise-mà-thiếu-method) + `run_contract_checks` (golden capture G1: text-report reply cho `format=json` phải fail-closed `wire_status=schema_drift`; ensure_index trong read context chỉ abstain/no-op; mọi method bounded — failure là data không exception) + `validate_entry_point_provider`. CBM adapter khai báo `contract_version=1`/`name` và pass full golden contract. `providers_registry.discover_plugin_providers()` quét entry-point group `sot_graph.providers` — read-only, không install, không query; plugin hỏng degrade thành status unhealthy không phá detect. Orchestrator core không import plugin machinery (boundary test). `tests/test_p3_plugin_contract.py` (8 test: reference pass, version mismatch fail-closed, advertise-without-method, broken EP degrade, read-only discovery, orchestrator untouched).
 
 ### Exit gate
-
-- Không production evidence parser nào phụ thuộc whitespace text report.
-- Golden tests chạy từ clean clone; schema drift/unknown version/partial payload → abstain.
-- Trace test chứng minh đúng source/target/direction/hop; builtin+CBM cùng `diff_identity`.
+- [x] Không production evidence parser nào phụ thuộc whitespace text report.
+  — Receipt: CBM wire toàn JSON (P3.1), text reply → schema_drift fail-closed; SCIP protobuf/JSON có cấu trúc; regex fallback chỉ là extractor fallback (PARTIAL_AST, ceiling 0.45/WEAK) không phải evidence parser.
+- [x] Golden tests chạy từ clean clone; schema drift/unknown version/partial payload → abstain.
+  — Receipt: mọi fake binary là script Python self-contained sinh runtime (không artifact ngoài repo); `tests/test_cbm_adapter.py::TestSchemaDrift`, `test_p3_adapters.py::TestSearchStructuredParse` (partial/missing cols → abstain), version gate UNKNOWN không bump.
+- [x] Trace test chứng minh đúng source/target/direction/hop; builtin+CBM cùng `diff_identity`.
+  — Receipt: `TestTraceStructuredParse` (direction callees/callers, hop, root preserved, targets=[root]); `TestImpactScoping::test_diff_identity_pins_commit_pair` (base12..head12 shared envelope field trước khi so sánh).
 
 ## P4 — Canonical identity & search accuracy (R4)
 

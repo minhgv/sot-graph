@@ -274,6 +274,9 @@ def _extract_payload(envelope: Mapping[str, Any]) -> tuple[Any, str | None]:
 class CodebaseMemoryProvider:
     """Adapter for the Codebase Memory one-shot CLI (FEDERATED_CLI)."""
 
+    #: P3.4 versioned plugin contract this adapter is built against.
+    contract_version = 1
+    name = "codebase-memory"
     capabilities: tuple[str, ...]
 
     def __init__(

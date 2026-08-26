@@ -45,6 +45,59 @@ CAPABILITY_PRIORITY: dict[str, tuple[str, ...]] = {
     "broad-language-discovery": ("codebase-memory", "gitnexus", "sot-builtin"),
 }
 
+
+def discover_plugin_providers() -> list[ProviderStatus]:
+    """P3.4: discover entry-point evidence providers (read-only).
+
+    Scans the ``sot_graph.providers`` entry-point group, validates each
+    class against the versioned plugin contract (static checks only),
+    and returns one ProviderStatus per plugin. Never installs anything,
+    never issues a query — plugin index work belongs to the explicit
+    ``sot providers sync`` path. Contract violations surface as an
+    unhealthy status with the problem list, not an exception: detection
+    must stay read-only and bounded.
+    """
+    from sot_graph.providers.contract import (
+        ENTRY_POINT_GROUP,
+        PROVIDER_CONTRACT_VERSION,
+        static_contract_problems,
+    )
+
+    statuses: list[ProviderStatus] = []
+    try:
+        eps = importlib.metadata.entry_points(group=ENTRY_POINT_GROUP)
+    except Exception:  # noqa: BLE001 - malformed metadata must not break detect
+        return statuses
+    for ep in eps:
+        try:
+            cls = ep.load()
+            problems = static_contract_problems(cls)
+            statuses.append(ProviderStatus(
+                name=getattr(cls, "name", ep.name),
+                mode="plugin",
+                installed=True,
+                version=str(getattr(cls, "provider_version", None) or "unknown"),
+                healthy=not problems,
+                capabilities=list(getattr(cls, "capabilities", ()) or []),
+                detail=(
+                    f"entry-point plugin; contract v{PROVIDER_CONTRACT_VERSION}"
+                    if not problems else "; ".join(problems)
+                ),
+                probe_engine="plugin",
+            ))
+        except Exception as exc:  # noqa: BLE001 - one bad plugin never kills detect
+            statuses.append(ProviderStatus(
+                name=ep.name,
+                mode="plugin",
+                installed=False,
+                version=None,
+                healthy=False,
+                capabilities=[],
+                detail=f"entry-point load failed: {type(exc).__name__}: {exc}",
+                probe_engine="plugin",
+            ))
+    return statuses
+
 #: sot-builtin measured per language x relation F1 (oracle P0 baseline,
 #: benchmarks/oracle/builtin-baseline.json — regenerated after the P3.3b
 #: recall work: Go 100, TS 99.5, Rust 98.5 overall). The builtin does NOT
