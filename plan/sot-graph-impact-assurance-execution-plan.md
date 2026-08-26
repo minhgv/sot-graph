@@ -152,22 +152,30 @@ Provider orchestration ra khỏi private CLI helpers; CLI và MCP dùng chung m�
 
 ### Việc
 
-- [ ] P2.a Tạo `src/sot_graph/assurance/` package: `orchestrator.py`, `models.py`, `routing.py`, `identity.py`, `normalization.py`, `coverage.py`, `verification.py`, `conflicts.py`, `receipts.py`.
-- [ ] P2.b Di chuyển (không copy): `_federation_plan` (`cli.py:295-335`), `_run_federated_query` (`cli.py:367`), `_cbm_candidates_from_outcome` (`cli.py:500-580`), `_target_conflicts` (`cli.py:606`) vào orchestrator; CLI chỉ parse args + render.
-- [ ] P2.c `McpService` gọi orchestrator (thay đọc tĩnh `provider_runs` — `mcp_service.py:168-178`); không gọi private CLI function.
-- [ ] P2.c' Đúng semantics `builtin/auto/prefer:/require:/all`; `providers_mode=auto` trong config có hiệu lực không cần lặp `--provider` (W5/G6.1); `all` thật sự invoke mọi provider queryable hoặc không quảng bá.
-- [ ] P2.d Route theo capability + language + assurance tier; provider failure là typed outcome, không throw xuyên lớp; builtin giữ tương thích ngược.
-- [ ] P2.e Canonical candidate model đúng roadmap §5.2 (field thiếu là `null`/`unknown`, không invent).
+- [x] P2.a Tạo `src/sot_graph/assurance/` package: `orchestrator.py`, `models.py`, `routing.py`, `identity.py`, `normalization.py`, `coverage.py`, `verification.py`, `conflicts.py`, `receipts.py`.
+  — Receipt: package tạo với các module THỰC SỰ carry code: `routing.py` (spec parse + capability tables), `orchestrator.py` (plan/query/candidates/conflicts), `engine.py` (resolve_symbol + assured_query_context), `__init__.py` re-export. KHÔNG tạo rỗng identity/normalization/coverage/verification/conflicts/receipts/models — logic tương ứng đang sống ở `providers/normalization.py`, `providers/verification.py`; chúng MOVE vào assurance/ ở phase sở hữu (P4 identity, P5 coverage, P7 receipts) theo đúng nguyên tắc move-không-copy, tránh re-export shell rỗng.
+- [x] P2.b Di chuyển (không copy): `_federation_plan` (`cli.py:295-335`), `_run_federated_query` (`cli.py:367`), `_cbm_candidates_from_outcome` (`cli.py:500-580`), `_target_conflicts` (`cli.py:606`) vào orchestrator; CLI chỉ parse args + render.
+  — Receipt: cli.py 2746→2032 dòng; 10 private helper bị cắt hẳn (`_resolve_symbol`, `_QUERYABLE_PROVIDERS/_CAPABILITY_ALIASES/_COMMAND_CAPABILITY`, `_parse_provider_spec`, `_supports_capability`, `_federation_plan`, `_run_federated_query`, `_SEARCH_ROW_LINES`+2 parser, `_candidate_entry`, `_snapshot_match_of`, `_cbm_candidates_from_outcome`, `_target_conflicts`, `federated_extras`, `_envelope_fed_kwargs`, `_assured_query_context`, `_stale_files_warning`); signature đổi args→`provider_spec: str|None` để MCP gọi được không cần argparse. CLI giữ `_print_fed_warnings`/`_print_federation_notes` (presentation-only). Test guard: `TestOrchestratorModuleBoundaries` assert không còn private orchestration attribute trong cli.
+- [x] P2.c `McpService` gọi orchestrator (thay đọc tĩnh `provider_runs` — `mcp_service.py:168-178`); không gọi private CLI function.
+  — Receipt: `McpService.explore/usages/diff_impact` giờ gọi `assurance.assured_query_context` (mark_ledger=False — conn mode=ro chỉ detect, không ghi ledger); `_ConnView` bind `Database.stale_journal_files`/`get_file_journal` unbound. `_providers()` (stats display) vẫn đọc `provider_runs` — đó là hiển thị ledger đã ghi, không phải negotiation; negotiation/sync thật nằm ở `sot providers sync` (P3.1). MCP federation full (truyền provider spec qua tool call) defer sang P3 sau khi adapter structured parse xong — MCP surface hiện là read-only bounded.
+- [x] P2.c' Đúng semantics `builtin/auto/prefer:/require:/all`; `providers_mode=auto` trong config có hiệu lực không cần lặp `--provider` (W5/G6.1); `all` thật sự invoke mọi provider queryable hoặc không quảng bá.
+  — Receipt: `effective_provider_spec(explicit, providers_mode, allow_external)`: explicit thắng → config auto+allow_external → "auto" → builtin. CLI gọi qua `resolve_federated_spec`. Tests: `TestEffectiveSpec` (explicit wins / config auto applies / auto без allow_external stays builtin). `all` mode: registry-ranked mọi queryable provider; P1 chỉ có 1 queryable (CBM) nên all ≡ auto top-1 — trung thực với tập queryable hiện có, không quảng bá thêm.
+- [x] P2.d Route theo capability + language + assurance tier; provider failure là typed outcome, không throw xuyên lớp; builtin giữ tương thích ngược.
+  — Receipt: routing table `COMMAND_CAPABILITY` + `CAPABILITY_ALIASES` dùng chung CLI/MCP; provider failure → `QueryOutcome` typed (ok/error/next_action), federated_extras không throw xuyên lớp (fail_message cho require, warnings cho auto/prefer). Builtin compat: `test_default_builtin_never_spawns` (legacy shape không federation keys) vẫn xanh.
+- [x] P2.e Canonical candidate model đúng roadmap §5.2 (field thiếu là `null`/`unknown`, không invent).
+  — Receipt: `_candidate_entry` dùng `getattr(subj, field, None)` — field thiếu là None, không invent; verdict/resolution luôn str.
 
 ### Test bắt buộc
 
-- CLI/MCP parity: cùng request + snapshot → cùng canonical evidence/receipt digest.
-- `require` fail closed exit code ổn định; `auto/prefer` provider chết không phá builtin.
+- [x] CLI/MCP parity: cùng request + snapshot → cùng canonical evidence/receipt digest.
+  — Receipt: `tests/test_p2_orchestrator.py::TestCliMcpParity::test_explore_assurance_digest_matches` — SHA-256 canonical digest của snapshot descriptor CLI vs MCP bằng nhau; stale files identical.
+- [x] `require` fail closed exit code ổn định; `auto/prefer` provider chết không phá builtin.
+  — Receipt: `test_require_blocked_by_config_exit_code_is_stable` (exit 2), `TestDeadProviderDegrades` (auto/prefer PATH rỗng → warnings + builtin tiếp tục, candidates rỗng; require → fail_message "failing closed").
 
 ### Exit gate
 
-- Không còn orchestration logic trong `cli.py` ngoài parse/render.
-- Full suite xanh; hành vi CLI cũ không đổi (backward-compat invariant #9).
+- [x] Không còn orchestration logic trong `cli.py` ngoài parse/render.
+- [x] Full suite xanh; hành vi CLI cũ không đổi (backward-compat invariant #9). — 646 passed + 5 skipped, 0 failed; smoke: builtin explore/usages legacy shape, require exit 2.
 
 ## P3 — Provider adapters hoàn thiện (R3)
 

@@ -24,6 +24,7 @@ from urllib.parse import quote, unquote, urlparse
 from sot_graph.analytics.graph import OperationCancelledError
 from sot_graph.db import Database
 from sot_graph.verifier import TrustVerifier, tokenize
+from sot_graph.assurance import assured_query_context
 
 class McpServiceError(Exception):
     """Stable public error with a machine-readable code."""
@@ -73,10 +74,16 @@ class _ConnView:
     """Minimal Database-compatible view over a read-only connection.
 
     Database query methods only touch ``self.conn``, so the unbound methods
-    can serve MCP reads without opening a writer connection.
+    can serve MCP reads without opening a writer connection. The shared
+    assurance path (assurance.assured_query_context) resolves these two
+    reads through ``self.conn`` as well; binding them here lets one engine
+    serve both surfaces without a writer connection.
     """
 
     __slots__ = ("conn",)
+
+    stale_journal_files = Database.stale_journal_files
+    get_file_journal = Database.get_file_journal
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
@@ -397,6 +404,12 @@ class McpService:
                         queue.append((target, hop_num, target, label, path))
             hop1_count = sum(1 for r in relations if r.get("hop") == 1)
             hop2_count = sum(1 for r in relations if r.get("hop", 0) > 1)
+            view = cast(Database, _ConnView(conn))
+            snapshot, stale = assured_query_context(
+                view, self.project_root,
+                [node.get("path")] + [r.get("path") for r in relations if r.get("path")],
+                mark_ledger=False,  # read-only connection: detect, never write
+            )
             return self._fits_response({
                 "node": node,
                 "target": node,
@@ -405,6 +418,8 @@ class McpService:
                 "hop_summary": {"1_hop_direct": hop1_count, "transitive_hops": hop2_count},
                 "truncated": len(relations) >= limit,
                 "providers": self._providers(conn),
+                "snapshot": snapshot,
+                "stale_files": stale,
             })
         return self._run(op)
 
@@ -449,6 +464,13 @@ class McpService:
                 "dst_symbol": item["dst_symbol"], "relation": item["relation"],
                 "line": item["line"], "state": item["state"],
             } for item in data["risk"][:limit]]
+            view = cast(Database, _ConnView(conn))
+            snapshot, stale = assured_query_context(
+                view, self.project_root,
+                [row["path"]] + [c["path"] for c in callers if c.get("path")]
+                + [r["path"] for r in risk if r.get("path")],
+                mark_ledger=False,  # read-only connection: detect, never write
+            )
             return self._fits_response({
                 "target": self._node_dict(row),
                 "status": data.get("status", "COMPLETE"),
@@ -460,6 +482,8 @@ class McpService:
                 "next_steps": data.get("next_steps", []),
                 "truncated": len(data["callers"]) > limit or len(data["risk"]) > limit,
                 "providers": self._providers(conn),
+                "snapshot": snapshot,
+                "stale_files": stale,
             })
         return self._run(op)
 
@@ -945,6 +969,18 @@ class McpService:
                 working_tree=working_tree,
             )
             result_dict = res.to_dict()
+            cited: List[str] = []
+            for key in ("changed_files", "impacted", "affected_tests"):
+                entries = result_dict.get(key)
+                if isinstance(entries, list):
+                    cited.extend(
+                        e.get("path") if isinstance(e, dict) else str(e)
+                        for e in entries
+                    )
+            snapshot, stale = assured_query_context(
+                view, self.project_root, cited,
+                mark_ledger=False,  # read-only connection: detect, never write
+            )
             payload: Dict[str, Any] = {
                 "ok": True,
                 "status": "success",
@@ -954,6 +990,8 @@ class McpService:
                 "providers": self._providers(conn),
                 "summary": result_dict.get("summary", {}),
                 "result": result_dict,
+                "snapshot": snapshot,
+                "stale_files": stale,
             }
             if format.lower() == "markdown":
                 payload["markdown"] = format_diff_impact_markdown(res)

@@ -259,13 +259,13 @@ class TestTrustCeilingMatrix:
 
 class TestCandidatesWiring:
     def test_verified_candidate_reaches_supported_when_fresh(self):
-        from sot_graph.cli import _cbm_candidates_from_outcome
+        from sot_graph.assurance import cbm_candidates_from_outcome
 
         payload = _search_payload(
             "core.service.compute_total function core/service.py 6-9 0.98"
         )
         outcome = _fake_outcome(payload, snapshot_match=FRESH_MATCH)
-        candidates, truncated, gap_note = _cbm_candidates_from_outcome(
+        candidates, truncated, gap_note = cbm_candidates_from_outcome(
             outcome, "search", "codebase-memory", repo_root=str(FIXTURE_REPO)
         )
         assert truncated is False and gap_note is None
@@ -277,7 +277,7 @@ class TestCandidatesWiring:
 
     def test_adapter_metadata_freshness_reaches_supported(self):
         """P2 adapter travels the binding in metadata, not an attribute."""
-        from sot_graph.cli import _cbm_candidates_from_outcome
+        from sot_graph.assurance import cbm_candidates_from_outcome
 
         payload = _search_payload(
             "core.service.compute_total function core/service.py 6-9 0.98"
@@ -288,7 +288,7 @@ class TestCandidatesWiring:
                       "source_changed": False},
             error=None, next_action=None,
         )
-        candidates, _, gap_note = _cbm_candidates_from_outcome(
+        candidates, _, gap_note = cbm_candidates_from_outcome(
             outcome, "search", "codebase-memory", repo_root=str(FIXTURE_REPO)
         )
         cand = candidates[0]
@@ -297,7 +297,7 @@ class TestCandidatesWiring:
         assert cand["resolution"] == "EXACT"
 
     def test_adapter_metadata_stale_yields_stale(self):
-        from sot_graph.cli import _cbm_candidates_from_outcome
+        from sot_graph.assurance import cbm_candidates_from_outcome
 
         payload = _search_payload(
             "core.service.compute_total function core/service.py 6-9 0.98"
@@ -308,13 +308,13 @@ class TestCandidatesWiring:
                       "source_changed": True},
             error=None, next_action=None,
         )
-        candidates, _, _ = _cbm_candidates_from_outcome(
+        candidates, _, _ = cbm_candidates_from_outcome(
             outcome, "search", "codebase-memory", repo_root=str(FIXTURE_REPO)
         )
         assert candidates[0]["verdict"] == VERDICT_STALE
 
     def test_adapter_metadata_unbound_caps_at_unverifiable(self):
-        from sot_graph.cli import _cbm_candidates_from_outcome
+        from sot_graph.assurance import cbm_candidates_from_outcome
 
         payload = _search_payload(
             "core.service.compute_total function core/service.py 6-9 0.98"
@@ -324,18 +324,18 @@ class TestCandidatesWiring:
             metadata={"freshness": "UNBOUND", "snapshot_bound": False},
             error=None, next_action=None,
         )
-        candidates, _, _ = _cbm_candidates_from_outcome(
+        candidates, _, _ = cbm_candidates_from_outcome(
             outcome, "search", "codebase-memory", repo_root=str(FIXTURE_REPO)
         )
         assert candidates[0]["verdict"] == VERDICT_UNVERIFIABLE
 
     def test_metadata_without_binding_markers_stays_p1(self):
-        from sot_graph.cli import _cbm_candidates_from_outcome
+        from sot_graph.assurance import cbm_candidates_from_outcome
 
         payload = _search_payload(
             "core.service.compute_total function core/service.py 6-9 0.98"
         )
-        candidates, _, _ = _cbm_candidates_from_outcome(
+        candidates, _, _ = cbm_candidates_from_outcome(
             SimpleNamespace(ok=True, payload=payload,
                             metadata={"wire_status": "ok"}, error=None,
                             next_action=None),
@@ -345,13 +345,13 @@ class TestCandidatesWiring:
         assert candidates[0]["verified"] == VERIFIED
 
     def test_drifted_candidate_is_downgraded_not_supported(self):
-        from sot_graph.cli import _cbm_candidates_from_outcome
+        from sot_graph.assurance import cbm_candidates_from_outcome
 
         payload = _search_payload(
             "app.main.build_invoice function app/main.py 50-60 0.91"
         )
         outcome = _fake_outcome(payload, snapshot_match=FRESH_MATCH)
-        candidates, _, _ = _cbm_candidates_from_outcome(
+        candidates, _, _ = cbm_candidates_from_outcome(
             outcome, "search", "codebase-memory", repo_root=str(FIXTURE_REPO)
         )
         cand = candidates[0]
@@ -360,12 +360,12 @@ class TestCandidatesWiring:
         assert cand["resolution"] == "INFERRED"
 
     def test_no_snapshot_match_attr_caps_at_unverifiable(self):
-        from sot_graph.cli import _cbm_candidates_from_outcome
+        from sot_graph.assurance import cbm_candidates_from_outcome
 
         payload = _search_payload(
             "core.service.compute_total function core/service.py 6-9 0.98"
         )
-        candidates, _, _ = _cbm_candidates_from_outcome(
+        candidates, _, _ = cbm_candidates_from_outcome(
             _fake_outcome(payload), "search", "codebase-memory",
             repo_root=str(FIXTURE_REPO),
         )
@@ -374,25 +374,25 @@ class TestCandidatesWiring:
         assert cand["verdict"] == VERDICT_UNVERIFIABLE  # …but cannot elevate
 
     def test_stale_snapshot_yields_stale_verdict(self):
-        from sot_graph.cli import _cbm_candidates_from_outcome
+        from sot_graph.assurance import cbm_candidates_from_outcome
 
         payload = _search_payload(
             "core.service.compute_total function core/service.py 6-9 0.98"
         )
         outcome = _fake_outcome(payload, snapshot_match=STALE_MATCH)
-        candidates, _, _ = _cbm_candidates_from_outcome(
+        candidates, _, _ = cbm_candidates_from_outcome(
             outcome, "search", "codebase-memory", repo_root=str(FIXTURE_REPO)
         )
         assert candidates[0]["verdict"] == VERDICT_STALE
 
     def test_repo_root_none_preserves_p1_behaviour(self):
-        from sot_graph.cli import _cbm_candidates_from_outcome
+        from sot_graph.assurance import cbm_candidates_from_outcome
 
         payload = _search_payload(
             "core.service.compute_total function core/service.py 6-9 0.98"
         )
         outcome = _fake_outcome(payload, snapshot_match=FRESH_MATCH)
-        candidates, _, _ = _cbm_candidates_from_outcome(
+        candidates, _, _ = cbm_candidates_from_outcome(
             outcome, "search", "codebase-memory", repo_root=None
         )
         cand = candidates[0]
@@ -412,9 +412,9 @@ class TestTargetConflicts:
         return cand
 
     def test_cbm_verified_wins_and_builtin_contradicted(self):
-        from sot_graph.cli import _target_conflicts
+        from sot_graph.assurance import target_conflicts
 
-        conflicts = _target_conflicts(
+        conflicts = target_conflicts(
             ("format_label", "core/service.py", 99),  # builtin span stale
             [self._cand("core.labels.format_label", "core/labels.py", 4)],
             repo_root=str(FIXTURE_REPO),
@@ -430,9 +430,9 @@ class TestTargetConflicts:
         assert conflict["builtin"]["line"] == 99
 
     def test_builtin_verified_wins_when_cbm_span_drifted(self):
-        from sot_graph.cli import _target_conflicts
+        from sot_graph.assurance import target_conflicts
 
-        conflicts = _target_conflicts(
+        conflicts = target_conflicts(
             ("compute_total", "core/service.py", 6),
             [self._cand("core.service.compute_total",
                         "core/service.py", 100)],
@@ -444,9 +444,9 @@ class TestTargetConflicts:
         assert conflict["contradicted"]["line"] == 100
 
     def test_both_sides_unverified_stays_recorded_not_resolved(self):
-        from sot_graph.cli import _target_conflicts
+        from sot_graph.assurance import target_conflicts
 
-        conflicts = _target_conflicts(
+        conflicts = target_conflicts(
             ("compute_total", "core/nowhere.py", 3),
             [self._cand("core.service.compute_total",
                         "core/elsewhere.py", 3)],
@@ -458,9 +458,9 @@ class TestTargetConflicts:
     def test_both_sides_verified_does_not_adjudicate(self):
         # Same-name symbol genuinely defined on both sides (format_label x2):
         # neither side is contradicted by source, so no silent pick.
-        from sot_graph.cli import _target_conflicts
+        from sot_graph.assurance import target_conflicts
 
-        conflicts = _target_conflicts(
+        conflicts = target_conflicts(
             ("format_label", "core/service.py", 12),
             [self._cand("core.labels.format_label", "core/labels.py", 4)],
             repo_root=str(FIXTURE_REPO),
@@ -469,13 +469,13 @@ class TestTargetConflicts:
 
     def test_end_to_end_pipeline_conflict_via_fake_binary(self):
         """Full flow: parse report -> verify -> ceiling -> conflict."""
-        from sot_graph.cli import _cbm_candidates_from_outcome, _target_conflicts
+        from sot_graph.assurance import cbm_candidates_from_outcome, target_conflicts
 
         payload = _search_payload(
             "core.service.compute_total function core/service.py 42-45 0.95"
         )
         outcome = _fake_outcome(payload, snapshot_match=FRESH_MATCH)
-        candidates, _, gap_note = _cbm_candidates_from_outcome(
+        candidates, _, gap_note = cbm_candidates_from_outcome(
             outcome, "search", "codebase-memory", repo_root=str(FIXTURE_REPO)
         )
         assert gap_note is None
@@ -483,7 +483,7 @@ class TestTargetConflicts:
         assert cand["verified"] == SPAN_MISMATCH
         assert cand["verdict"] == VERDICT_HEURISTIC
 
-        conflicts = _target_conflicts(
+        conflicts = target_conflicts(
             ("compute_total", "core/service.py", 6),
             candidates, repo_root=str(FIXTURE_REPO),
         )
@@ -497,24 +497,23 @@ class TestFederatedExtrasGaps:
 
     @pytest.fixture()
     def wired_cli(self, monkeypatch):
-        import sot_graph.cli as cli
+        import sot_graph.assurance.orchestrator as orch
 
         def run(outcome):
             monkeypatch.setattr(
-                cli, "_federation_plan",
-                lambda args, root, kind: {
+                orch, "federation_plan",
+                lambda spec, root, kind: {
                     "mode": "prefer", "warnings": [], "fail_message": None,
                     "status": {"name": "cbm", "version": "0.10.8"},
                     "name": "cbm", "provider": object(),
                 },
             )
             monkeypatch.setattr(
-                cli, "_run_federated_query",
+                orch, "run_federated_query",
                 lambda plan, root, kind, sym: (outcome, "search"),
             )
-            args = argparse.Namespace(provider="prefer:cbm")
-            return cli.federated_extras(
-                args, str(FIXTURE_REPO), "explore", "compute_total"
+            return orch.federated_extras(
+                "prefer:cbm", str(FIXTURE_REPO), "explore", "compute_total"
             )
 
         return run
@@ -541,7 +540,7 @@ class TestFederatedExtrasGaps:
         assert fed["candidates"][0]["verdict"] == VERDICT_UNVERIFIABLE
 
     def test_federated_extras_accepts_adapter_metadata_shape(self, wired_cli):
-        from sot_graph.cli import _cbm_candidates_from_outcome  # noqa: F401
+        from sot_graph.assurance import cbm_candidates_from_outcome  # noqa: F401
 
         payload = _search_payload(
             "core.service.compute_total function core/service.py 6-9 0.98"
