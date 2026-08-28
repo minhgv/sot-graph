@@ -50,7 +50,8 @@ def federation_plan(provider_spec: Optional[str], root: str, command_kind: str, 
         return {"mode": "invalid", "name": None, "warnings": [],
                 "fail_message": str(exc), "provider": None, "status": None}
     plan: dict = {"mode": mode, "name": name, "warnings": [],
-                  "fail_message": None, "provider": None, "status": None}
+                  "fail_message": None, "provider": None, "status": None,
+                  "providers": [], "statuses": []}
     if mode == "builtin":
         return plan
 
@@ -79,32 +80,49 @@ def federation_plan(provider_spec: Optional[str], root: str, command_kind: str, 
         )
         return plan
 
-    target = names[0]
-    assert target is not None
-    pcfg = cfg.providers.get(target)
-    if (
-        pcfg is None or pcfg.enabled is False
-        or pcfg.integration != "cli" or target not in QUERYABLE_PROVIDERS
-    ):
-        msg = f"provider '{target}' is not queryable through an adapter in P1"
-        if mode == "require":
-            plan["fail_message"] = msg
-        else:
-            plan["warnings"].append(f"{msg}; using sot-builtin only")
-    provider = CodebaseMemoryProvider(config=pcfg, db=db)
-    st = provider.probe(root)
-    plan["status"] = {
-        "name": target, "installed": st.installed, "healthy": st.healthy,
-        "version": st.version, "detail": st.detail,
-    }
-    if not (st.installed and st.healthy):
-        msg = f"provider '{target}' unavailable ({st.detail})"
-        if mode == "require":
-            plan["fail_message"] = f"{msg}: failing closed"
-        else:
-            plan["warnings"].append(f"{msg}; using sot-builtin only")
+    # Probe EVERY ranked queryable provider ('all' keeps the full ranked
+    # list; 'auto' still truncates to the best one). Healthy providers stay
+    # in plan["providers"]; unhealthy ones only warn (require fails closed).
+    # NOTE(adapter-factory): CodebaseMemoryProvider is the only wired
+    # adapter; a provider->adapter factory replaces this hardcode while
+    # routing keeps flowing through QUERYABLE_PROVIDERS + registry
+    # resolution.
+    statuses: list = []
+    first_healthy = None
+    for target in names:
+        assert target is not None
+        pcfg = cfg.providers.get(target)
+        if (
+            pcfg is None or pcfg.enabled is False
+            or pcfg.integration != "cli" or target not in QUERYABLE_PROVIDERS
+        ):
+            msg = f"provider '{target}' is not queryable through an adapter in P1"
+            if mode == "require":
+                plan["fail_message"] = msg
+            else:
+                plan["warnings"].append(f"{msg}; using sot-builtin only")
+            continue
+        provider = CodebaseMemoryProvider(config=pcfg, db=db)
+        st = provider.probe(root)
+        statuses.append({
+            "name": target, "installed": st.installed, "healthy": st.healthy,
+            "version": st.version, "detail": st.detail,
+        })
+        if not (st.installed and st.healthy):
+            msg = f"provider '{target}' unavailable ({st.detail})"
+            if mode == "require":
+                plan["fail_message"] = f"{msg}: failing closed"
+            else:
+                plan["warnings"].append(f"{msg}; using sot-builtin only")
+            continue
+        plan["providers"].append(provider)
+        if first_healthy is None:
+            first_healthy = provider
+    plan["statuses"] = statuses
+    if plan["fail_message"]:
         return plan
-    plan["provider"] = provider
+    plan["status"] = statuses[0] if statuses else None
+    plan["provider"] = first_healthy
     return plan
 
 
@@ -565,76 +583,86 @@ def federated_extras(
             ]
             return result
 
-    status = plan["status"] or {}
-    pname = status.get("name", plan["name"] or "codebase-memory")
-    result["providers_extra"] = [{
-        "name": pname, "version": status.get("version"),
-        "role": "candidate-evidence",
-    }] if status else []
-    gaps: list = []
-    # The snapshot-binding gap is only reported when a query actually ran
-    # and the outcome still lacks a bound+fresh snapshot_match report.
-    result["coverage"] = {pname: {"queried": False}}
-
-    provider = plan["provider"]
-    if provider is None:
-        result["known_gaps"] = gaps
+    healthy = plan["providers"]
+    if not healthy:
+        result["known_gaps"] = []
         return result
-
-    outcome, method = run_federated_query(
-        plan, root, command_kind, symbol,
-        staged=staged, working_tree=working_tree, depth=depth,
-    )
-    cov = {"queried": bool(outcome is not None and outcome.ok), "method": method}
-    if outcome is None:
-        gaps.append("capability negotiation found no invocable CBM method")
-        cov["error"] = "no invocable method"
-    elif not outcome.ok:
-        cov["error"] = outcome.error
-        if outcome.next_action:
-            gaps.append(f"{pname}: {outcome.next_action}")
-        if plan["mode"] == "require":
-            plan["fail_message"] = result["fail_message"] = (
-                f"require:{pname}: query failed ({outcome.error}); "
-                "failing closed"
-            )
-            result["coverage"] = {pname: cov}
-            result["known_gaps"] = gaps
-            return result
-        result["warnings"].append(
-            f"{pname} query failed ({outcome.error}); using sot-builtin only"
+    # mode 'all' may carry several healthy providers; each one is a
+    # candidate-evidence source and its candidates keep per-provider
+    # provenance ("provider" on each entry, one coverage cell per name).
+    result["providers_extra"] = [
+        {"name": st["name"], "version": st["version"], "role": "candidate-evidence"}
+        for st in plan["statuses"] if st["healthy"] and st["installed"]
+    ]
+    gaps: list = []
+    coverage: dict = {}
+    candidates: list = []
+    conflicts: list = []
+    truncated = False
+    for provider in healthy:
+        pname = provider.name
+        per_plan = dict(plan, provider=provider, name=pname)
+        outcome, method = run_federated_query(
+            per_plan, root, command_kind, symbol,
+            staged=staged, working_tree=working_tree, depth=depth,
         )
-    else:
-        sm = snapshot_match_of(outcome)
-        sm_bound = (
-            bool(sm.get("bound")) if isinstance(sm, dict)
-            else bool(getattr(sm, "bound", False))
-        )
-        if not sm_bound:
-            gaps.append(
-                "snapshot binding unproven: "
-                f"{pname} candidates are capped at UNVERIFIABLE"
-            )
-        candidates, truncated, gap_note = cbm_candidates_from_outcome(
-            outcome, method or "search_symbols", pname, repo_root=root
-        )
-        result["candidates"] = candidates
-        result["truncated"] = truncated
-        if gap_note:
-            gaps.append(gap_note)
-        for cand in candidates:
-            verified = cand.get("verified")
-            detail = cand.get("detail") or ""
-            if verified is not None and verified != "VERIFIED":
-                qn = cand["subject"].get("qualified_name") or "<unknown>"
-                gaps.append(
-                    f"{pname}: {qn}: source verification {verified}"
-                    + (f" ({detail})" if detail else "")
+        cov: dict = {
+            "queried": bool(outcome is not None and outcome.ok), "method": method,
+        }
+        if outcome is None:
+            gaps.append("capability negotiation found no invocable CBM method")
+            cov["error"] = "no invocable method"
+        elif not outcome.ok:
+            cov["error"] = outcome.error
+            if outcome.next_action:
+                gaps.append(f"{pname}: {outcome.next_action}")
+            if plan["mode"] == "require":
+                plan["fail_message"] = result["fail_message"] = (
+                    f"require:{pname}: query failed ({outcome.error}); "
+                    "failing closed"
                 )
-        result["conflicts"] = target_conflicts(
-            builtin_target, candidates, repo_root=root
-        )
-    result["coverage"] = {pname: cov}
+                coverage[pname] = cov
+                break
+            result["warnings"].append(
+                f"{pname} query failed ({outcome.error}); using sot-builtin only"
+            )
+        else:
+            sm = snapshot_match_of(outcome)
+            sm_bound = (
+                bool(sm.get("bound")) if isinstance(sm, dict)
+                else bool(getattr(sm, "bound", False))
+            )
+            if not sm_bound:
+                gaps.append(
+                    "snapshot binding unproven: "
+                    f"{pname} candidates are capped at UNVERIFIABLE"
+                )
+            per_candidates, one_truncated, gap_note = cbm_candidates_from_outcome(
+                outcome, method or "search_symbols", pname, repo_root=root
+            )
+            candidates.extend(per_candidates)
+            truncated = truncated or one_truncated
+            if gap_note:
+                gaps.append(gap_note)
+            for cand in per_candidates:
+                verified = cand.get("verified")
+                detail = cand.get("detail") or ""
+                if verified is not None and verified != "VERIFIED":
+                    qn = cand["subject"].get("qualified_name") or "<unknown>"
+                    gaps.append(
+                        f"{pname}: {qn}: source verification {verified}"
+                        + (f" ({detail})" if detail else "")
+                    )
+            # Conflicts stay per provider pair vs builtin; entries record
+            # the provider they came from.
+            conflicts.extend(target_conflicts(
+                builtin_target, per_candidates, repo_root=root
+            ))
+        coverage[pname] = cov
+    result["candidates"] = candidates
+    result["truncated"] = truncated
+    result["conflicts"] = conflicts
+    result["coverage"] = coverage
     result["known_gaps"] = gaps
     return result
 

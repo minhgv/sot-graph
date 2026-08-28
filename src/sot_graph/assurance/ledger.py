@@ -51,20 +51,26 @@ def union_evidence(
     *,
     snapshot_hash: Optional[str] = None,
     limit: int = 5000,
+    verify_spans: bool = True,
 ) -> List[Dict[str, Any]]:
-    """Union provider evidence by canonical identity.
+    """Union provider evidence by canonical identity — fail-closed.
 
-    Successful, non-stale runs only; each union entry keeps the
-    supporting providers and any contradicting spans. Contradictions
-    are adjudicated against current source; unresolved stays CONFLICT.
+    Successful, non-invalidated runs only. An entry is ``SUPPORTED``
+    only when it simultaneously has a non-empty snapshot_hash, a
+    non-empty path, exactly one distinct span, AND that span verifies
+    against current source (``verify_subject`` VERIFIED). Anything less
+    downgrades: ``UNBOUND`` (missing snapshot/path), ``UNVERIFIED``
+    (span present but not verified, or zero spans, or verification
+    explicitly skipped via ``verify_spans=False``). Contradictions with
+    a uniquely verified span resolve to ``source_verified``; unresolved
+    conflicts stay ``CONFLICT``.
     """
     sql = (
         "SELECT e.path, e.relation, e.src_symbol, e.dst_symbol, "
         "e.snapshot_hash, e.provider_name, e.line_start, e.line_end, "
         "e.run_id, e.confidence "
         "FROM provider_evidence e JOIN provider_runs r ON e.run_id = r.id "
-        "WHERE r.status = 'ok' AND COALESCE(e.metadata_json, '') "
-        "NOT LIKE '%\"stale\": true%'"
+        "WHERE r.status = 'ok' AND e.invalidated_at IS NULL"
     )
     params: List[Any] = []
     if snapshot_hash is not None:
@@ -75,7 +81,25 @@ def union_evidence(
     try:
         rows = db.conn.execute(sql, params).fetchall()
     except Exception as exc:  # noqa: BLE001 - ledger is a sidecar
-        return [{"error": f"ledger read failed: {type(exc).__name__}"}]
+        # Tolerant fallback for sidecars opened before the invalidated_at
+        # migration landed: retry with the legacy stale-metadata filter.
+        legacy_params: List[Any] = []
+        legacy = (
+            "SELECT e.path, e.relation, e.src_symbol, e.dst_symbol, "
+            "e.snapshot_hash, e.provider_name, e.line_start, e.line_end, "
+            "e.run_id, e.confidence "
+            "FROM provider_evidence e JOIN provider_runs r ON e.run_id = r.id "
+            "WHERE r.status = 'ok' AND COALESCE(e.metadata_json, '') "
+            "NOT LIKE '%\"stale\": true%'"
+        )
+        if snapshot_hash is not None:
+            legacy += " AND e.snapshot_hash = ?"
+            legacy_params.append(snapshot_hash)
+        legacy_params.append(int(limit))
+        try:
+            rows = db.conn.execute(legacy, legacy_params).fetchall()
+        except Exception:  # noqa: BLE001 - still unreadable: degrade honestly
+            return [{"error": f"ledger read failed: {type(exc).__name__}"}]
 
     groups: Dict[tuple, Dict[str, Any]] = {}
     for row in rows:
@@ -89,7 +113,7 @@ def union_evidence(
             "providers": set(),
             "spans": {},
             "conflict": False,
-            "status": "SUPPORTED",
+            "status": "UNVERIFIED",
         })
         entry["providers"].add(str(row[5]))
         span = (row[6], row[7])
@@ -100,6 +124,13 @@ def union_evidence(
         spans = entry.pop("spans")
         provs = sorted(entry.pop("providers"))
         entry["providers"] = provs
+        identity = entry["identity"]
+        if not identity["snapshot"] or not identity["path"]:
+            # Fail-closed: evidence without a snapshot binding or source
+            # path can never support a claim.
+            entry["status"] = "UNBOUND"
+            out.append(entry)
+            continue
         distinct = [s for s in spans if s != (None, None)]
         if len(distinct) > 1:
             entry["conflict"] = True
@@ -109,8 +140,8 @@ def union_evidence(
             verified = []
             for (start, end) in distinct:
                 subj = {
-                    "path": entry["identity"]["path"],
-                    "qualified_name": entry["identity"]["src"],
+                    "path": identity["path"],
+                    "qualified_name": identity["src"],
                     "kind": "function",
                     "start_line": int(start or 0),
                     "end_line": int(end or 0),
@@ -125,7 +156,24 @@ def union_evidence(
                 entry["status"] = "source_verified"
                 entry["resolved_span"] = list(verified[0])
         elif len(distinct) == 1:
-            entry["span"] = [distinct[0][0], distinct[0][1]]
+            start, end = distinct[0]
+            entry["span"] = [start, end]
+            if verify_spans:
+                subj = {
+                    "path": identity["path"],
+                    "qualified_name": identity["src"],
+                    "kind": "function",
+                    "start_line": int(start or 0),
+                    "end_line": int(end or 0),
+                }
+                try:
+                    outcome = verify_subject(subj, repo_root)
+                except Exception:  # noqa: BLE001 - abstain on verifier error
+                    outcome = None
+                if outcome is not None and outcome.status == VERIFIED:
+                    entry["status"] = "SUPPORTED"
+            # else: verification skipped or failed — stays UNVERIFIED.
+        # else: zero distinct spans — stays UNVERIFIED.
         out.append(entry)
     out.sort(key=lambda e: (
         e["status"] != "SUPPORTED", e["conflict"],

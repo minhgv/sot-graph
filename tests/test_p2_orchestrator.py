@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from sot_graph.assurance import (  # noqa: E402
@@ -153,9 +154,199 @@ class TestDeadProviderDegrades:
         ])
         assert rc == 2, "require fail-closed must exit 2 on every surface"
 
+class TestFederationModeAll:
+    """mode 'all' keeps the full ranked queryable list and merges evidence."""
+
+    def _config_with_providers(self, repo: Path, names: list) -> None:
+        lines = ["allow_external = true\n"]
+        for name in names:
+            lines.append(
+                f"[providers.{name}]\nintegration = \"cli\"\n"
+                f"command = [\"{name}-missing-binary\"]\n"
+                f"capabilities = [\"symbols\", \"callgraph\", \"impact\", \"trace\"]\n"
+            )
+        (repo / ".sot" / "config.toml").write_text(
+            "".join(lines), encoding="utf-8",
+        )
+
+    @staticmethod
+    def _fake_provider_cls(healthy=True):
+        def factory(config=None, *, db=None, **kw):
+            caps = tuple(getattr(config, "capabilities", ()) or ())
+
+            class _Fake:
+                name = getattr(config, "name", "fake")
+                capabilities = caps
+
+                def probe(self, root):
+                    return SimpleNamespace(
+                        installed=True, healthy=healthy,
+                        version="1.0" if healthy else None,
+                        detail="ok" if healthy else "simulated outage",
+                        capabilities=list(caps),
+                    )
+
+            return _Fake()
+
+        return factory
+
+    def test_plan_all_keeps_full_ranked_list(self, repo, monkeypatch):
+        from sot_graph.assurance import orchestrator as orch
+
+        self._config_with_providers(repo, ["fake-a", "fake-b"])
+        monkeypatch.setattr(
+            orch, "QUERYABLE_PROVIDERS", frozenset({"fake-a", "fake-b"})
+        )
+        statuses = [
+            SimpleNamespace(name="fake-a", installed=True, healthy=True,
+                            version="1.0", detail="ok", capabilities=["symbols"]),
+            SimpleNamespace(name="fake-b", installed=True, healthy=True,
+                            version="2.0", detail="ok", capabilities=["symbols"]),
+        ]
+        monkeypatch.setattr(
+            "sot_graph.providers_registry.resolve_capability",
+            lambda *a, **k: statuses,
+        )
+        monkeypatch.setattr(
+            "sot_graph.providers.codebase_memory.CodebaseMemoryProvider",
+            self._fake_provider_cls(healthy=True),
+        )
+        plan = orch.federation_plan("all", str(repo), "usages")
+        assert [s["name"] for s in plan["statuses"]] == ["fake-a", "fake-b"]
+        assert len(plan["providers"]) == 2
+        assert plan["provider"] is plan["providers"][0]
+
+    def test_plan_auto_still_truncates_to_first(self, repo, monkeypatch):
+        from sot_graph.assurance import orchestrator as orch
+
+        self._config_with_providers(repo, ["fake-a", "fake-b"])
+        monkeypatch.setattr(
+            orch, "QUERYABLE_PROVIDERS", frozenset({"fake-a", "fake-b"})
+        )
+        statuses = [
+            SimpleNamespace(name="fake-a", installed=True, healthy=True,
+                            version="1.0", detail="ok", capabilities=["symbols"]),
+            SimpleNamespace(name="fake-b", installed=True, healthy=True,
+                            version="2.0", detail="ok", capabilities=["symbols"]),
+        ]
+        monkeypatch.setattr(
+            "sot_graph.providers_registry.resolve_capability",
+            lambda *a, **k: statuses,
+        )
+        monkeypatch.setattr(
+            "sot_graph.providers.codebase_memory.CodebaseMemoryProvider",
+            self._fake_provider_cls(healthy=True),
+        )
+        plan = orch.federation_plan("auto", str(repo), "usages")
+        assert len(plan["providers"]) == 1
+        assert plan["providers"][0].name == "fake-a"
+
+    def test_plan_all_degrades_when_all_unhealthy(self, repo, monkeypatch):
+        from sot_graph.assurance import orchestrator as orch
+
+        self._config_with_providers(repo, ["fake-a"])
+        monkeypatch.setattr(
+            orch, "QUERYABLE_PROVIDERS", frozenset({"fake-a"})
+        )
+        statuses = [
+            SimpleNamespace(name="fake-a", installed=False, healthy=False,
+                            version=None, detail="not installed",
+                            capabilities=[]),
+        ]
+        monkeypatch.setattr(
+            "sot_graph.providers_registry.resolve_capability",
+            lambda *a, **k: statuses,
+        )
+        monkeypatch.setattr(
+            "sot_graph.providers.codebase_memory.CodebaseMemoryProvider",
+            self._fake_provider_cls(healthy=False),
+        )
+        plan = orch.federation_plan("all", str(repo), "usages")
+        assert plan["fail_message"] is None, "all never fails closed"
+        assert any("unavailable" in w for w in plan["warnings"])
+        assert plan["providers"] == []
+
+
+    def test_extras_all_merges_candidates_per_provider(self, repo, monkeypatch):
+        from sot_graph.assurance import orchestrator as orch
+
+        self._config_with_providers(repo, ["fake-a", "fake-b"])
+
+        def fake_outcome(ok=True):
+            return SimpleNamespace(ok=ok, error=None, next_action=None,
+                                   metadata={}, snapshot_match=None)
+
+        providers = [
+            SimpleNamespace(
+                name="fake-a", probe=lambda root: None,
+                search_symbols=lambda req: fake_outcome(),
+            ),
+            SimpleNamespace(
+                name="fake-b", probe=lambda root: None,
+                search_symbols=lambda req: fake_outcome(),
+            ),
+        ]
+        monkeypatch.setattr(
+            orch, "federation_plan",
+            lambda *a, **k: {
+                "mode": "all", "name": "fake-a", "warnings": [],
+                "fail_message": None,
+                "providers": providers,
+                "statuses": [
+                    {"name": "fake-a", "installed": True, "healthy": True,
+                     "version": "1.0", "detail": "ok"},
+                    {"name": "fake-b", "installed": True, "healthy": True,
+                     "version": "2.0", "detail": "ok"},
+                ],
+                "provider": providers[0], "status": None,
+            },
+        )
+        monkeypatch.setattr(
+            orch, "run_federated_query",
+            lambda plan, root, kind, symbol, **k: (
+                fake_outcome(), "search_symbols",
+            ),
+        )
+        monkeypatch.setattr(
+            orch, "cbm_candidates_from_outcome",
+            lambda outcome, method, pname, repo_root=None: (
+                [{"provider": pname, "subject": {"qualified_name": "x"}}],
+                False, None,
+            ),
+        )
+        fed = orch.federated_extras("all", str(repo), "usages", "target")
+        assert fed["fail_message"] is None
+        assert [c["provider"] for c in fed["candidates"]] == ["fake-a", "fake-b"]
+        assert set(fed["coverage"]) == {"fake-a", "fake-b"}
+        assert [p["name"] for p in fed["providers_extra"]] == ["fake-a", "fake-b"]
+
+    def test_extras_all_requires_becomes_fail_when_no_healthy(self, repo,
+                                                              monkeypatch):
+        from sot_graph.assurance import orchestrator as orch
+
+        self._config_with_providers(repo, ["fake-a"])
+        monkeypatch.setattr(
+            orch, "QUERYABLE_PROVIDERS", frozenset({"fake-a"})
+        )
+        statuses = [
+            SimpleNamespace(name="fake-a", installed=False, healthy=False,
+                            version=None, detail="not installed",
+                            capabilities=[]),
+        ]
+        monkeypatch.setattr(
+            "sot_graph.providers_registry.resolve_capability",
+            lambda *a, **k: statuses,
+        )
+        fed = orch.federated_extras(
+            "require:fake-a", str(repo), "usages", "target"
+        )
+        assert fed["fail_message"]
+        assert "fake-a" in fed["fail_message"]
+        assert fed["fail_message"].endswith("failing closed")
+
+
 class TestCliMcpParity:
     """Same request + snapshot -> same canonical evidence digest (CLI vs MCP).
-
     Both surfaces share assurance.assured_query_context; the canonical part
     of the evidence (snapshot descriptor + stale files) must be identical.
     """

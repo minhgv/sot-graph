@@ -24,21 +24,27 @@ import hashlib
 import json
 from typing import Any, Dict, List, Optional, Sequence
 
+from dataclasses import asdict
 from .coverage import coverage_note, repo_coverage
-from .engine import assured_query_context
+from .engine import assured_query_context, resolve_symbol_identity
 from .ledger import union_evidence
+from .state import CANONICAL_STATUSES, AssuranceFacts, decide
 
 __all__ = [
-    "RECEIPT_SCHEMA_VERSION",
     "receipt_digest",
     "scope_receipt",
     "diff_impact_receipt",
     "classify_change_risk",
     "check_rename_gate",
     "omp_confirmations_for",
+    "decide",
+    "AssuranceFacts",
+    "CANONICAL_STATUSES",
+    "resolve_symbol_identity",
+    "RECEIPT_SCHEMA_VERSION",
 ]
+RECEIPT_SCHEMA_VERSION = "1.1"  # minor bump: canonical status vocabulary (P0)
 
-RECEIPT_SCHEMA_VERSION = 1
 
 _RELATION_FAMILIES = {
     "imports": ("imports",),
@@ -132,15 +138,21 @@ def _ledger_cross_check(db: Any, repo_root: str, limit: int = 5) -> Dict[str, An
     except Exception:  # noqa: BLE001
         runs = []
     union = union_evidence(db, repo_root)
-    conflicts = [e for e in union if not e.get("error") and e.get("conflict")]
+    usable = [e for e in union if not e.get("error")]
+    conflicts = [e for e in usable if e.get("conflict")]
+    # P0 Contract 1: any union entry not fully SUPPORTED is unresolved
+    # evidence (source_verified?/CONFLICT/etc.) and counts against the
+    # evidence budget.
+    unresolved = len([e for e in usable if e.get("status") != "SUPPORTED"])
     return {
         "runs": [
             {"run_id": r[0], "provider": r[1], "version": r[2],
              "capability": r[3], "snapshot": r[4]}
             for r in runs
         ],
-        "union_entries": len([e for e in union if not e.get("error")]),
+        "union_entries": len(usable),
         "open_conflicts": len(conflicts),
+        "unresolved_count": unresolved,
     }
 
 
@@ -260,10 +272,25 @@ def scope_receipt(
     touches_auth: bool = False,
     dynamic_heavy: bool = False,
 ) -> Dict[str, Any]:
-    """PRE-change receipt for one edit target (P7.1)."""
-    row = _node_row(db, target)
+    """PRE-change receipt for one edit target (P7.1, P0 Contract 1+3).
+
+    Identity resolution is a DECISION (UNIQUE/AMBIGUOUS/NOT_FOUND, exact
+    match only); an ambiguous or missing target ABSTAINS the receipt with
+    an explicit reason code instead of silently picking ``LIMIT 1``.
+    """
+    identity = resolve_symbol_identity(db, target)
+    identity_status = identity["status"]
+    row = identity["selected"]
+    cited_paths = [row["path"]] if row else []
     snapshot_dict, stale_files = assured_query_context(
-        db, repo_root, [row["path"]] if row else [],
+        db, repo_root, cited_paths,
+    )
+    # P0 Contract 2 (A2 wires content binding): scope_digest present and
+    # non-null means the snapshot bound the cited file CONTENT; absent key
+    # (pre-A2 snapshot) is legacy-safe pass-through.
+    snapshot_bound = (
+        bool(snapshot_dict.get("scope_digest"))
+        if "scope_digest" in snapshot_dict else True
     )
     node_id = str((row or {}).get("id") or (row or {}).get("node_id") or "")
     callers = _edges_of(db, node_id, "in") if node_id else []
@@ -304,6 +331,27 @@ def scope_receipt(
             if kind_of_change in ("rename", "delete") else
             {"symbol": target, "resolved": row is not None, "blocked": False,
              "reason": "rename gate not applicable"})
+    truncated = len(transitive) >= 200
+    # Absence claim: the receipt's conclusion would rest on a negative
+    # claim (rename/delete gate with 0 callers, or a kind whose rule
+    # permits absence assurance) while the graph shows no callers.
+    absence_claim = bool(risk.get("absence_assurance")) and len(callers) == 0
+    facts = AssuranceFacts(
+        identity_status=identity_status,
+        snapshot_bound=snapshot_bound,
+        stale_files=list(stale_files),
+        coverage_measured=cov.basis == "measured",
+        coverage_fraction=cov.covered_fraction,
+        parser_failures=0,  # no parser-status source yet (P0 honest default)
+        unresolved_count=int(ledger.get("unresolved_count") or 0),
+        unresolved_budget=0,
+        open_conflicts=int(ledger.get("open_conflicts") or 0),
+        truncated=truncated,
+        provider_capability_ok=True,  # no provider policy wired into receipts
+        absence_claim=absence_claim,
+        gate_blocked=bool(gate.get("blocked")),
+    )
+    decision = decide(facts)
     payload: Dict[str, Any] = {
         "schema_version": RECEIPT_SCHEMA_VERSION,
         "kind": "scope",
@@ -315,7 +363,12 @@ def scope_receipt(
             "touches_auth": touches_auth,
             "dynamic_heavy": dynamic_heavy,
         },
-        "resolved_target": row if row else None,
+        "identity": {
+            "status": identity_status,
+            "candidates": identity["candidates"],
+            "selected": row,
+        },
+        "assurance_facts": asdict(facts),
         "snapshot": snapshot_dict,
         "stale_files": stale_files,
         "source_anchors": (
@@ -329,7 +382,7 @@ def scope_receipt(
         "transitive_impact": {
             "depth": depth,
             "nodes": transitive,
-            "truncated": len(transitive) >= 200,
+            "truncated": truncated,
         },
         "affected_files": affected_files,
         "candidate_tests": candidate_tests,
@@ -343,15 +396,21 @@ def scope_receipt(
             "risk": risk,
             "rename_gate": gate,
             "omp_confirmations": omp_confirmations_for(risk, gate),
-            "status": "BLOCKED" if gate.get("blocked") else (
-                "ASSURED" if not stale_files else "DEGRADED_STALE_SOURCES"
-            ),
+            "status": decision["status"],
+            "reason_codes": decision["reason_codes"],
+            "decision": decision,
         },
     }
     payload["digest"] = receipt_digest(
         {k: v for k, v in payload.items() if k != "digest"}
     )
     return payload
+
+
+def _jsonable(value: Any) -> Any:
+    """Normalize an engine row to a JSON-safe dict (P0 contract sync)."""
+    to_dict = getattr(value, "to_dict", None)
+    return to_dict() if callable(to_dict) else value
 
 
 def diff_impact_receipt(
@@ -363,12 +422,16 @@ def diff_impact_receipt(
     staged: bool = False,
     working_tree: bool = False,
     pre_receipt: Optional[Dict[str, Any]] = None,
+    pre_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """POST-change receipt wrapping the diff-impact engine (P7.2).
+    """POST-change receipt wrapping the diff-impact engine (P7.2, P0).
 
     The pre-change receipt may be attached for cross-reference only —
     its ``proof_scope`` forbids using it as post-change proof; this
-    receipt always binds a fresh post-change snapshot.
+    receipt always binds a fresh post-change snapshot, with the changed
+    files as cited paths so ``scope_digest`` pins the POST-change file
+    content (P0 Contract 2). ``pre_snapshot`` (captured BEFORE
+    auto-reconcile) is embedded volatile-stripped for digest cross-ref.
     """
     from sot_graph.diff_impact import analyze_diff_impact
     from sot_graph.snapshot import capture_worktree_snapshot
@@ -377,8 +440,11 @@ def diff_impact_receipt(
         db, repo_path=repo_root, target=target, depth=depth,
         staged=staged, working_tree=working_tree,
     )
-    post_snapshot = capture_worktree_snapshot(repo_root, role="post_change")
-    changed_files = getattr(result, "changed_files", None) or []
+    changed_files = [str(p) for p in (getattr(result, "changed_files", None) or [])]
+    post_snapshot = capture_worktree_snapshot(
+        repo_root, role="post_change",
+        cited_paths=changed_files[:200] or None,
+    )
     # Evidence invalidated by the diff: rows bound to changed paths.
     invalidated: List[Dict[str, Any]] = []
     try:
@@ -393,11 +459,35 @@ def diff_impact_receipt(
             )
     except Exception:  # noqa: BLE001
         pass
+
     test_impacts = getattr(result, "test_impacts", None) or []
     summary = getattr(result, "summary", None)
     summary_dict = summary if isinstance(summary, dict) else getattr(
         summary, "to_dict", lambda: {} )()
     open_omp = []
+    # P0 Contract 2: post snapshot binds content only when cited paths
+    # were supplied AND all were readable; empty diff -> nothing to bind.
+    post_ps = (
+        post_snapshot if isinstance(post_snapshot, dict)
+        else post_snapshot.as_dict()
+    )
+    snapshot_bound = bool(post_ps.get("scope_digest"))
+    facts = AssuranceFacts(
+        identity_status="UNIQUE",  # diff target is a revision, not a symbol
+        snapshot_bound=snapshot_bound,
+        stale_files=list(changed_files),  # post-change: cited disk state vs journal
+        coverage_measured=False,  # coverage is a pre-change scope concept
+        coverage_fraction=None,
+        parser_failures=0,  # no parser-status source yet (P0 honest default)
+        unresolved_count=len(invalidated),
+        unresolved_budget=0,
+        open_conflicts=0,
+        truncated=False,
+        provider_capability_ok=True,
+        absence_claim=False,
+        gate_blocked=False,
+    )
+    decision = decide(facts)
     if pre_receipt is not None:
         open_omp = list(
             pre_receipt.get("assurance", {}).get("omp_confirmations", [])
@@ -411,7 +501,7 @@ def diff_impact_receipt(
         )
     if open_omp:
         remaining_gaps.append(f"{len(open_omp)} OMP confirmation(s) still open")
-    closure = "closed" if not remaining_gaps else "open"
+    closure = "closed" if decision["status"] == "ASSURED_WITHIN_SCOPE" else "open"
     payload: Dict[str, Any] = {
         "schema_version": RECEIPT_SCHEMA_VERSION,
         "kind": "diff_impact",
@@ -420,10 +510,13 @@ def diff_impact_receipt(
             "target": target, "staged": staged, "working_tree": working_tree,
         },
         "changed_files": changed_files,
-        "direct_nodes": getattr(result, "direct_nodes", None) or [],
-        "caller_impacts": getattr(result, "caller_impacts", None) or [],
-        "api_impacts": getattr(result, "api_impacts", None) or [],
-        "test_impacts": test_impacts,
+        "direct_nodes": [_jsonable(n) for n in
+                         (getattr(result, "direct_nodes", None) or [])],
+        "caller_impacts": [_jsonable(c) for c in
+                           (getattr(result, "caller_impacts", None) or [])],
+        "test_impacts": [_jsonable(t) for t in test_impacts],
+        "api_impacts": [_jsonable(a) for a in
+                        (getattr(result, "api_impacts", None) or [])],
         "tests_to_run": sorted({
             str(t.get("test_file") if isinstance(t, dict)
                else getattr(t, "test_file", None))
@@ -433,16 +526,25 @@ def diff_impact_receipt(
         "invalidated_evidence": invalidated,
         "post_change_snapshot": (
             post_snapshot if isinstance(post_snapshot, dict)
-            else getattr(post_snapshot, "__dict__", {"captured": True})
+            else post_snapshot.as_dict()
         ),
         "reconcile": {"required": True,
                       "note": "run `sot reconcile` to bind the post-change "
                               "snapshot to a fresh index generation"},
         "summary": summary_dict,
         "pre_receipt_digest": (pre_receipt or {}).get("digest"),
+        "pre_change_snapshot": (
+            _strip_volatile(pre_snapshot) if pre_snapshot else None
+        ),
         "remaining_gaps": remaining_gaps,
         "closure_decision": closure,
         "omp_confirmations_remaining": open_omp,
+        "assurance_facts": asdict(facts),
+        "assurance": {
+            "status": decision["status"],
+            "reason_codes": decision["reason_codes"],
+            "decision": decision,
+        },
     }
     payload["digest"] = receipt_digest(
         {k: v for k, v in payload.items() if k != "digest"}

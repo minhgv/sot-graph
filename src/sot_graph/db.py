@@ -2354,33 +2354,72 @@ class Database:
         The whole INSERT runs in a single implicit transaction; a failure
         anywhere before commit leaves ``provider_runs`` untouched.
         """
+        with self.conn:
+            return self._insert_run_row(
+                provider_name,
+                provider_version=provider_version,
+                capability=capability,
+                snapshot_hash=snapshot_hash,
+                project_root=project_root,
+                position_encoding=position_encoding,
+                arguments_json=arguments_json,
+                run_id=run_id,
+                status=status,
+                exit_code=exit_code,
+                duration_ms=duration_ms,
+                command_digest=command_digest,
+                snapshot_id=snapshot_id,
+            )
+
+    def _insert_run_row(
+        self,
+        provider_name: str,
+        *,
+        provider_version: Optional[str] = None,
+        capability: str = "COMPILER_INDEXED_SYMBOLS",
+        snapshot_hash: Optional[str] = None,
+        project_root: Optional[str] = None,
+        position_encoding: str = "UTF-8",
+        arguments_json: Optional[str] = None,
+        run_id: Optional[str] = None,
+        status: Optional[str] = None,
+        exit_code: Optional[int] = None,
+        duration_ms: Optional[int] = None,
+        command_digest: Optional[str] = None,
+        snapshot_id: Optional[str] = None,
+    ) -> str:
+        """Run-row INSERT without opening its own transaction.
+
+        The caller (public method or ``record_provider_outcome``) owns the
+        surrounding ``with self.conn:`` so multi-statement sequences stay
+        atomic.
+        """
         import uuid
         rid = run_id or f"run_{int(time.time())}_{uuid.uuid4().hex[:8]}"
         now = int(time.time())
-        with self.conn:
-            self.conn.execute(
-                "INSERT OR REPLACE INTO provider_runs "
-                "(id, provider_name, provider_version, capability, snapshot_hash, "
-                "project_root, position_encoding, arguments_json, status, exit_code, "
-                "duration_ms, command_digest, created_at, snapshot_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    rid,
-                    provider_name,
-                    provider_version,
-                    capability,
-                    snapshot_hash,
-                    project_root,
-                    position_encoding,
-                    arguments_json,
-                    status,
-                    exit_code,
-                    duration_ms,
-                    command_digest,
-                    now,
-                    snapshot_id,
-                ),
-            )
+        self.conn.execute(
+            "INSERT OR REPLACE INTO provider_runs "
+            "(id, provider_name, provider_version, capability, snapshot_hash, "
+            "project_root, position_encoding, arguments_json, status, exit_code, "
+            "duration_ms, command_digest, created_at, snapshot_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                rid,
+                provider_name,
+                provider_version,
+                capability,
+                snapshot_hash,
+                project_root,
+                position_encoding,
+                arguments_json,
+                status,
+                exit_code,
+                duration_ms,
+                command_digest,
+                now,
+                snapshot_id,
+            ),
+        )
         return rid
 
     def record_provider_binding(
@@ -2399,34 +2438,104 @@ class Database:
         pair updates head_sha/branch/generation in place instead of
         duplicating rows. Returns the row id.
         """
+        with self.conn:
+            return self._upsert_binding_row(
+                sot_repo_id,
+                provider_name,
+                provider_project_id,
+                provider_generation=provider_generation,
+                head_sha=head_sha,
+                branch=branch,
+            )
+
+    def _upsert_binding_row(
+        self,
+        sot_repo_id: str,
+        provider_name: str,
+        provider_project_id: str,
+        *,
+        provider_generation: Optional[int] = None,
+        head_sha: Optional[str] = None,
+        branch: Optional[str] = None,
+    ) -> str:
+        """Binding upsert without opening its own transaction."""
         import uuid
         now = int(time.time())
-        with self.conn:
-            existing = self.conn.execute(
-                "SELECT id FROM provider_project_bindings "
-                "WHERE sot_repo_id = ? AND provider_name = ?",
-                (sot_repo_id, provider_name),
-            ).fetchone()
-            if existing is not None:
-                bid = existing[0]
-                self.conn.execute(
-                    "UPDATE provider_project_bindings SET provider_project_id = ?, "
-                    "provider_generation = ?, head_sha = ?, branch = ?, updated_at = ? "
-                    "WHERE id = ?",
-                    (provider_project_id, provider_generation, head_sha, branch,
-                     now, bid),
-                )
-            else:
-                bid = f"bind_{now}_{uuid.uuid4().hex[:8]}"
-                self.conn.execute(
-                    "INSERT INTO provider_project_bindings "
-                    "(id, sot_repo_id, provider_name, provider_project_id, "
-                    "provider_generation, head_sha, branch, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (bid, sot_repo_id, provider_name, provider_project_id,
-                     provider_generation, head_sha, branch, now),
-                )
+        existing = self.conn.execute(
+            "SELECT id FROM provider_project_bindings "
+            "WHERE sot_repo_id = ? AND provider_name = ?",
+            (sot_repo_id, provider_name),
+        ).fetchone()
+        if existing is not None:
+            bid = existing[0]
+            self.conn.execute(
+                "UPDATE provider_project_bindings SET provider_project_id = ?, "
+                "provider_generation = ?, head_sha = ?, branch = ?, updated_at = ? "
+                "WHERE id = ?",
+                (provider_project_id, provider_generation, head_sha, branch,
+                 now, bid),
+            )
+        else:
+            bid = f"bind_{now}_{uuid.uuid4().hex[:8]}"
+            self.conn.execute(
+                "INSERT INTO provider_project_bindings "
+                "(id, sot_repo_id, provider_name, provider_project_id, "
+                "provider_generation, head_sha, branch, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (bid, sot_repo_id, provider_name, provider_project_id,
+                 provider_generation, head_sha, branch, now),
+            )
         return bid
+
+    def record_provider_outcome(
+        self,
+        run: Dict[str, Any],
+        binding: Optional[Dict[str, Any]],
+        evidence: Sequence[Dict[str, Any]],
+    ) -> str:
+        """Atomically persist run + optional binding + evidence (P0 Contract 4).
+
+        One ``with self.conn:`` transaction wraps the run INSERT, the
+        optional binding upsert, and the evidence batch insert; a failure
+        anywhere rolls back ALL of it — the ledger can never show a run
+        whose evidence or binding silently went missing.
+
+        Args:
+            run: kwargs for :meth:`record_provider_run` (``provider_name``
+                required; ``run_id`` honored when supplied).
+            binding: optional kwargs for :meth:`record_provider_binding`.
+            evidence: items for :meth:`record_provider_evidence`.
+
+        Returns:
+            The provider run id.
+        """
+        with self.conn:
+            rid = self._insert_run_row(**run)
+            if binding is not None:
+                self._upsert_binding_row(**binding)
+            self._insert_evidence_rows(rid, evidence)
+        return rid
+
+    def invalidate_provider_evidence(
+        self, evidence_ids: Sequence[str]
+    ) -> int:
+        """Set ``invalidated_at`` on specific evidence rows (diff paths).
+
+        Idempotent: rows already invalidated keep their first timestamp.
+        Returns the number of rows newly invalidated.
+        """
+        import time as _time
+        ids = [str(e) for e in evidence_ids if e]
+        if not ids:
+            return 0
+        now = int(_time.time())
+        with self.conn:
+            cur = self.conn.executemany(
+                "UPDATE provider_evidence SET invalidated_at = ? "
+                "WHERE id = ? AND invalidated_at IS NULL",
+                [(now, eid) for eid in ids],
+            )
+        return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
 
     def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve a single node by its unique id."""
@@ -2450,6 +2559,19 @@ class Database:
         evidence_items: Sequence[Dict[str, Any]],
     ) -> int:
         """Batch insert provider evidence items."""
+        with self.conn:
+            return self._insert_evidence_rows(run_id, evidence_items)
+
+    def _insert_evidence_rows(
+        self,
+        run_id: str,
+        evidence_items: Sequence[Dict[str, Any]],
+    ) -> int:
+        """Evidence batch insert without opening its own transaction.
+
+        Called inside the caller's ``with self.conn:`` so run + binding +
+        evidence land atomically via :meth:`record_provider_outcome`.
+        """
         if not evidence_items:
             return 0
         now = int(time.time())
@@ -2487,13 +2609,12 @@ class Database:
                 line_start, line_end, col_start, col_end,
                 syntax_kind, documentation, confidence, meta, snap, now, now
             ))
-        with self.conn:
-            self.conn.executemany(
-                "INSERT OR REPLACE INTO provider_evidence "
-                "(id, run_id, provider_name, file_path, path, symbol, src_symbol, target_symbol, dst_symbol, role, relation, line_start, line_end, col_start, col_end, syntax_kind, documentation, confidence, metadata_json, snapshot_hash, recorded_at, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                rows,
-            )
+        self.conn.executemany(
+            "INSERT OR REPLACE INTO provider_evidence "
+            "(id, run_id, provider_name, file_path, path, symbol, src_symbol, target_symbol, dst_symbol, role, relation, line_start, line_end, col_start, col_end, syntax_kind, documentation, confidence, metadata_json, snapshot_hash, recorded_at, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
         return len(rows)
 
     insert_provider_evidence = record_provider_evidence

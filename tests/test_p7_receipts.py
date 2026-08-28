@@ -82,10 +82,10 @@ class TestScopeReceipt:
             payload = scope_receipt(db, str(receipt_repo), "run")
         finally:
             db.close()
-        assert payload["schema_version"] == RECEIPT_SCHEMA_VERSION == 1
+        assert payload["schema_version"] == RECEIPT_SCHEMA_VERSION == "1.1"
         assert payload["proof_scope"] == "pre_change_only"
         assert payload["request"]["target"] == "run"
-        assert payload["resolved_target"]["symbol"] == "run"
+        assert payload["identity"]["selected"]["symbol"] == "run"
         assert payload["snapshot"]["commit_sha"]
         assert payload["source_anchors"][0]["path"].endswith("app.py")
         # run() -> util.help(): one outgoing call edge.
@@ -119,7 +119,10 @@ class TestScopeReceipt:
             payload = scope_receipt(db, str(receipt_repo), "does_not_exist")
         finally:
             db.close()
-        assert payload["resolved_target"] is None
+        assert payload["identity"]["status"] == "NOT_FOUND"
+        assert payload["identity"]["selected"] is None
+        assert payload["assurance"]["status"] == "ABSTAINED"
+        assert payload["assurance"]["reason_codes"] == ["target_not_found"]
         assert payload["assurance"]["rename_gate"]["resolved"] is False
 
 
@@ -180,7 +183,8 @@ class TestRenameGate:
         finally:
             db.close()
         assert payload["assurance"]["rename_gate"]["blocked"] is True
-        assert payload["assurance"]["status"] == "BLOCKED"
+        assert payload["assurance"]["status"] == "ABSTAINED"
+        assert payload["assurance"]["reason_codes"] == ["target_not_found"]
 
 
 class TestDiffReceipt:
@@ -249,7 +253,7 @@ class TestCliSurface:
         )
         payload = json.loads(out.stdout)
         assert payload["digest"]
-        assert payload["schema_version"] == 1
+        assert payload["schema_version"] == RECEIPT_SCHEMA_VERSION
 
     def test_rename_blocked_exit_code(self, tmp_path, capsys):
         # Unresolved target in an empty graph: BLOCKED → exit 2.

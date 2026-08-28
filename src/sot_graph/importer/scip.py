@@ -863,18 +863,21 @@ class ScipImporter:
                 snapshot_hash = None
 
         stale_marked = 0
+        run_kwargs: Dict[str, Any] = dict(
+            provider_name=prov_name,
+            provider_version=prov_ver,
+            capability="COMPILER_INDEXED_SYMBOLS",
+            snapshot_hash=snapshot_hash,
+            project_root=proj_root,
+            position_encoding=encoding_str,
+            arguments_json=json.dumps(tool_info.get("arguments", [])),
+            run_id=run_id,
+        )
         with self.db.write_lock():
-            rid = self.db.record_provider_run(
-                provider_name=prov_name,
-                provider_version=prov_ver,
-                capability="COMPILER_INDEXED_SYMBOLS",
-                snapshot_hash=snapshot_hash,
-                project_root=proj_root,
-                position_encoding=encoding_str,
-                arguments_json=json.dumps(tool_info.get("arguments", [])),
-                run_id=run_id,
+            rid = self.db.record_provider_outcome(
+                run_kwargs, None, evidence_items
             )
-            recorded = self.db.record_provider_evidence(rid, evidence_items)
+            recorded = len(self.db.get_provider_evidence(run_id=rid))
         if stale_files:
             stale_marked = self.db.mark_evidence_stale(
                 stale_files,

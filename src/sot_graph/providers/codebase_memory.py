@@ -476,70 +476,69 @@ class CodebaseMemoryProvider:
         match: SnapshotMatch | None = None
         if snapshot_bind and outcome.ok and not result.timed_out:
             match = self.snapshot_match(repo_root, project=project)
+        evidence_items = self._evidence_items(
+            tool, outcome, match
+        ) if outcome.ok else []
         run = self._persist_run(
             capability=tool, result=result, duration_ms=duration_ms,
             status=outcome.status, repo_root=cwd, redacted=redacted,
-            match=match,
+            match=match, evidence_items=evidence_items,
         )
-        self._persist_evidence(tool, outcome, run, match)
         return _InvokeOutcome(
             ok=outcome.ok, status=outcome.status, payload=outcome.payload,
             error=outcome.error, run=run, match=match,
         )
 
-    def _persist_evidence(self, tool, outcome, run, match) -> int:
-        """P6: persist query evidence next to its run (sidecar-safe).
+    def _evidence_items(self, tool, outcome, match) -> list[dict]:
+        """Build ledger evidence items from one successful outcome (P6).
 
-        Ledger failures are swallowed like ``_persist_run`` — a broken
-        ledger must never abort an otherwise successful query.
+        Pure extraction: no I/O, no ledger access. Items are persisted
+        atomically with their run via ``record_provider_outcome``.
         """
-        if self._db is None or run is None or not outcome.ok:
-            return 0
         from sot_graph.assurance.orchestrator import (
             search_rows_from_payload,
             trace_edges_from_payload,
         )
 
         items: list[dict] = []
-        payload = outcome.payload or {}
+        payload = outcome.payload
+        if not isinstance(payload, Mapping):
+            # Text-report drift passthrough (P3.1) and other non-object
+            # payloads carry no structured rows: zero evidence, never guess.
+            return items
+        payload = dict(payload)
         snap = match.cbm_head_sha if match is not None and match.bound else None
-        try:
-            if tool in ("trace_path", "trace", "impact"):
-                for edge in trace_edges_from_payload(payload):
+        if tool in ("trace_path", "trace", "impact"):
+            for edge in trace_edges_from_payload(payload):
+                items.append({
+                    "path": "",
+                    "symbol": str(edge.get("root") or ""),
+                    "target_symbol": str(edge.get("qualified_name") or ""),
+                    "relation": f"call:{edge.get('direction', 'out')}",
+                    "snapshot_hash": snap,
+                    "metadata_json": {"hop": edge.get("hop"),
+                                      "edge_type": edge.get("edge_type"),
+                                      "strategy": edge.get("strategy")},
+                    "confidence": (
+                        edge["confidence"]
+                        if edge.get("confidence") is not None
+                        else 1.0
+                    ),
+                })
+        else:
+            rows, _more, drift = search_rows_from_payload(payload)
+            if not drift:
+                for row in rows:
                     items.append({
-                        "path": "",
-                        "symbol": str(edge.get("root") or ""),
-                        "target_symbol": str(edge.get("qualified_name") or ""),
-                        "relation": f"call:{edge.get('direction', 'out')}",
+                        "path": row.get("path") or "",
+                        "symbol": row.get("qualified_name") or "",
+                        "relation": "define",
+                        "line_start": row.get("start_line"),
+                        "line_end": row.get("end_line"),
+                        "syntax_kind": row.get("kind"),
                         "snapshot_hash": snap,
-                        "metadata_json": {"hop": edge.get("hop"),
-                                          "edge_type": edge.get("edge_type"),
-                                          "strategy": edge.get("strategy")},
-                        "confidence": (
-                            edge["confidence"]
-                            if edge.get("confidence") is not None
-                            else 1.0
-                        ),
                     })
-            else:
-                rows, _more, drift = search_rows_from_payload(payload)
-                if not drift:
-                    for row in rows:
-                        items.append({
-                            "path": row.get("path") or "",
-                            "symbol": row.get("qualified_name") or "",
-                            "relation": "define",
-                            "line_start": row.get("start_line"),
-                            "line_end": row.get("end_line"),
-                            "syntax_kind": row.get("kind"),
-                            "snapshot_hash": snap,
-                        })
-            if not items:
-                return 0
-            return int(self._db.record_provider_evidence(run.run_id, items))
-        except Exception as exc:  # noqa: BLE001 - sidecar isolation
-            logger.warning("provider evidence ledger write failed: %s", exc)
-            return 0
+        return items
 
     def _shape_outcome(self, tool: str, result: RunResult) -> _InvokeOutcome:
         """Classify one completed invocation against the wire contract."""
@@ -625,11 +624,15 @@ class CodebaseMemoryProvider:
         repo_root: str,
         redacted: tuple[str, ...] | None = None,
         match: SnapshotMatch | None = None,
+        evidence_items: list[dict] | None = None,
     ) -> ProviderRunRecord:
-        """Build the run record; persist through the ledger when available.
+        """Build the run record; persist run+binding+evidence atomically.
 
-        Without a ledger the record is returned so the caller can persist it.
-        Ledger failures are swallowed (logged) — a broken ledger must never
+        P0 Contract 4: when a ledger is available the whole outcome goes
+        through ``record_provider_outcome`` in ONE transaction — a failure
+        rolls back run, binding, and evidence together. Without a ledger
+        the record is returned so the caller can persist it. Ledger
+        failures are swallowed (logged) — a broken ledger must never
         corrupt or abort an otherwise successful query.
         """
         record = ProviderRunRecord(
@@ -648,33 +651,51 @@ class CodebaseMemoryProvider:
             snapshot_hash = (
                 match.cbm_head_sha if match is not None and match.bound else None
             )
-            try:
-                self._db.record_provider_run(
-                    PROVIDER_NAME,
-                    provider_version=self._version,
-                    capability=capability,
-                    snapshot_hash=snapshot_hash,
-                    project_root=repo_root,
-                    position_encoding="UTF-8",
-                    arguments_json=json.dumps(list(record.arguments_redacted)),
-                    run_id=record.run_id,
-                    status=status,
-                    exit_code=result.returncode,
-                    duration_ms=duration_ms,
-                    command_digest=_command_digest(record.arguments_redacted),
+            run_kwargs: dict = dict(
+                provider_name=PROVIDER_NAME,
+                provider_version=self._version,
+                capability=capability,
+                snapshot_hash=snapshot_hash,
+                project_root=repo_root,
+                position_encoding="UTF-8",
+                arguments_json=json.dumps(list(record.arguments_redacted)),
+                run_id=record.run_id,
+                status=status,
+                exit_code=result.returncode,
+                duration_ms=duration_ms,
+                command_digest=_command_digest(record.arguments_redacted),
+            )
+            binding = None
+            if (
+                match is not None and match.bound and match.project
+                and getattr(self._db, "record_provider_binding", None)
+                is not None
+            ):
+                binding = dict(
+                    sot_repo_id=repo_root,
+                    provider_name=PROVIDER_NAME,
+                    provider_project_id=match.project,
+                    head_sha=match.cbm_head_sha,
+                    branch=match.branch,
                 )
-                binding_api = getattr(self._db, "record_provider_binding", None)
-                if (
-                    binding_api is not None and match is not None
-                    and match.bound and match.project
-                ):
-                    binding_api(
-                        repo_root,
-                        PROVIDER_NAME,
-                        match.project,
-                        head_sha=match.cbm_head_sha,
-                        branch=match.branch,
+            atomic = getattr(self._db, "record_provider_outcome", None)
+            try:
+                if atomic is not None:
+                    atomic(
+                        run_kwargs,
+                        binding,
+                        evidence_items or [],
                     )
+                else:
+                    # Sidecar without the atomic API (test doubles):
+                    # fall back to the per-method sequence.
+                    self._db.record_provider_run(**run_kwargs)
+                    if binding is not None:
+                        self._db.record_provider_binding(**binding)
+                    if evidence_items:
+                        self._db.record_provider_evidence(
+                            record.run_id, evidence_items
+                        )
             except Exception as exc:  # pragma: no cover - defensive ledger guard
                 logger.warning(
                     "cbm ledger persistence failed for run %s: %s",

@@ -10,12 +10,12 @@ PY=".venv/bin/python"
 fail() { echo "❌ gate failed: $1" >&2; exit 1; }
 
 echo "== ruff (core modules)"
-npx -y ruff check src/sot_graph/assurance/ src/sot_graph/providers/ \
+uv run ruff check src/sot_graph/assurance/ src/sot_graph/providers/ \
     src/sot_graph/diff_impact.py src/sot_graph/db.py \
     || fail "ruff"
 
 echo "== pyright (core modules)"
-npx -y pyright src/sot_graph/assurance/ src/sot_graph/providers/ \
+uv run pyright src/sot_graph/assurance/ src/sot_graph/providers/ \
     src/sot_graph/diff_impact.py src/sot_graph/db.py \
     || fail "pyright"
 
@@ -28,9 +28,9 @@ echo "core=${CORE}% receipts=${REC}%"
 [ "$REC" -ge 90 ] || fail "receipts coverage ${REC}% < 90%"
 
 echo "== bandit (reviewed config: bandit.yaml)"
-"$PY" -m bandit -q -c bandit.yaml -r src/sot_graph || fail "bandit"
+uvx bandit -q -c bandit.yaml -r src/sot_graph || fail "bandit"
 
 echo "== pip-audit"
-"$PY" -m pip_audit --skip-editable || fail "pip-audit"
+uvx pip-audit --skip-editable || fail "pip-audit"
 
 echo "✅ all quality gates passed"

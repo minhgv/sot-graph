@@ -516,7 +516,9 @@ class TestFederatedExtrasGaps:
                 orch, "federation_plan",
                 lambda spec, root, kind, db=None: {
                     "mode": "prefer", "warnings": [], "fail_message": None,
-                    "status": {"name": "cbm", "version": "0.10.8"},
+                    "providers": [SimpleNamespace(name="cbm")],
+                    "statuses": [{"name": "cbm", "installed": True,
+                                  "healthy": True, "version": "0.10.8"}],
                     "name": "cbm", "provider": object(),
                 },
             )

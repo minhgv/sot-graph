@@ -1197,11 +1197,34 @@ def cmd_trace(args: argparse.Namespace, db: Database, root: str) -> int:
     from sot_graph.trace import trace_fullstack, render_trace_markdown
 
     res = trace_fullstack(db, args.target, depth=getattr(args, "depth", 2))
+
+    # P1.b shared pre-query assurance: bind cited file content beside the
+    # result and surface journal staleness (same contract as explore/usages).
+    cited_paths: list[str] = []
+    for key, path_keys in (
+        ("nodes", ("path",)),
+        ("ui_navigation", ("file",)),
+        ("ui_decisions", ("file",)),
+        ("backend_steps", ("file",)),
+    ):
+        for item in res.get(key, []):
+            if isinstance(item, dict):
+                for pk in path_keys:
+                    p = item.get(pk)
+                    if p:
+                        cited_paths.append(str(p))
+    snapshot_dict, stale = assured_query_context(db, root, cited_paths)
+    res["snapshot"] = snapshot_dict
+    res["stale_files"] = stale
+
     if args.json:
         print(json.dumps(res, indent=2))
         return 0
 
     md = render_trace_markdown(res)
+    warning = stale_files_warning(stale)
+    if warning:
+        md = f"⚠ {warning}\n\n{md}"
     if args.output:
         out_path = os.path.abspath(os.path.join(root, args.output)) if not os.path.isabs(args.output) else args.output
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -1341,26 +1364,46 @@ def cmd_scope_receipt(args: argparse.Namespace, db: Database, root: str) -> int:
           f"candidate tests: {len(payload['candidate_tests'])}")
     print(f"   {payload['coverage']['note']}")
     print(f"   assurance: {ass['status']} — {ass['risk']['rule']}")
+    for rc in ass.get("reason_codes", []):
+        print(f"   reason: {rc}")
     if ass["rename_gate"].get("blocked"):
         print(f"   🚫 rename gate BLOCKED: {ass['rename_gate']['reason']}")
     for item in ass["omp_confirmations"]:
         print(f"   ☐ {item}")
-    return 0 if ass["status"] != "BLOCKED" else 2
+    # P0 vocabulary: hard stop only on ABSTAINED/UNVERIFIABLE (no bounded
+    # evidence at all); gate-blocked renames still stop the loop via exit 2.
+    blocked_statuses = ("ABSTAINED", "UNVERIFIABLE")
+    gate_blocked = bool(ass.get("rename_gate", {}).get("blocked"))
+    return 2 if (ass["status"] in blocked_statuses or gate_blocked) else 0
 
 
 def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
-    from sot_graph.diff_impact import (
-        analyze_diff_impact,
-        format_diff_impact_markdown,
-        format_diff_impact_json,
-    )
+    from sot_graph.diff_impact import GitDeltaExtractor, format_diff_impact_markdown
 
+    from sot_graph.assurance.receipts import diff_impact_receipt
     from sot_graph.snapshot import capture_worktree_snapshot
+    from types import SimpleNamespace
+
+    target = getattr(args, "target", "HEAD~1") or "HEAD~1"
+    depth = int(getattr(args, "depth", 2) or 2)
+    staged = bool(getattr(args, "staged", False))
+    working_tree = bool(getattr(args, "working_tree", False))
 
     # P1.g: capture PRE-change snapshot before any auto-reconcile mutates the
-    # index, and POST-change snapshot after — receipts can then prove which
-    # worktree state each half of the answer describes.
-    pre_snapshot = capture_worktree_snapshot(root, role="pre_change")
+    # index — the receipt binds it (volatile-stripped) beside the post state.
+    # P0 Contract 2: cite the diff's changed files so the pre-snapshot binds
+    # their content, mirroring the post-change snapshot in receipts.py.
+    try:
+        delta_files = list(
+            GitDeltaExtractor(root)
+            .extract_diff(target, staged=staged, working_tree=working_tree)[0]
+            .keys()
+        )
+    except Exception:  # pragma: no cover - best-effort content binding
+        delta_files = []
+    pre_snapshot = capture_worktree_snapshot(
+        root, role="pre_change", cited_paths=delta_files[:200] or None
+    )
     if getattr(args, "auto_reconcile", False):
         try:
             reconciler = Reconciler(db, root)
@@ -1368,26 +1411,21 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
         except Exception as exc:
             print(f"⚠️  Auto-reconcile failed: {exc}", file=sys.stderr)
 
-    target = getattr(args, "target", "HEAD~1") or "HEAD~1"
-    depth = getattr(args, "depth", 2)
-    staged = getattr(args, "staged", False)
-    working_tree = getattr(args, "working_tree", False)
-
-    res = analyze_diff_impact(
-        db=db,
-        repo_path=root,
-        target=target,
-        depth=depth,
-        staged=staged,
+    receipt = diff_impact_receipt(
+        db, root, target=target, depth=depth, staged=staged,
         working_tree=working_tree,
+        pre_snapshot=pre_snapshot.as_dict(),
     )
-    post_snapshot = capture_worktree_snapshot(root, role="post_change")
+    post_snapshot = receipt["post_change_snapshot"]
+    if not isinstance(post_snapshot, dict):
+        post_snapshot = post_snapshot.as_dict()
+
     # P1.c: every graph-derived citation must still match the journal; a
     # file that changed since the last reconcile caps evidence trust.
     cited = (
-        list(res.changed_files)
-        + [n.path for n in res.direct_nodes]
-        + [c.path for c in res.caller_impacts]
+        list(receipt["changed_files"])
+        + [n["path"] for n in receipt["direct_nodes"] if "path" in n]
+        + [c["path"] for c in receipt["caller_impacts"] if "path" in c]
     )
     stale = db.stale_journal_files(sorted({p for p in cited if p}), root=root)
     if stale:
@@ -1401,33 +1439,23 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
     fed = federated_extras(
         resolve_federated_spec(getattr(args, "provider", None), root),
         root, "diff-impact", target,
-        staged=bool(getattr(args, "staged", False)),
-        working_tree=bool(getattr(args, "working_tree", False)),
-        depth=int(getattr(args, "depth", 2) or 2),
+        staged=staged,
+        working_tree=working_tree,
+        depth=depth,
         db=db,
     )
     if fed is not None and fed["fail_message"]:
         print(f"❌ {fed['fail_message']}", file=sys.stderr)
         return 2
 
-    if getattr(args, "json", False):
-        from sot_graph.assurance.receipts import (
-            RECEIPT_SCHEMA_VERSION,
-            receipt_digest,
-        )
+    payload = dict(receipt)
+    payload["stale_files"] = stale
+    if fed is not None:
+        payload["external_candidates"] = fed["candidates"]
 
-        payload = res.to_dict()
+    if getattr(args, "json", False):
         if fed is not None:
             _print_fed_warnings(fed)
-            payload["external_candidates"] = fed["candidates"]
-        payload["snapshot"] = {
-            "pre_change": pre_snapshot.as_dict(),
-            "post_change": post_snapshot.as_dict(),
-        }
-        payload["stale_files"] = stale
-        payload["proof_scope"] = "post_change"
-        payload["schema_version"] = RECEIPT_SCHEMA_VERSION
-        payload["digest"] = receipt_digest(payload)
         envelope = wrap_envelope(payload, db=db)
         print(json.dumps(envelope, indent=2, default=str))
         if fed is not None:
@@ -1436,11 +1464,27 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
 
     print(
         f"_Snapshot: pre {pre_snapshot.descriptor_digest[:19]} "
-        f"(dirty={pre_snapshot.dirty}) → post {post_snapshot.descriptor_digest[:19]} "
-        f"(dirty={post_snapshot.dirty})_"
+        f"(dirty={pre_snapshot.dirty}) → post {post_snapshot['descriptor_digest'][:19]} "
+        f"(dirty={post_snapshot['dirty']})_"
     )
 
-    md = format_diff_impact_markdown(res)
+    def _ns(value: Any) -> Any:
+        if isinstance(value, dict):
+            return SimpleNamespace(**{k: _ns(v) for k, v in value.items()})
+        if isinstance(value, list):
+            return [_ns(v) for v in value]
+        return value
+
+    engine = SimpleNamespace(
+        summary=receipt["summary"],
+        target=target,
+        changed_files=receipt["changed_files"],
+        direct_nodes=_ns(receipt["direct_nodes"]),
+        caller_impacts=_ns(receipt["caller_impacts"]),
+        api_impacts=_ns(receipt["api_impacts"]),
+        test_impacts=_ns(receipt["test_impacts"]),
+    )
+    md = format_diff_impact_markdown(engine)
     if getattr(args, "output", None):
         out_path = os.path.abspath(os.path.join(root, args.output)) if not os.path.isabs(args.output) else args.output
         os.makedirs(os.path.dirname(out_path), exist_ok=True)

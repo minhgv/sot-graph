@@ -228,8 +228,8 @@ class TestUnionByIdentity:
 
         snap = "s1"
         self._seed(ledger_repo, [
-            ("codebase-memory", "app.py", "call:callees", "run", "helper", snap, None, None),
-            ("scip", "app.py", "call:callees", "run", "helper", snap, None, None),
+            ("codebase-memory", "app.py", "call:callees", "run", "helper", snap, 1, 1),
+            ("scip", "app.py", "call:callees", "run", "helper", snap, 1, 1),
             ("codebase-memory", "other.py", "define", "x", "x", snap, 1, 1),
         ])
         db = _db_of(ledger_repo)
@@ -239,7 +239,10 @@ class TestUnionByIdentity:
                       if not e.get("error")}
             entry = by_src["run"]
             assert set(entry["providers"]) == {"codebase-memory", "scip"}
+            # Fail-closed (P0): SUPPORTED requires a non-empty snapshot,
+            # a real path, and a span that verifies against live source.
             assert entry["status"] == "SUPPORTED"
+            assert entry["span"] == [1, 1]
             assert not entry["conflict"]
         finally:
             db.close()

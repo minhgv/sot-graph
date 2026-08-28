@@ -128,12 +128,7 @@ jobs:
         run: uv sync --all-extras --dev
 
       - name: Install audit tools
-        run: uv pip install bandit pip-audit
-
-      - name: Set up Node (ruff/pyright via npx)
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
+        run: uv tool install bandit && uv tool install pip-audit
 
       - name: Run quality gates
         run: bash scripts/quality_gates.sh
@@ -168,7 +163,7 @@ jobs:
           EOF
           uv run sot --root /tmp/cbm-e2e reconcile
           uv run sot --root /tmp/cbm-e2e providers detect --format json
-          uv run sot --root /tmp/cbm-e2e usages run --provider auto ||             uv run sot --root /tmp/cbm-e2e search run --provider auto
+          uv run sot --root /tmp/cbm-e2e usages "extract_graphql" --provider auto ||             uv run sot --root /tmp/cbm-e2e search "extract"
 
   package-smoke:
     name: Package & Smoke (${{ matrix.os }})

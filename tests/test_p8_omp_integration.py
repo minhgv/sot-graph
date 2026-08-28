@@ -73,8 +73,8 @@ class TestAssuredChangeLoop:
             _sot(e2e_repo, "scope-receipt", "run", "--json").stdout
         )
         assert pre["proof_scope"] == "pre_change_only"
-        assert pre["assurance"]["status"] in ("ASSURED", "DEGRADED_STALE_SOURCES")
-        assert pre["assurance"]["status"] != "BLOCKED"
+        assert pre["assurance"]["status"] == "ASSURED_WITHIN_SCOPE"
+        assert pre["assurance"]["reason_codes"] == []
         # builtin-only degradation is stated, not faked
         assert pre["providers"]["runs"] == []
         assert pre["coverage"]["basis"] == "measured"
@@ -152,7 +152,7 @@ class TestAssuredChangeLoop:
 
 class TestMcpAssuranceInputs:
     def test_search_policy_and_budget_params(self, e2e_repo: Path):
-        from sot_graph.mcp_service import McpService
+        from sot_graph.mcp_service import McpService, McpServiceError
 
         service = McpService(str(e2e_repo / ".sot" / "sot.db"), str(e2e_repo))
         try:
@@ -160,10 +160,15 @@ class TestMcpAssuranceInputs:
                                  provider_policy="prefer_external", budget=5)
             assert res["policy"]["provider_policy"] == "prefer_external"
             assert res["policy"]["builtin_only"] is False
+            # Honest fallback: the note states builtin was served because
+            # MCP has no external provider wired in.
+            assert res["policy"]["note"] is not None
+            assert "no external provider is wired into" in res["policy"]["note"]
             assert res["coverage"]["basis"] == "measured"
 
             lean = service.search("run", assurance=False)
             assert lean["coverage"] is None
+            assert lean["policy"]["note"] is None  # builtin_only needs no note
 
             usages = service.usages("run", provider_policy="builtin_only")
             assert usages["policy"]["builtin_only"] is True
@@ -171,5 +176,45 @@ class TestMcpAssuranceInputs:
 
             with pytest.raises(Exception):
                 service.search("run", provider_policy="bogus")
+
+            # require_external fails closed on the builtin-only MCP path.
+            with pytest.raises(McpServiceError) as exc:
+                service.search("run", provider_policy="require_external")
+            assert exc.value.code == "policy_unsatisfiable"
+            with pytest.raises(McpServiceError) as exc:
+                service.usages("run", provider_policy="require_external")
+            assert exc.value.code == "policy_unsatisfiable"
+        finally:
+            service.close()
+
+    def test_scope_receipt_and_diff_impact_receipt(self, e2e_repo: Path):
+        """MCP receipt tools return payload + digest; statuses pass through."""
+        from sot_graph.mcp_service import McpService
+
+        service = McpService(str(e2e_repo / ".sot" / "sot.db"), str(e2e_repo))
+        try:
+            scope = service.scope_receipt("run")
+            assert scope["digest"]
+            assert "status" in scope["assurance"]
+            assert scope["assurance"]["status"] != "BLOCKED"
+            assert scope["proof_scope"] == "pre_change_only"
+
+            (e2e_repo / "app.py").write_text(
+                "import util\n\n\ndef run():\n    return util.help() + 3\n",
+                encoding="utf-8",
+            )
+            diff = service.diff_impact_receipt("HEAD~1")
+            assert diff["digest"]
+            assert "status" in diff or "closure_decision" in diff
+
+            import asyncio
+
+            # The worktree changed above, so the receipt digest MUST move
+            # (snapshot binding), and the async wrapper must agree with a
+            # fresh sync call on the SAME post-edit state.
+            post_scope = service.scope_receipt("run")
+            assert post_scope["digest"] != scope["digest"]
+            async_scope = asyncio.run(service.ascope_receipt("run"))
+            assert async_scope["digest"] == post_scope["digest"]
         finally:
             service.close()

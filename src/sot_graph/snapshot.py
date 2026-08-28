@@ -128,10 +128,17 @@ class WorktreeSnapshot:
     algo_version: str = "sha256-v1"
     snapshot_id: str | None = None
     descriptor_digest: str = field(default="", compare=False)
+    # P0 content binding (Contract 2): when cited_paths are supplied, every
+    # cited file is hashed from the working tree and the per-file digests
+    # fold into scope_digest. Any unreadable cited path forces
+    # scope_digest=None (fail-closed) and names the path in ``unreadable``.
+    content_digests: dict[str, str] = field(default_factory=dict)
+    scope_digest: str | None = None
+    unreadable: list[str] = field(default_factory=list)
 
 
     def as_dict(self) -> dict[str, object]:
-        return {
+        d: dict[str, object] = {
             "snapshot_id": self.snapshot_id,
             "descriptor_digest": self.descriptor_digest,
             "role": self.role,
@@ -143,6 +150,57 @@ class WorktreeSnapshot:
             "algo_version": self.algo_version,
             "captured_at": self.captured_at,
         }
+        if self.content_digests:
+            d["content_digests"] = dict(self.content_digests)
+        if self.scope_digest is not None:
+            d["scope_digest"] = self.scope_digest
+        if self.unreadable:
+            d["unreadable"] = list(self.unreadable)
+        return d
+
+
+def _content_binding(
+    repo_root: str, cited_paths: list[str] | None
+) -> tuple[dict[str, str], str | None, list[str]]:
+    """Hash every cited file from the working tree (Contract 2).
+
+    Returns ``(content_digests, scope_digest, unreadable)``. Paths are
+    deduplicated and normalized to forward slashes; digests fold into a
+    single ``scope_digest`` over the sorted ``"path  hexdigest"`` lines.
+    Any read failure is fail-closed: the offending path lands in
+    ``unreadable`` and ``scope_digest`` comes back None.
+    """
+    if not cited_paths:
+        return {}, None, []
+    digests: dict[str, str] = {}
+    unreadable: list[str] = []
+    root_real = os.path.realpath(repo_root)
+    for raw in cited_paths:
+        raw_s = str(raw).replace(os.sep, "/")
+        if os.path.isabs(raw_s):
+            # Graph nodes store absolute paths; normalize anything under
+            # the repo root to repo-relative so CLI and MCP citing the
+            # same node produce identical digest keys (Contract 2).
+            real = os.path.realpath(raw_s)
+            if real == root_real or real.startswith(root_real + os.sep):
+                rel = os.path.relpath(real, root_real).replace(os.sep, "/")
+            else:
+                # Cited path outside the repo: fail-closed below.
+                rel = raw_s.strip("/")
+        else:
+            rel = raw_s.strip("/")
+        abs_path = os.path.join(root_real, *rel.split("/"))
+        try:
+            with open(abs_path, "rb") as fh:
+                digests[rel] = hashlib.sha256(fh.read()).hexdigest()
+        except OSError:
+            unreadable.append(rel)
+    if unreadable:
+        return digests, None, sorted(unreadable)
+    hasher = hashlib.sha256()
+    for rel in sorted(digests):
+        hasher.update(f"{rel}  {digests[rel]}\n".encode("utf-8"))
+    return digests, f"sha256:{hasher.hexdigest()}", []
 
 
 def capture_worktree_snapshot(
@@ -150,17 +208,27 @@ def capture_worktree_snapshot(
     conn: sqlite3.Connection | None = None,
     *,
     role: str = "query",
+    cited_paths: list[str] | None = None,
 ) -> WorktreeSnapshot:
     """Capture the common snapshot descriptor shared by assured queries.
 
     With ``conn`` the descriptor is ALSO persisted (reusing
     ``bind_snapshot`` semantics); without it this stays a read-only capture
     — no writes happen on read paths.
+
+    With ``cited_paths`` the descriptor additionally binds file CONTENT
+    (not just git status): each cited file is sha256-hashed from the
+    working tree and the per-file digests fold into ``scope_digest``.
+    Unreadable cited paths leave ``scope_digest`` unset (fail-closed) and
+    are reported in ``unreadable``.
     """
     from sot_graph.envelope import compute_manifest_digest, compute_snapshot_generation
 
     root = os.path.realpath(repo_root)
     dirty, fingerprint = dirty_state(root)
+    content_digests, scope_digest, unreadable = _content_binding(
+        root, cited_paths
+    )
     snapshot = WorktreeSnapshot(
         repo_root=root,
         commit_sha=get_head_sha(root),
@@ -171,11 +239,23 @@ def capture_worktree_snapshot(
         manifest_digest=compute_manifest_digest(conn) if conn is not None else None,
         generation=compute_snapshot_generation(conn) if conn is not None else None,
     )
+    if cited_paths is not None:
+        snapshot = replace(snapshot, algo_version="sha256-v2")
+    if content_digests:
+        snapshot = replace(snapshot, content_digests=content_digests)
+    if scope_digest is not None:
+        snapshot = replace(snapshot, scope_digest=scope_digest)
+    if unreadable:
+        snapshot = replace(snapshot, unreadable=unreadable)
     hasher = hashlib.sha256()
     for part in (
         str(snapshot.commit_sha), str(snapshot.dirty),
         str(snapshot.dirty_fingerprint), str(snapshot.manifest_digest),
         str(snapshot.generation), snapshot.role,
+        # Contract 2: content binding must be part of the descriptor so
+        # v1 (status-only) and v2 (content-bound) captures of the same
+        # git state never collide.
+        snapshot.algo_version, str(snapshot.scope_digest),
     ):
         hasher.update(part.encode("utf-8"))
         hasher.update(b"\x00")

@@ -534,8 +534,9 @@ class TestTimeoutAndEvidenceDefaults:
         })()
         run = type("Run", (), {"run_id": "run-zero"})()
 
-        provider._persist_evidence("trace_path", outcome, run, None)
-        assert ledger.items[0]["confidence"] == 0.0
+        provider = CodebaseMemoryProvider()
+        items = provider._evidence_items("trace_path", outcome, None)
+        assert items[0]["confidence"] == 0.0
 
 
 

@@ -103,14 +103,24 @@ _PACK_OUTPUT = {
     },
     "required": ["ok"],
 }
+_RECEIPT_OUTPUT = {
+    "type": "object",
+    "properties": {
+        "digest": {"type": "string"},
+        "kind": {"type": "string"},
+        "error": {"type": "object"},
+    },
+    "required": ["digest"],
+}
 
 _SCHEMA_SHAPES = {
     "sot_search": ("sot_search", _SEARCH_OUTPUT),
     "sot_usages": ("sot_usages", _USAGES_OUTPUT),
     "sot_map": ("sot_map", _MAP_OUTPUT),
     "sot_pack": ("sot_pack", _PACK_OUTPUT),
+    "sot_scope_receipt": ("sot_scope_receipt", _RECEIPT_OUTPUT),
+    "sot_diff_impact_receipt": ("sot_diff_impact_receipt", _RECEIPT_OUTPUT),
 }
-
 
 def _ensure_schema_shape(name: str, result: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
     """Guarantee outputSchema-required keys even on service error paths."""
@@ -125,8 +135,8 @@ def _ensure_schema_shape(name: str, result: Dict[str, Any], args: Dict[str, Any]
         result.setdefault("risk", [])
     elif name == "sot_map":
         result.setdefault("ok", False)
-    elif name == "sot_pack":
-        result.setdefault("ok", False)
+    elif name in _SCHEMA_SHAPES and _SCHEMA_SHAPES[name][1] is _RECEIPT_OUTPUT:
+        result.setdefault("digest", "")
     return result
 
 
@@ -260,6 +270,23 @@ def create_server(service: McpService) -> Any:
                     "format": {"type": "string", "enum": ["markdown", "json"], "description": "Output format (default: markdown)"},
                 }, "additionalProperties": False,
             }),
+            types.Tool(name="sot_scope_receipt", description="PRE-change scope receipt for one edit target (P7.1): resolved identity, snapshot binding, bounded impact, candidate tests, risk-based assurance, and OMP confirmations.", inputSchema={
+                "type": "object", "properties": {
+                    "target": {"type": "string"},
+                    "kind_of_change": {"type": "string", "enum": ["local-body", "rename", "delete", "public-api"]},
+                    "touches_auth": {"type": "boolean"},
+                    "dynamic_heavy": {"type": "boolean"},
+                    "depth": {"type": "integer", "minimum": 1},
+            }, "required": ["target"], "additionalProperties": False,
+            }, outputSchema=_RECEIPT_OUTPUT),
+            types.Tool(name="sot_diff_impact_receipt", description="POST-change diff-impact receipt (P7.2): wraps the diff engine result with a post-change snapshot, invalidated evidence, remaining gaps, and an explicit closure decision.", inputSchema={
+                "type": "object", "properties": {
+                    "target": {"type": "string"},
+                    "depth": {"type": "integer", "minimum": 1, "maximum": 5},
+                    "staged": {"type": "boolean"},
+                    "working_tree": {"type": "boolean"},
+                }, "additionalProperties": False,
+            }, outputSchema=_RECEIPT_OUTPUT),
         ]
 
     @server.call_tool()
@@ -338,6 +365,21 @@ def create_server(service: McpService) -> Any:
                     since=args.get("since"),
                     with_impact=args.get("with_impact", True),
                     format=args.get("format", "markdown"),
+                )
+            elif name == "sot_scope_receipt":
+                result = await service.ascope_receipt(
+                    args.get("target", ""),
+                    kind_of_change=args.get("kind_of_change", "local-body"),
+                    touches_auth=args.get("touches_auth", False),
+                    dynamic_heavy=args.get("dynamic_heavy", False),
+                    depth=args.get("depth", 2),
+                )
+            elif name == "sot_diff_impact_receipt":
+                result = await service.adiff_impact_receipt(
+                    target=args.get("target", "HEAD~1"),
+                    depth=args.get("depth", 2),
+                    staged=args.get("staged", False),
+                    working_tree=args.get("working_tree", False),
                 )
             else:
                 result = {"error": {"code": "unknown_tool", "message": "unknown MCP tool"}}

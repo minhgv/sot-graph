@@ -38,7 +38,7 @@ from sot_graph.providers.contract import (  # noqa: E402
     static_contract_problems,
     validate_entry_point_provider,
 )
-from tests.test_cbm_adapter import make_exe  # noqa: E402
+from test_cbm_adapter import make_exe  # noqa: E402  (tests/ is not a package)
 
 DRIFTED = "total: 1\nhas_more: false\n"  # text report, not JSON
 

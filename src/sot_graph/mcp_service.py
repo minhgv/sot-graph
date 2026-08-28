@@ -60,6 +60,35 @@ def resolve_and_validate_output_path(
     return resolved_target
 
 
+def _require_satisfiable_policy(provider_policy: str) -> None:
+    """Fail closed when ``require_external`` cannot be honored.
+
+    The MCP read path serves builtin evidence only; no external provider
+    is wired into it, so demanding one must raise instead of silently
+    degrading.
+    """
+    if provider_policy == "require_external":
+        raise McpServiceError(
+            "policy_unsatisfiable",
+            "require_external cannot be served by builtin-only MCP read "
+            "path; use CLI federation or provide an external provider",
+        )
+
+
+def _honest_policy_meta(provider_policy: str) -> Dict[str, Any]:
+    """Honest policy metadata for the builtin-only MCP read path."""
+    note: Optional[str] = None
+    if provider_policy == "prefer_external":
+        note = ("builtin served: no external provider is wired into the "
+                "MCP read path; prefer_external applies to CLI federation "
+                "and sot_providers_sync")
+    return {
+        "provider_policy": provider_policy,
+        "builtin_only": provider_policy == "builtin_only",
+        "note": note,
+    }
+
+
 @dataclass(frozen=True)
 class ServiceLimits:
     search: int = 50
@@ -84,6 +113,8 @@ class _ConnView:
 
     stale_journal_files = Database.stale_journal_files
     get_file_journal = Database.get_file_journal
+    get_node_by_symbol = Database.get_node_by_symbol
+    explore_node = Database.explore_node
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
@@ -386,15 +417,10 @@ class McpService:
                 "invalid_argument",
                 "provider_policy must be builtin_only | prefer_external | require_external",
             )
+        _require_satisfiable_policy(provider_policy)
         if budget is not None:
             limit = self._bounded(budget, limit)
-        policy_meta = {
-            "provider_policy": provider_policy,
-            "builtin_only": provider_policy == "builtin_only",
-            "note": "MCP read tools are builtin-only; prefer_external/"
-                    "require_external apply to CLI federation and "
-                    "sot_providers_sync",
-        }
+        policy_meta = _honest_policy_meta(provider_policy)
         try:
             threshold = float(threshold)
         except (TypeError, ValueError) as exc:
@@ -604,6 +630,7 @@ class McpService:
                 "invalid_argument",
                 "provider_policy must be builtin_only | prefer_external | require_external",
             )
+        _require_satisfiable_policy(provider_policy)
         if budget is not None:
             limit = self._bounded(budget, limit)
 
@@ -640,8 +667,7 @@ class McpService:
                 "risk": risk,
                 "next_steps": data.get("next_steps", []),
                 "truncated": len(data["callers"]) > limit or len(data["risk"]) > limit,
-                "policy": {"provider_policy": provider_policy,
-                           "builtin_only": provider_policy == "builtin_only"},
+                "policy": _honest_policy_meta(provider_policy),
                 "coverage": self._coverage_note(conn) if assurance else None,
                 "providers": self._providers(conn),
                 "snapshot": snapshot,
@@ -1169,6 +1195,61 @@ class McpService:
             return self._fits_response(payload)
         return self._run(op)
 
+    def scope_receipt(
+        self,
+        target: str,
+        kind_of_change: str = "local-body",
+        touches_auth: bool = False,
+        dynamic_heavy: bool = False,
+        depth: int = 2,
+    ) -> Dict[str, Any]:
+        """PRE-change scope receipt for one edit target (P7.1) over MCP."""
+        from sot_graph.assurance.receipts import scope_receipt as _scope_receipt
+
+        if not isinstance(target, str) or not target.strip():
+            raise McpServiceError("invalid_argument", "target must not be empty")
+        if len(target) > 512:
+            raise McpServiceError("invalid_argument", "target exceeds 512 characters")
+        if kind_of_change not in ("local-body", "rename", "delete", "public-api"):
+            raise McpServiceError(
+                "invalid_argument",
+                "kind_of_change must be local-body | rename | delete | public-api",
+            )
+        depth = self._bounded(depth, self.limits.explore_depth)
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            view = cast(Database, _ConnView(conn))
+            payload = _scope_receipt(
+                view, self.project_root, target,
+                kind_of_change=kind_of_change, touches_auth=touches_auth,
+                dynamic_heavy=dynamic_heavy, depth=depth,
+            )
+            return self._fits_response(payload)
+
+        return self._run(op)
+
+    def diff_impact_receipt(
+        self,
+        target: str = "HEAD~1",
+        depth: int = 2,
+        staged: bool = False,
+        working_tree: bool = False,
+    ) -> Dict[str, Any]:
+        """POST-change diff-impact receipt (P7.2) over MCP."""
+        from sot_graph.assurance.receipts import (
+            diff_impact_receipt as _diff_impact_receipt,
+        )
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            view = cast(Database, _ConnView(conn))
+            payload = _diff_impact_receipt(
+                view, self.project_root, target=target, depth=depth,
+                staged=staged, working_tree=working_tree,
+            )
+            return self._fits_response(payload)
+
+        return self._run(op)
+
     def git_history(
         self,
         limit: int = 10,
@@ -1308,6 +1389,11 @@ class McpService:
 
     async def agit_history(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return await self._async(self.git_history, *args, **kwargs)
+    async def ascope_receipt(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.scope_receipt, *args, **kwargs)
+
+    async def adiff_impact_receipt(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.diff_impact_receipt, *args, **kwargs)
 
 
 __all__ = ["McpService", "McpServiceError", "ServiceLimits"]
