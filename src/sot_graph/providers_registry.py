@@ -145,6 +145,19 @@ def _external_allowed(name: str, cfg: SotConfig) -> bool:
     if cfg.allow_external:
         return True
     return name in ("sot-builtin", "scip")
+def _gated_status(pcfg: ProviderConfig, detail: str) -> ProviderStatus:
+    """Describe a provider that was intentionally not probed."""
+    return ProviderStatus(
+        name=pcfg.name,
+        mode=pcfg.integration,
+        installed=False,
+        version=None,
+        healthy=False,
+        capabilities=list(pcfg.capabilities),
+        detail=detail,
+        probe_engine="gated",
+    )
+
 
 
 def _join_detail(parts: list[str]) -> str:
@@ -291,7 +304,21 @@ def _status_for(pcfg: ProviderConfig, repo_root: str) -> ProviderStatus:
 
 
 def _detect_all(repo_root: str, cfg: SotConfig) -> dict[str, ProviderStatus]:
-    return {name: _status_for(pcfg, repo_root) for name, pcfg in cfg.providers.items()}
+    statuses: dict[str, ProviderStatus] = {}
+    for name, pcfg in cfg.providers.items():
+        if pcfg.enabled is False:
+            statuses[name] = _gated_status(
+                pcfg, "not probed: disabled via config"
+            )
+        elif not _external_allowed(name, cfg):
+            statuses[name] = _gated_status(
+                pcfg,
+                "not probed: external provider gated because "
+                "allow_external=false",
+            )
+        else:
+            statuses[name] = _status_for(pcfg, repo_root)
+    return statuses
 
 
 def detect_providers(repo_root: str, config: SotConfig | None = None) -> list[ProviderStatus]:
@@ -372,30 +399,52 @@ def providers_doctor(repo_root: str, config: SotConfig | None = None) -> dict:
         entry = asdict(st)
         entry["enabled"] = pcfg.enabled
         entry["usable"] = bool(
-            st.installed and st.healthy and pcfg.enabled is not False and _external_allowed(name, cfg)
+            st.installed
+            and st.healthy
+            and pcfg.enabled is not False
+            and _external_allowed(name, cfg)
         )
         entries.append(entry)
 
-        required_broken = pcfg.enabled is True and not (st.installed and st.healthy)
-        if required_broken:
-            ok = False
-            state = f"unhealthy ({st.detail})" if st.installed else f"missing ({st.detail})"
+        if pcfg.enabled is False:
             next_actions.append(
-                f"{name}: required by config but {state} — fix the installation "
-                f"or set enabled=false in .sot/config.toml"
+                f"{name}: disabled via config — re-enable it in .sot/config.toml "
+                "to use its capabilities"
             )
-        elif pcfg.enabled is False:
-            next_actions.append(f"{name}: disabled via config — re-enable it in .sot/config.toml to use its capabilities")
-        elif not st.installed and name != "sot-builtin":
-            caps = ", ".join(st.capabilities) or "(none)"
-            next_actions.append(
-                f"{name}: optional, not installed ({st.detail}) — install it to unlock: {caps}"
+        elif not _external_allowed(name, cfg):
+            if pcfg.enabled is True:
+                ok = False
+                next_actions.append(
+                    f"{name}: required by config but unavailable because "
+                    "allow_external=false — set allow_external=true in "
+                    ".sot/config.toml to use it"
+                )
+            else:
+                next_actions.append(
+                    f"{name}: not probed because allow_external=false — "
+                    "set allow_external=true in .sot/config.toml to use it"
+                )
+        else:
+            required_broken = (
+                pcfg.enabled is True and not (st.installed and st.healthy)
             )
-        elif st.installed and st.healthy and not _external_allowed(name, cfg):
-            next_actions.append(
-                f"{name}: detected and healthy but ignored because allow_external=false — "
-                f"set allow_external=true in .sot/config.toml to use it"
-            )
+            if required_broken:
+                ok = False
+                state = (
+                    f"unhealthy ({st.detail})"
+                    if st.installed
+                    else f"missing ({st.detail})"
+                )
+                next_actions.append(
+                    f"{name}: required by config but {state} — fix the installation "
+                    "or set enabled=false in .sot/config.toml"
+                )
+            elif not st.installed and name != "sot-builtin":
+                caps = ", ".join(st.capabilities) or "(none)"
+                next_actions.append(
+                    f"{name}: optional, not installed ({st.detail}) — "
+                    f"install it to unlock: {caps}"
+                )
 
     return {
         "root": repo_root,

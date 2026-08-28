@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import html as html_lib
 import os
 import webbrowser
 from pathlib import Path
@@ -98,7 +99,15 @@ def generate_html_visualizer(
         "title": title,
     }
 
-    payload_json = json.dumps(graph_payload)
+    # Escape characters that can terminate the surrounding script element.
+    # The JSON remains valid JavaScript while hostile metadata stays data.
+    payload_json = (
+        json.dumps(graph_payload, ensure_ascii=True)
+        .replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+    )
+    title_html = html_lib.escape(str(title), quote=True)
 
     # HTML template with embedded D3.js and responsive UI
     html_template = f"""<!DOCTYPE html>
@@ -106,7 +115,7 @@ def generate_html_visualizer(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{title}</title>
+  <title>{title_html}</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <style>
     :root {{
@@ -264,7 +273,7 @@ def generate_html_visualizer(
 <body>
   <div id="sidebar">
     <div class="sidebar-header">
-      <h1 id="viz-title">{title}</h1>
+      <h1 id="viz-title">{title_html}</h1>
       <input type="text" id="search-input" class="search-box" placeholder="Filter symbol, file, community...">
     </div>
     <div class="stats-bar">
@@ -307,13 +316,21 @@ def generate_html_visualizer(
     DATA.communities.forEach(c => {{
       const div = document.createElement("div");
       div.className = "community-item";
-      div.innerHTML = `
-        <div>
-          <span class="comm-badge" style="background: ${{colorScale(c.id)}}"></span>
-          <span>${{c.label}}</span>
-        </div>
-        <span style="color: var(--text-muted); font-size: 0.75rem;">${{c.node_count}}</span>
-      `;
+
+      const details = document.createElement("div");
+      const badge = document.createElement("span");
+      badge.className = "comm-badge";
+      badge.style.background = colorScale(c.id);
+      const label = document.createElement("span");
+      label.textContent = String(c.label ?? "");
+      details.append(badge, label);
+
+      const count = document.createElement("span");
+      count.style.color = "var(--text-muted)";
+      count.style.fontSize = "0.75rem";
+      count.textContent = String(c.node_count ?? 0);
+      div.append(details, count);
+
       div.onclick = () => filterByCommunity(c.id);
       commList.appendChild(div);
     }});
@@ -366,7 +383,10 @@ def generate_html_visualizer(
     node.append("text")
       .attr("dx", 12)
       .attr("dy", ".35em")
-      .text(d => d.label.length > 24 ? d.label.substring(0, 22) + "..." : d.label);
+      .text(d => {{
+        const label = String(d.label ?? "");
+        return label.length > 24 ? label.substring(0, 22) + "..." : label;
+      }});
 
     simulation.on("tick", () => {{
       link
@@ -399,18 +419,45 @@ def generate_html_visualizer(
     function inspectNode(d) {{
       document.getElementById("inspector-panel").style.display = "block";
       const ic = document.getElementById("inspector-content");
-      const kindTag = d.kind === "file" ? '<span class="tag tag-file">FILE</span>' : '<span class="tag tag-symbol">SYMBOL</span>';
-      const godTag = d.is_god_node ? `<span class="tag tag-god">GOD NODE (${{d.risk_level}})</span>` : '';
+      ic.replaceChildren();
 
-      ic.innerHTML = `
-        <h3>${{d.label}}</h3>
-        <div style="margin-bottom: 8px;">${{kindTag}} ${{godTag}}</div>
-        <p><strong>Path:</strong> ${{d.path ? d.path : 'N/A'}}</p>
-        <p><strong>Location:</strong> Line ${{d.line_start || 1}}</p>
-        <p><strong>Community:</strong> ${{d.community_label}}</p>
-        <p><strong>Connections:</strong> Total ${{d.total_degree}} (In: ${{d.in_degree}}, Out: ${{d.out_degree}})</p>
-        ${{d.is_god_node ? `<p><strong>Blast Radius:</strong> ${{d.blast_radius}} nodes</p>` : ''}}
-      `;
+      const h3 = document.createElement("h3");
+      h3.textContent = String(d.label ?? "");
+      ic.appendChild(h3);
+
+      const tagLine = document.createElement("div");
+      tagLine.style.marginBottom = "8px";
+      const kindTag = document.createElement("span");
+      kindTag.className = d.kind === "file"
+        ? "tag tag-file"
+        : "tag tag-symbol";
+      kindTag.textContent = d.kind === "file" ? "FILE" : "SYMBOL";
+      tagLine.appendChild(kindTag);
+      if (d.is_god_node) {{
+        const godTag = document.createElement("span");
+        godTag.className = "tag tag-god";
+        godTag.textContent = `GOD NODE (${{String(d.risk_level ?? "")}})`;
+        tagLine.appendChild(godTag);
+      }}
+      ic.appendChild(tagLine);
+
+      const addDetail = (label, value) => {{
+        const p = document.createElement("p");
+        const strong = document.createElement("strong");
+        strong.textContent = `${{label}}:`;
+        p.append(strong, document.createTextNode(` ${{String(value)}}`));
+        ic.appendChild(p);
+      }};
+      addDetail("Path", d.path ? d.path : "N/A");
+      addDetail("Location", `Line ${{d.line_start || 1}}`);
+      addDetail("Community", d.community_label);
+      addDetail(
+        "Connections",
+        `Total ${{d.total_degree}} (In: ${{d.in_degree}}, Out: ${{d.out_degree}})`,
+      );
+      if (d.is_god_node) {{
+        addDetail("Blast Radius", `${{d.blast_radius}} nodes`);
+      }}
 
       // Highlight neighbors
       node.classed("highlighted", n => n.id === d.id);
@@ -429,7 +476,12 @@ def generate_html_visualizer(
         link.style("opacity", 0.6);
         return;
       }}
-      node.style("opacity", d => (d.label.toLowerCase().includes(query) || (d.path && d.path.toLowerCase().includes(query))) ? 1 : 0.1);
+      node.style("opacity", d => {{
+        const label = String(d.label ?? "");
+        const path = d.path == null ? "" : String(d.path);
+        return (label.toLowerCase().includes(query) ||
+          (path && path.toLowerCase().includes(query))) ? 1 : 0.1;
+      }});
       link.style("opacity", 0.1);
     }};
 

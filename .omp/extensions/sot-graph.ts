@@ -20,10 +20,101 @@
  * - sot_viz: Interactive D3.js Knowledge Graph Visualizer Generation
  * - sot_export: Multi-format Graph Export (GraphRAG JSON, Obsidian, GraphML, SCIP)
  * - sot_bundle: Architecture Fact Bundler for LLM Report Synthesis
+ * - sot_diff_impact: Git Diff Blast Radius & API Impact Analysis
+ * - sot_git_history: Git Commit History Risk Scoring & Symbol Detection
  */
 import { execFile } from "node:child_process";
-import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { accessSync, constants, existsSync, realpathSync, statSync } from "node:fs";
+import { delimiter, isAbsolute, join, relative, resolve, sep } from "node:path";
+
+const DEFAULT_WINDOWS_PATHEXT = [".COM", ".EXE", ".BAT", ".CMD"];
+
+const environmentValue = (env: NodeJS.ProcessEnv, name: string): string | undefined => {
+  const directValue = env[name];
+  if (directValue !== undefined) return directValue;
+  const normalizedName = name.toLowerCase();
+  return Object.entries(env).find(([key]) => key.toLowerCase() === normalizedName)?.[1];
+};
+
+const pathDelimiter = (platform: NodeJS.Platform): string => (platform === "win32" ? ";" : delimiter);
+
+const canonicalPath = (path: string): string => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+};
+
+const canonicalExistingPath = (path: string): string | undefined => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return undefined;
+  }
+};
+
+const isWithin = (root: string, candidate: string, platform: NodeJS.Platform = process.platform): boolean => {
+  const comparisonRoot = platform === "win32" ? root.toLowerCase() : root;
+  const comparisonCandidate = platform === "win32" ? candidate.toLowerCase() : candidate;
+  const relativePath = relative(comparisonRoot, comparisonCandidate);
+  return relativePath === "" || (!relativePath.startsWith(`..${sep}`) && relativePath !== ".." && !isAbsolute(relativePath));
+};
+
+const commandEnvironment = (cwd: string, platform: NodeJS.Platform = process.platform): NodeJS.ProcessEnv => {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  const pathValue = environmentValue(env, "PATH");
+
+  // Environment variable names are case-insensitive on Windows. Remove every
+  // variant before publishing the filtered canonical PATH.
+  for (const key of Object.keys(env)) {
+    const normalizedKey = key.toLowerCase();
+    if (normalizedKey === "pythonpath" || normalizedKey === "path") delete env[key];
+  }
+
+  if (pathValue !== undefined) {
+    const workspaceRoot = canonicalPath(resolve(cwd));
+    env.PATH = pathValue
+      .split(pathDelimiter(platform))
+      .flatMap((entry) => {
+        const originalEntryPath = resolve(cwd, entry || ".");
+        const canonicalEntryPath = canonicalPath(originalEntryPath);
+        const originalSotPath = join(originalEntryPath, "sot");
+        const canonicalSotPath = canonicalPath(originalSotPath);
+        const pathsToCheck = [
+          originalEntryPath,
+          canonicalEntryPath,
+          originalSotPath,
+          canonicalSotPath,
+        ];
+        if (pathsToCheck.some((candidate) => isWithin(workspaceRoot, candidate, platform))) {
+          return [];
+        }
+        return [canonicalEntryPath];
+      })
+      .join(pathDelimiter(platform));
+  }
+  return env;
+};
+
+const windowsPathSuffixes = (env: NodeJS.ProcessEnv): string[] => {
+  const configuredPathext = environmentValue(env, "PATHEXT");
+  const configuredSuffixes = (configuredPathext ?? DEFAULT_WINDOWS_PATHEXT.join(";"))
+    .split(";")
+    .map((suffix) => suffix.trim())
+    .filter((suffix) => /^\.[^./\\]+$/.test(suffix));
+  return configuredSuffixes.length > 0 ? configuredSuffixes : DEFAULT_WINDOWS_PATHEXT;
+};
+
+const isExecutableFile = (path: string, platform: NodeJS.Platform): boolean => {
+  try {
+    if (!statSync(path).isFile()) return false;
+    if (platform !== "win32") accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 interface ToolResult {
   content: Array<{ type: string; text: string }>;
@@ -42,36 +133,76 @@ interface ExtensionAPI {
   }) => void;
 }
 
-const runCmd = (bin: string, args: string[], cwd?: string): Promise<{ ok: boolean; output: string }> => {
-  const { promise, resolve } = Promise.withResolvers<{ ok: boolean; output: string }>();
+const runCmd = (bin: string | undefined, args: string[], cwd?: string): Promise<{ ok: boolean; output: string }> => {
+  const commandCwd = cwd || process.cwd();
+  if (bin === undefined || !isAbsolute(bin)) {
+    return Promise.resolve({ ok: false, output: "Error: sot executable not found on trusted PATH" });
+  }
+
+  const { promise, resolve: resolvePromise } = Promise.withResolvers<{ ok: boolean; output: string }>();
   execFile(
     bin,
     args,
     {
-      cwd: cwd || process.cwd(),
+      cwd: commandCwd,
       timeout: 120_000,
       maxBuffer: 16_000_000,
-      env: { ...process.env, PYTHONPATH: join(process.cwd(), "src") },
+      env: commandEnvironment(commandCwd),
     },
     (err, stdout, stderr) => {
       if (err) {
-        resolve({ ok: false, output: `Error: ${err.message}\n${stderr || ""}\n${stdout || ""}` });
+        resolvePromise({ ok: false, output: `Error: ${err.message}\n${stderr || ""}\n${stdout || ""}` });
       } else {
-        resolve({ ok: true, output: stdout || stderr });
+        resolvePromise({ ok: true, output: stdout || stderr });
       }
     }
   );
   return promise;
 };
 
-export function resolveSotBinary(cwd: string = process.cwd()): string {
-  const localBin = join(cwd, "bin", "sot");
-  if (existsSync(localBin)) return localBin;
-  return "sot";
+export function resolveSotBinary(cwd: string = process.cwd(), platform: NodeJS.Platform = process.platform): string | undefined {
+  const commandCwd = cwd || process.cwd();
+  const env = commandEnvironment(commandCwd, platform);
+  const pathValue = env.PATH;
+  if (pathValue === undefined) return undefined;
+
+  const workspaceRoot = canonicalPath(resolve(commandCwd));
+  const candidateNames =
+    platform === "win32" ? windowsPathSuffixes(env).map((suffix) => `sot${suffix}`) : ["sot"];
+  for (const pathEntry of pathValue.split(pathDelimiter(platform))) {
+    if (!pathEntry) continue;
+    const canonicalDirectory = canonicalExistingPath(pathEntry);
+    if (
+      canonicalDirectory === undefined ||
+      !isAbsolute(canonicalDirectory) ||
+      isWithin(workspaceRoot, pathEntry, platform) ||
+      isWithin(workspaceRoot, canonicalDirectory, platform)
+    ) {
+      continue;
+    }
+
+    for (const candidateName of candidateNames) {
+      const candidatePath = join(canonicalDirectory, candidateName);
+      if (!isAbsolute(candidatePath) || isWithin(workspaceRoot, candidatePath, platform)) continue;
+
+      const canonicalCandidate = canonicalExistingPath(candidatePath);
+      if (
+        canonicalCandidate === undefined ||
+        !isAbsolute(canonicalCandidate) ||
+        isWithin(workspaceRoot, canonicalCandidate, platform) ||
+        !isExecutableFile(canonicalCandidate, platform)
+      ) {
+        continue;
+      }
+      return canonicalCandidate;
+    }
+  }
+  return undefined;
 }
 
+
 export default function sotGraphExtension(pi: ExtensionAPI): void {
-  const getSotBin = (): string => resolveSotBinary(process.cwd());
+  const getSotBin = (): string | undefined => resolveSotBinary(process.cwd());
 
   // 1. sot_search: Verified Knowledge Search with Trust Verdicts
   pi.registerTool({
@@ -235,7 +366,7 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
       type: "object",
       properties: {
         target: { type: "string", description: "Target root symbol or fully-qualified name" },
-        depth: { type: "number", description: "Graph traversal depth (default: 2)" },
+        depth: { type: "number", description: "Graph traversal depth passed as --max-hops (default: 2)" },
         tokens: { type: "number", description: "Hard token budget limit for context bundle (default: 1500)" },
         output: { type: "string", description: "Optional output file path" },
       },
@@ -244,8 +375,8 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
     async execute(_id, params) {
       const target = String(params.target || "");
       const args = ["pack", target];
-      if (params.depth) args.push("--depth", String(params.depth));
-      if (params.tokens) args.push("--max-tokens", String(params.tokens));
+      if (params.depth !== undefined && params.depth !== null) args.push("--max-hops", String(params.depth));
+      if (params.tokens !== undefined && params.tokens !== null) args.push("--max-tokens", String(params.tokens));
       if (params.output) args.push("-o", String(params.output));
 
       const { ok, output } = await runCmd(getSotBin(), args);
@@ -329,7 +460,7 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
     name: "sot_clean",
     label: "SOT Clean Stale Data",
     description:
-      "Safely purge stale nodes, dangling edges, or reset generated graph data.",
+      "Safely purge stale nodes, dangling edges, or reset generated graph data. A non-dry-run --all reset requires confirm=true.",
     promptSnippet: "Clean stale nodes or reset graph data safely",
     parameters: {
       type: "object",
@@ -337,13 +468,31 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
         all: { type: "boolean", description: "Reset all generated graph data" },
         include_notes: { type: "boolean", description: "Include persistent notes in reset" },
         dry_run: { type: "boolean", description: "Preview clean plan without modifying database" },
+        confirm: {
+          type: "boolean",
+          description: "Explicitly confirm a destructive --all reset; required when all=true unless dry_run=true",
+        },
       },
     },
     async execute(_id, params) {
+      const all = params.all === true;
+      const dryRun = params.dry_run === true;
+      const confirmed = params.confirm === true;
+      if (all && !dryRun && !confirmed) {
+        return {
+          content: [{
+            type: "text",
+            text: "sot_clean --all requires explicit confirm=true (no command was executed)",
+          }],
+          details: { ok: false, blocked: true },
+        };
+      }
+
       const args = ["clean"];
-      if (params.all) args.push("--all");
+      if (all) args.push("--all");
+      if (all && !dryRun && confirmed) args.push("--yes");
       if (params.include_notes) args.push("--include-notes");
-      if (params.dry_run) args.push("--dry-run");
+      if (dryRun) args.push("--dry-run");
 
       const { ok, output } = await runCmd(getSotBin(), args);
       return { content: [{ type: "text", text: output.trim() }], details: { ok } };
@@ -681,18 +830,132 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // Post-Mutation Hook (Solution A): Auto-reconcile on file mutation tools & session start
+  // 25. sot_diff_impact: Git Diff Blast Radius & Impact Analysis
+  pi.registerTool({
+    name: "sot_diff_impact",
+    label: "SOT Diff Impact Analysis",
+    description:
+      "Analyze git diff blast radius, upstream inward callers, API contract impacts, and affected tests.",
+    promptSnippet: "Analyze blast radius and upstream caller impact for git diff/revisions",
+    parameters: {
+      type: "object",
+      properties: {
+        target: { type: "string", description: "Git revision target (e.g. 'HEAD~1', 'main...HEAD', commit hash; default: 'HEAD~1')" },
+        depth: { type: "number", description: "Reverse call graph traversal depth (default: 2)" },
+        staged: { type: "boolean", description: "Analyze staged changes (--cached)" },
+        workingTree: { type: "boolean", description: "Analyze unstaged working tree changes" },
+        autoReconcile: { type: "boolean", description: "Reconcile knowledge graph before analyzing impact" },
+        format: { type: "string", description: "Output format: 'markdown' or 'json'" },
+        json: { type: "boolean", description: "Output raw JSON" },
+      },
+    },
+    async execute(_id, params) {
+      const target = params.target === undefined || params.target === null ? undefined : String(params.target);
+      if (target?.startsWith("-")) {
+        return {
+          content: [{ type: "text", text: "sot_diff_impact target must not begin with '-' (no command was executed)" }],
+          details: { ok: false, blocked: true },
+        };
+      }
+      const args = ["diff-impact"];
+      if (target) args.push(target);
+      if (params.depth) args.push("--depth", String(params.depth));
+      if (params.staged) args.push("--staged");
+      if (params.workingTree) args.push("--working-tree");
+      if (params.autoReconcile) args.push("--auto-reconcile");
+      if (params.json || params.format === "json") args.push("--json");
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
+  // 26. sot_git_history: Git Commit History Risk Scoring & Impacted Symbols
+  pi.registerTool({
+    name: "sot_git_history",
+    label: "SOT Git History & Risk Scoring",
+    description:
+      "Inspect git commit history with automated risk scoring and impacted symbol detection.",
+    promptSnippet: "Inspect git commit history with risk scoring and symbol impact",
+    parameters: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Maximum commits to evaluate (default: 10)" },
+        author: { type: "string", description: "Filter commits by author" },
+        since: { type: "string", description: "Filter commits since date/time (e.g. '2026-01-01' or '2.weeks')" },
+        impact: { type: "boolean", description: "Enable or disable knowledge graph symbol impact analysis (default: true)" },
+        json: { type: "boolean", description: "Output raw JSON format" },
+      },
+    },
+    async execute(_id, params) {
+      const args = ["log"];
+      if (params.limit) args.push("-n", String(params.limit));
+      if (params.author) args.push("--author", String(params.author));
+      if (params.since) args.push("--since", String(params.since));
+      if (params.impact === false) args.push("--no-impact");
+      if (params.json) args.push("--json");
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok } };
+    },
+  });
+
+  // 27. sot_scope_receipt: PRE-change bounded evidence receipt (P8)
+  pi.registerTool({
+    name: "sot_scope_receipt",
+    label: "SOT Scope Receipt (pre-change)",
+    description:
+      "PRE-change bounded evidence receipt for one edit target: snapshot binding, source anchors, callers/callees, bounded transitive impact, candidate tests, coverage, risk rules, rename gate, and remaining OMP confirmations. Exit code 2 (details.ok=false) when BLOCKED.",
+    promptSnippet: "Run a pre-change scope receipt before editing core/public symbols",
+    parameters: {
+      type: "object",
+      properties: {
+        target: { type: "string", description: "Symbol to scope (e.g. 'Pipeline.process')" },
+        depth: { type: "number", description: "Transitive impact walk depth (default: 2)" },
+        changeKind: { type: "string", description: "local-body | public-api | rename | delete (default: local-body)" },
+        auth: { type: "boolean", description: "Change touches auth/tenant logic" },
+        dynamic: { type: "boolean", description: "Change is dynamic-heavy (dispatch/reflection)" },
+        json: { type: "boolean", description: "Output raw JSON receipt" },
+      },
+      required: ["target"],
+    },
+    async execute(_id, params) {
+      const args = ["scope-receipt", String(params.target)];
+      if (params.depth) args.push("--depth", String(params.depth));
+      if (params.changeKind) args.push("--change-kind", String(params.changeKind));
+      if (params.auth) args.push("--auth");
+      if (params.dynamic) args.push("--dynamic");
+      if (params.json) args.push("--json");
+
+      const { ok, output } = await runCmd(getSotBin(), args);
+      return { content: [{ type: "text", text: output.trim() }], details: { ok, blocked: !ok } };
+    },
+  });
+
+  // Post-Mutation Hook: debounce reconcile after successful file mutation tools.
   if (typeof pi.on === "function") {
     let debounceTimer: NodeJS.Timeout | number | null = null;
+    const pendingPaths = new Set<string>();
     const triggerReconcile = (paths?: string[]) => {
-      if (debounceTimer) clearTimeout(debounceTimer);
+      if (paths) {
+        for (const path of paths) pendingPaths.add(path);
+      }
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
       debounceTimer = setTimeout(async () => {
+        debounceTimer = null;
         try {
           const cwd = process.cwd();
           const dbPath = join(cwd, ".sot", "sot.db");
+          const pathsToReconcile = [...pendingPaths];
+          pendingPaths.clear();
           if (existsSync(dbPath)) {
             const bin = resolveSotBinary(cwd);
-            const args = paths && paths.length > 0 ? ["reconcile", ...paths] : ["reconcile"];
+            const args = pathsToReconcile.length > 0
+              ? ["reconcile", ...pathsToReconcile]
+              : ["reconcile"];
             await runCmd(bin, args, cwd);
           }
         } catch {
@@ -701,13 +964,59 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
       }, 200);
     };
 
-    // Hook mutating tool results
     pi.on("tool_result", (event: Record<string, unknown>) => {
-      const tool = String(event.tool || event.name || "");
-      if (["write", "edit", "ast_edit", "patch"].includes(tool)) {
-        const path = typeof event.path === "string" ? event.path : undefined;
-        triggerReconcile(path ? [path] : undefined);
-      }
+      const tool = typeof event.tool === "string"
+        ? event.tool
+        : typeof event.toolName === "string"
+          ? event.toolName
+          : typeof event.name === "string"
+            ? event.name
+            : "";
+      if (!["write", "edit", "ast_edit", "patch"].includes(tool)) return;
+
+      const result = event.result;
+      const resultRecord = result && typeof result === "object"
+        ? result as Record<string, unknown>
+        : undefined;
+      const details = resultRecord?.details;
+      const detailsRecord = details && typeof details === "object"
+        ? details as Record<string, unknown>
+        : undefined;
+      const status = event.status;
+      const resultStatus = resultRecord?.status;
+      if (
+        event.isError === true ||
+        event.success === false ||
+        event.ok === false ||
+        event.error != null ||
+        status === "error" ||
+        status === "failed" ||
+        status === "failure" ||
+        resultRecord?.isError === true ||
+        resultRecord?.success === false ||
+        resultRecord?.ok === false ||
+        resultRecord?.error != null ||
+        resultStatus === "error" ||
+        resultStatus === "failed" ||
+        resultStatus === "failure" ||
+        detailsRecord?.ok === false
+      ) return;
+
+      const args = event.args;
+      const input = event.input;
+      const argsRecord = args && typeof args === "object" ? args as Record<string, unknown> : undefined;
+      const inputRecord = input && typeof input === "object" ? input as Record<string, unknown> : undefined;
+      const resultPath = resultRecord?.path;
+      const path = typeof event.path === "string"
+        ? event.path
+        : typeof argsRecord?.path === "string"
+          ? argsRecord.path
+          : typeof inputRecord?.path === "string"
+            ? inputRecord.path
+            : typeof resultPath === "string"
+              ? resultPath
+              : undefined;
+      triggerReconcile(path ? [path] : undefined);
     });
 
     pi.on("session_start", async () => {
@@ -715,11 +1024,9 @@ export default function sotGraphExtension(pi: ExtensionAPI): void {
         const cwd = process.cwd();
         const dbPath = join(cwd, ".sot", "sot.db");
         if (!existsSync(dbPath)) {
-          // Trigger initial silent reconcile if database doesn't exist
+          // Trigger initial silent reconcile through the trusted installed/PATH command.
           const bin = resolveSotBinary(cwd);
-          if (existsSync(bin)) {
-            await runCmd(bin, ["reconcile"], cwd);
-          }
+          await runCmd(bin, ["reconcile"], cwd);
         }
       } catch {
         // Non-blocking fallback

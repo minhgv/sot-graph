@@ -286,6 +286,70 @@ class TestGitDeltaExtractor(unittest.TestCase):
             self.assertIn("test.py", head_intervals)
 
 
+    def test_extract_diff_disables_external_helpers(self):
+        with tempfile.TemporaryDirectory() as temp_repo:
+            subprocess.run(["git", "init"], cwd=temp_repo, check=True, capture_output=True)
+            subprocess.run(
+                ["git", "config", "user.name", "Test"],
+                cwd=temp_repo,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.com"],
+                cwd=temp_repo,
+                check=True,
+                capture_output=True,
+            )
+            source = Path(temp_repo) / "test.txt"
+            attrs = Path(temp_repo) / ".gitattributes"
+            source.write_text("before\n")
+            attrs.write_text("*.txt diff=marker\n")
+            subprocess.run(
+                ["git", "add", "test.txt", ".gitattributes"],
+                cwd=temp_repo,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "commit", "-m", "initial"],
+                cwd=temp_repo,
+                check=True,
+                capture_output=True,
+            )
+
+            marker = Path(temp_repo) / "helper-ran"
+            helper = Path(temp_repo) / "helper.sh"
+            helper.write_text(f"#!/bin/sh\ntouch '{marker}'\n")
+            helper.chmod(helper.stat().st_mode | 0o111)
+            subprocess.run(
+                ["git", "config", "diff.external", str(helper)],
+                cwd=temp_repo,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "config", "diff.marker.textconv", str(helper)],
+                cwd=temp_repo,
+                check=True,
+                capture_output=True,
+            )
+
+            source.write_text("after\n")
+            intervals, hunks = GitDeltaExtractor(temp_repo).extract_diff(
+                working_tree=True
+            )
+            self.assertIn("test.txt", intervals)
+            self.assertTrue(hunks)
+            self.assertFalse(marker.exists())
+            unsafe_intervals, unsafe_hunks = GitDeltaExtractor(temp_repo).extract_diff(
+                target="--ext-diff"
+            )
+            self.assertEqual(unsafe_intervals, {})
+            self.assertEqual(unsafe_hunks, [])
+            self.assertFalse(marker.exists())
+
+
 class TestASTCoordinateMapper(unittest.TestCase):
     """Test mapping line intervals to SQLite graph_nodes."""
 

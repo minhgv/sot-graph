@@ -9,7 +9,7 @@ import json
 import os
 import sys
 import time
-from typing import List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import sqlite3
 
@@ -143,7 +143,23 @@ def cmd_vacuum(args: argparse.Namespace, db: Database) -> int:
 
 
 def default_db_path(root: str) -> str:
-    return os.path.join(os.path.abspath(root), ".sot", "sot.db")
+    """Return the default DB path without following an outside symlink."""
+    canonical_root = os.path.realpath(os.path.abspath(root))
+
+    def inside(candidate: str) -> bool:
+        try:
+            return os.path.commonpath((canonical_root, candidate)) == canonical_root
+        except ValueError:
+            return False
+
+    sot_dir = os.path.join(canonical_root, ".sot")
+    if os.path.lexists(sot_dir) and not inside(os.path.realpath(sot_dir)):
+        raise ValueError("default .sot directory resolves outside the project root")
+
+    db_path = os.path.join(sot_dir, "sot.db")
+    if os.path.islink(db_path) and not inside(os.path.realpath(db_path)):
+        raise ValueError("default .sot/sot.db symlink resolves outside the project root")
+    return db_path
 
 # P4 ranking: exact identity + scope + path proximity + provider
 # evidence + freshness, each factor surfaced as a human-readable reason
@@ -2062,7 +2078,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     root = os.path.abspath(args.root)
-    db_path = args.db or default_db_path(root)
+    try:
+        db_path = args.db or default_db_path(root)
+    except ValueError as exc:
+        print(f"❌ Unsafe default database path: {exc}", file=sys.stderr)
+        return 1
     if args.command == "setup":
         return cmd_setup(args, root)
 

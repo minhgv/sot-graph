@@ -40,14 +40,37 @@ class TempProject(unittest.TestCase):
 class LockingTests(TempProject):
     def test_mutual_exclusion_and_bounded_timeout(self):
         lock_path = str(self.root / ".sot" / "write.lock")
-        first = WriteLock(lock_path, timeout_ms=50)
+        first = WriteLock(lock_path, timeout_ms=200)
         first.acquire()
-        second = WriteLock(lock_path, timeout_ms=120)
-        with self.assertRaises(LockBusy):
-            second.acquire()
+        attempted = threading.Event()
+        outcome = []
+
+        def contend():
+            try:
+                WriteLock(lock_path, timeout_ms=120).acquire()
+            except LockBusy:
+                outcome.append("busy")
+            finally:
+                attempted.set()
+
+        contender = threading.Thread(target=contend)
+        contender.start()
+        self.assertTrue(attempted.wait(timeout=1))
+        contender.join(timeout=2)
+        self.assertEqual(outcome, ["busy"])
         first.release()
+        second = WriteLock(lock_path, timeout_ms=200)
         second.acquire()  # re-acquirable after release
         second.release()
+
+    def test_nested_acquisition_is_reentrant(self):
+        lock_path = str(self.root / ".sot" / "write.lock")
+        outer = WriteLock(lock_path, timeout_ms=200)
+        inner = WriteLock(lock_path, timeout_ms=200)
+        outer.acquire()
+        inner.acquire()
+        inner.release()
+        outer.release()
 
     def test_lock_file_is_never_truncated(self):
         lock_path = self.root / "write.lock"

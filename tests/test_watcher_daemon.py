@@ -3,12 +3,14 @@ Tests for sot_graph.watcher daemon, multi-project discovery, and lifecycle manag
 """
 
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from sot_graph.watcher import (
+    _process_identity,
     discover_sot_projects,
     is_pid_alive,
     pick_backend,
@@ -61,16 +63,98 @@ class TestWatcherDaemon(unittest.TestCase):
         st = status_daemon(str(self.root), is_all=False)
         self.assertFalse(st["running"])
         self.assertIsNone(st["pid"])
+    def test_process_identity_uses_posix_proc_metadata(self):
+        stat_fields = ["S"] + [str(index) for index in range(1, 24)]
+        stat_line = "123 (python) " + " ".join(stat_fields)
+
+        with (
+            patch("sot_graph.watcher.sys.platform", "linux"),
+            patch.object(Path, "is_dir", return_value=True),
+            patch.object(
+                Path,
+                "read_bytes",
+                return_value=b"python\0-m\0sot_graph.cli\0watch\0",
+            ),
+            patch.object(Path, "read_text", return_value=stat_line),
+            patch("sot_graph.watcher.subprocess.check_output") as check_output,
+        ):
+            identity = _process_identity(123)
+
+        self.assertEqual(
+            identity,
+            {
+                "command": "python -m sot_graph.cli watch",
+                "start": "19",
+            },
+        )
+        check_output.assert_not_called()
+
+    def test_process_identity_refuses_windows_without_proc_or_ps(self):
+        with (
+            patch("sot_graph.watcher.sys.platform", "win32"),
+            patch.object(Path, "is_dir", return_value=False),
+            patch(
+                "sot_graph.watcher.subprocess.check_output",
+                side_effect=FileNotFoundError,
+            ) as check_output,
+        ):
+            identity = _process_identity(os.getpid())
+
+        self.assertIsNone(identity)
+        check_output.assert_not_called()
+
+    def test_start_daemon_does_not_publish_unverifiable_windows_identity(self):
+        class DummyProc:
+            pid = 424242
+
+            def __init__(self):
+                self.terminated = False
+
+            def terminate(self):
+                self.terminated = True
+
+        proc = DummyProc()
+        with (
+            patch("sot_graph.watcher.sys.platform", "win32"),
+            patch.object(Path, "is_dir", return_value=False),
+            patch(
+                "sot_graph.watcher.subprocess.check_output",
+                side_effect=FileNotFoundError,
+            ) as check_output,
+            patch("sot_graph.watcher.subprocess.Popen", return_value=proc) as popen,
+        ):
+            ok, message = start_daemon(str(self.root))
+
+        self.assertFalse(ok)
+        self.assertIn("identity could not be verified", message)
+        self.assertTrue(proc.terminated)
+        popen.assert_called_once()
+        check_output.assert_not_called()
+        self.assertFalse((self.root / ".sot" / "watch.pid").exists())
+
+        status = status_daemon(str(self.root))
+        self.assertFalse(status["running"])
+        self.assertIsNone(status["pid"])
 
     def test_start_and_stop_daemon(self):
         (self.root / ".sot").mkdir(parents=True, exist_ok=True)
         (self.root / ".sot" / "sot.db").touch()
 
-        # Mock Popen to avoid running full background processes in unit test
         class DummyProc:
             pid = os.getpid()
 
-        with patch("subprocess.Popen", return_value=DummyProc()):
+        identity = {
+            "command": (
+                f"{sys.executable} -m sot_graph.cli watch "
+                "--debounce-ms 200 --interval-ms 500 --backend auto"
+            ),
+            "start": "test-start",
+        }
+        with (
+            patch("subprocess.Popen", return_value=DummyProc()),
+            patch("sot_graph.watcher._process_identity", return_value=identity),
+            patch("sot_graph.watcher._process_cwd", return_value=str(self.root)),
+        ):
             ok, msg = start_daemon(str(self.root), is_all=False)
             self.assertTrue(ok)
             self.assertIn("Started SOT Watcher daemon", msg)
@@ -79,8 +163,15 @@ class TestWatcherDaemon(unittest.TestCase):
             self.assertTrue(st["running"])
             self.assertEqual(st["pid"], os.getpid())
 
-        # Test stop
-        with patch("os.kill") as mock_kill:
+        with (
+            patch("os.kill") as mock_kill,
+            patch(
+                "sot_graph.watcher.is_pid_alive",
+                side_effect=[True, False, False],
+            ),
+            patch("sot_graph.watcher._process_identity", return_value=identity),
+            patch("sot_graph.watcher._process_cwd", return_value=str(self.root)),
+        ):
             ok, msg = stop_daemon(str(self.root), is_all=False)
             self.assertTrue(ok)
             self.assertTrue(mock_kill.called)

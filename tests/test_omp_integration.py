@@ -181,21 +181,278 @@ class TestOMPIntegrationScenarios(unittest.TestCase):
             self.run_sot(["export", "--format", "graphml", "-o", str(graphml_out)])
             self.assertTrue(graphml_out.exists())
             self.assertIn("<graphml", graphml_out.read_text())
-    def test_scenario_10_omp_extension_compilation(self):
-        """Scenario 10: OMP Extension TypeScript Compilation and Structure."""
-        ext_path = REPO_ROOT / "src" / "sot_graph" / "adapters" / "omp_extension.ts"
-        self.assertTrue(ext_path.exists())
+    def test_adapter_security_and_maintenance_contracts(self):
+        """OMP/OpenCode adapters use trusted PATH commands and safe tool flags."""
+        if sys.platform == "win32":
+            self.skipTest("The executable PATH harness is POSIX-specific")
+        bun = shutil.which("bun")
+        if not bun:
+            self.skipTest("bun is required for TypeScript adapter behavior tests")
 
-        # Check if bun or tsc is available for compilation test
-        shutil_bun = shutil.which("bun")
-        if shutil_bun:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = Path(tmpdir)
+            workspace = tmp_root / "workspace"
+            local_bin = workspace / "bin"
+            node_bin = workspace / "node_modules" / ".bin"
+            nested_bin = workspace / "tools"
+            trusted_bin = tmp_root / "trusted-bin"
+            alias_bin = tmp_root / "alias-bin"
+            windows_trusted_bin = tmp_root / "windows-trusted-bin"
+            windows_alias_bin = tmp_root / "windows-alias-bin"
+            workspace_alias_bin = workspace / "workspace-path-alias"
+            workspace.mkdir()
+            local_bin.mkdir(parents=True)
+            node_bin.mkdir(parents=True)
+            nested_bin.mkdir()
+            trusted_bin.mkdir()
+            alias_bin.mkdir()
+            windows_trusted_bin.mkdir()
+            windows_alias_bin.mkdir()
+            (workspace / ".sot").mkdir()
+            log_path = tmp_root / "trusted.log"
+            marker_path = tmp_root / "malicious.log"
+
+            trusted_bin.joinpath("sot").write_text(
+                f"#!{sys.executable}\n"
+                "import os, sys\n"
+                f"with open({json.dumps(str(log_path))}, 'a', encoding='utf-8') as handle:\n"
+                "    path_keys = sorted(key for key in os.environ if key.lower() == 'path')\n"
+                "    python_path_keys = sorted(key for key in os.environ if key.lower() == 'pythonpath')\n"
+                "    handle.write(' '.join(sys.argv[1:]) + '|' + os.environ.get('PYTHONPATH', '<unset>') + '|' + ','.join(path_keys) + '|' + ','.join(python_path_keys) + '|' + os.environ.get('PATH', '<missing>') + '\\n')\n"
+                "print('trusted')\n",
+                encoding="utf-8",
+            )
+            trusted_bin.joinpath("sot").chmod(0o755)
+            windows_trusted_bin.joinpath("sot.EXE").write_text(
+                trusted_bin.joinpath("sot").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            windows_trusted_bin.joinpath("sot.EXE").chmod(0o755)
+            malicious = (
+                f"#!{sys.executable}\n"
+                f"with open({json.dumps(str(marker_path))}, 'a', encoding='utf-8') as handle:\n"
+                "    handle.write('malicious\\n')\n"
+            )
+            for malicious_bin in (
+                workspace / "sot",
+                workspace / "sot.exe",
+                local_bin / "sot",
+                node_bin / "sot",
+                nested_bin / "sot",
+            ):
+                malicious_bin.write_text(malicious, encoding="utf-8")
+                malicious_bin.chmod(0o755)
+            alias_bin.joinpath("sot").symlink_to(node_bin / "sot")
+            windows_alias_bin.joinpath("sot.EXE").symlink_to(workspace / "sot.exe")
+            workspace_alias_bin.symlink_to(trusted_bin, target_is_directory=True)
+
+            harness = """
+import ompExtension, { resolveSotBinary } from __OMP_EXTENSION__;
+import openCodePlugin from __OPENCODE_PLUGIN__;
+
+const workspace = __WORKSPACE__;
+const logPath = __LOG_PATH__;
+const localBin = `${workspace}/bin`;
+const nodeBin = `${workspace}/node_modules/.bin`;
+const nestedBin = `${workspace}/tools`;
+const workspaceAliasBin = `${workspace}/workspace-path-alias`;
+const trustedBin = __TRUSTED_BIN__;
+const aliasBin = __ALIAS_BIN__;
+const windowsTrustedBin = __WINDOWS_TRUSTED_BIN__;
+const windowsAliasBin = __WINDOWS_ALIAS_BIN__;
+const pathSeparator = process.platform === "win32" ? ";" : ":";
+const originalPath = process.env.PATH || "";
+const windowsPath = [
+  workspace,
+  localBin,
+  nodeBin,
+  nestedBin,
+  workspaceAliasBin,
+  aliasBin,
+  windowsAliasBin,
+  trustedBin,
+  windowsTrustedBin,
+  originalPath,
+].join(pathSeparator);
+process.env.PATH = windowsPath;
+process.env.Path = windowsPath;
+process.env.PYTHONPATH = `${workspace}/src`;
+process.env.PythonPath = `${workspace}/src`;
+
+process.chdir(workspace);
+
+const assert = (condition, message) => {
+  if (!condition) throw new Error(message);
+};
+
+const fs = await import("node:fs");
+const canonicalTrustedBinary = fs.realpathSync(`${trustedBin}/sot`);
+assert(resolveSotBinary(workspace) === canonicalTrustedBinary, "POSIX resolver must return the canonical PATH executable");
+
+const mockedWindowsPath = [
+  workspace,
+  localBin,
+  nodeBin,
+  nestedBin,
+  windowsAliasBin,
+  aliasBin,
+  windowsTrustedBin,
+].join(";");
+process.env.PATH = mockedWindowsPath;
+process.env.Path = mockedWindowsPath;
+process.env.PATHEXT = ".EXE;.CMD";
+const canonicalWindowsBinary = fs.realpathSync(`${windowsTrustedBin}/sot.EXE`);
+assert(
+  resolveSotBinary(workspace, "win32") === canonicalWindowsBinary,
+  "Windows resolver must honor PATHEXT and return an absolute canonical executable",
+);
+process.env.PATH = [workspace, windowsAliasBin].join(";");
+process.env.Path = process.env.PATH;
+assert(
+  resolveSotBinary(workspace, "win32") === undefined,
+  "Windows resolver must reject current-directory and symlinked workspace candidates",
+);
+process.env.PATH = windowsPath;
+process.env.Path = windowsPath;
+delete process.env.PATHEXT;
+const tools = new Map();
+const ompEvents = new Map();
+ompExtension({
+  registerTool(tool) {
+    tools.set(tool.name, tool);
+  },
+  on(name, handler) {
+    ompEvents.set(name, handler);
+  },
+});
+assert(tools.get("sot_clean").parameters.properties.confirm.type === "boolean", "clean schema must expose confirmation");
+assert(tools.get("sot_pack").parameters.properties.tokens.type === "number", "pack schema must expose token budget");
+
+await ompEvents.get("session_start")();
+const packResult = await tools.get("sot_pack").execute("test", {
+  target: "Example",
+  depth: 3,
+  tokens: 777,
+});
+assert(packResult.details.ok === true, "pack command should succeed");
+
+const blockedClean = await tools.get("sot_clean").execute("test", { all: true });
+assert(blockedClean.details.ok === false && blockedClean.details.blocked === true, "clean-all must require confirmation");
+const linesAfterBlockedClean = (await Bun.file(logPath).text()).trim().split("\\n").filter(Boolean);
+assert(!linesAfterBlockedClean.some((line) => line.startsWith("clean ")), "blocked clean must not execute a command");
+
+const confirmedClean = await tools.get("sot_clean").execute("test", { all: true, confirm: true });
+assert(confirmedClean.details.ok === true, "confirmed clean command should succeed");
+const blockedDiffLineCount = (await Bun.file(logPath).text()).trim().split("\\n").filter(Boolean).length;
+const blockedDiff = await tools.get("sot_diff_impact").execute("test", { target: "--staged" });
+assert(blockedDiff.details.ok === false && blockedDiff.details.blocked === true, "option-like diff target must be rejected");
+const linesAfterBlockedDiff = (await Bun.file(logPath).text()).trim().split("\\n").filter(Boolean);
+assert(linesAfterBlockedDiff.length === blockedDiffLineCount, "rejected diff target must not execute a command");
+
+const opencodeEvents = new Map();
+await openCodePlugin({
+  directory: workspace,
+  event: {
+    on(name, handler) {
+      opencodeEvents.set(name, handler);
+      return () => {};
+    },
+  },
+});
+await opencodeEvents.get("session.created")();
+
+// A successful result from each mutating OMP tool schedules one debounced reconcile.
+await Bun.write(`${workspace}/.sot/sot.db`, "present");
+const toolResult = ompEvents.get("tool_result");
+assert(typeof toolResult === "function", "OMP mutation result hook must be registered");
+await toolResult({ tool: "write", success: true, path: "src/write.py" });
+await toolResult({ toolName: "edit", result: { ok: true }, input: { path: "src/edit.py" } });
+await toolResult({ name: "ast_edit", result: { details: { ok: true } }, args: { path: "src/ast.py" } });
+await toolResult({ tool: "patch", result: { isError: false }, path: "src/patch.py" });
+await toolResult({ tool: "write", success: false, path: "src/failed.py" });
+await new Promise((resolve) => setTimeout(resolve, 450));
+
+const lines = (await Bun.file(logPath).text()).trim().split("\\n").filter(Boolean);
+assert(lines.some((line) => line.startsWith("reconcile|")), "session startup must reconcile through PATH");
+assert(lines.some((line) => line.startsWith("pack Example --max-hops 3 --max-tokens 777|")), "pack depth and tokens must map to CLI flags");
+assert(lines.some((line) => line.startsWith("clean --all --yes|")), "explicit clean confirmation must pass --yes");
+const mutationLine = lines.find((line) => line.startsWith("reconcile src/write.py"));
+assert(mutationLine && ["src/edit.py", "src/ast.py", "src/patch.py"].every((path) => mutationLine.includes(path)), "successful mutations must trigger one debounced reconcile");
+assert(!lines.some((line) => line.includes("src/failed.py")), "failed mutation results must not reconcile");
+assert(lines.every((line) => line.split("|")[1] === "<unset>"), "adapters must not inject any PYTHONPATH variant");
+assert(lines.every((line) => line.split("|")[2] === "PATH"), "adapters must publish one canonical PATH key");
+assert(lines.every((line) => line.split("|")[3] === ""), "adapters must remove all PythonPath variants");
+const childPaths = lines.map((line) => line.split("|")[4].split(pathSeparator));
+assert(childPaths.every((entries) => !entries.includes(workspaceAliasBin)), "workspace symlink PATH entries must not be republished");
+assert(childPaths.every((entries) => !entries.includes(aliasBin)), "external aliases to workspace tools must not be republished");
+assert(childPaths.every((entries) => !entries.includes(nodeBin)), "canonical workspace paths must not be published");
+const canonicalTrustedBin = (await import("node:fs")).realpathSync(trustedBin);
+assert(childPaths.every((entries) => entries.includes(canonicalTrustedBin)), "external trusted PATH commands must remain available");
+
+// A missing installed command is a non-fatal background-sync failure.
+const { unlink } = await import("node:fs/promises");
+await unlink(`${workspace}/.sot/sot.db`);
+process.env.PATH = localBin;
+await ompEvents.get("session_start")();
+await opencodeEvents.get("session.created")();
+process.env.PATH = originalPath;
+"""
+            replacements = {
+                "__OMP_EXTENSION__": json.dumps(
+                    str(REPO_ROOT / "src" / "sot_graph" / "adapters" / "omp_extension.ts")
+                ),
+                "__OPENCODE_PLUGIN__": json.dumps(
+                    str(REPO_ROOT / "src" / "sot_graph" / "adapters" / "opencode_plugin.ts")
+                ),
+                "__WORKSPACE__": json.dumps(str(workspace)),
+                "__LOG_PATH__": json.dumps(str(log_path)),
+                "__TRUSTED_BIN__": json.dumps(str(trusted_bin)),
+                "__ALIAS_BIN__": json.dumps(str(alias_bin)),
+                "__WINDOWS_TRUSTED_BIN__": json.dumps(str(windows_trusted_bin)),
+                "__WINDOWS_ALIAS_BIN__": json.dumps(str(windows_alias_bin)),
+            }
+            for placeholder, value in replacements.items():
+                harness = harness.replace(placeholder, value)
+
+            harness_path = tmp_root / "adapter_harness.ts"
+            harness_path.write_text(harness, encoding="utf-8")
             proc = subprocess.run(
-                [shutil_bun, "build", str(ext_path), "--no-bundle"],
+                [bun, "run", str(harness_path)],
+                cwd=str(REPO_ROOT),
                 capture_output=True,
                 text=True,
+                env=self.env,
             )
-            self.assertEqual(proc.returncode, 0, f"Bun build failed:\n{proc.stderr}")
-            self.assertIn("sotGraphExtension", proc.stdout)
+            self.assertEqual(
+                proc.returncode,
+                0,
+                f"Adapter harness failed:\nStdout: {proc.stdout}\nStderr: {proc.stderr}",
+            )
+            self.assertFalse(marker_path.exists(), "workspace-controlled PATH entries must never be invoked")
+
+    def test_scenario_10_omp_extension_compilation(self):
+        """Scenario 10: OMP and OpenCode TypeScript compilation."""
+        extension_paths = [
+            REPO_ROOT / "src" / "sot_graph" / "adapters" / "omp_extension.ts",
+            REPO_ROOT / ".omp" / "extensions" / "sot-graph.ts",
+            REPO_ROOT / "src" / "sot_graph" / "adapters" / "opencode_plugin.ts",
+        ]
+        self.assertEqual(extension_paths[0].read_bytes(), extension_paths[1].read_bytes())
+        for ext_path in extension_paths:
+            self.assertTrue(ext_path.exists())
+
+            # Check if bun or tsc is available for compilation test
+            shutil_bun = shutil.which("bun")
+            if shutil_bun:
+                proc = subprocess.run(
+                    [shutil_bun, "build", str(ext_path), "--no-bundle"],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(proc.returncode, 0, f"Bun build failed:\n{proc.stderr}")
+                if ext_path.name == "omp_extension.ts":
+                    self.assertIn("sotGraphExtension", proc.stdout)
+
 
 
 if __name__ == "__main__":

@@ -243,7 +243,12 @@ class GitDeltaExtractor:
         Returns:
             Tuple of (file_intervals_map, list_of_hunks)
         """
-        diff_args = ["diff", "-U0"]
+        # Git treats option-like positional arguments as options, even after
+        # diff-specific flags. Reject them before any primary or fallback invocation.
+        if target and target.startswith("-"):
+            return {}, []
+
+        diff_args = ["diff", "--no-ext-diff", "--no-textconv", "-U0"]
 
         if staged:
             diff_args.append("--staged")
@@ -263,11 +268,15 @@ class GitDeltaExtractor:
 
         # Fallback: If single commit diff failed (e.g. root commit without parent), try git show
         if code != 0 and target and not staged and not working_tree:
-            code, stdout, stderr = self.run_git(["show", "-U0", "--format=", target])
+            code, stdout, stderr = self.run_git(
+                ["show", "--no-ext-diff", "--no-textconv", "-U0", "--format=", target]
+            )
 
         # Second fallback: If range or standard diff failed, try plain diff against target
         if code != 0 and target and not staged and not working_tree:
-            code, stdout, stderr = self.run_git(["diff", "-U0", target])
+            code, stdout, stderr = self.run_git(
+                ["diff", "--no-ext-diff", "--no-textconv", "-U0", target]
+            )
 
         if code != 0 or not stdout.strip():
             return {}, []

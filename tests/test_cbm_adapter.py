@@ -14,6 +14,10 @@ import time
 from pathlib import Path
 
 import pytest
+from sot_graph.config import ProviderConfig
+from sot_graph.proc import RunResult
+from sot_graph.providers.base import IndexRequest, SymbolRequest
+import sot_graph.providers.codebase_memory as cbm_module
 
 from sot_graph.providers.base import supports_method
 from sot_graph.providers.codebase_memory import (
@@ -448,6 +452,91 @@ class TestTimeoutAndOrphans:
         assert "***REDACTED***" in stored
         # The real argv still carries the value (only logs/ledger are redacted).
         assert "super-secret-value" in provider.command
+
+class TestTimeoutAndEvidenceDefaults:
+    def test_request_constructor_and_config_timeout_precedence(
+        self, tmp_path, monkeypatch
+    ):
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(kwargs["timeout_seconds"])
+            return RunResult(
+                argv=tuple(argv),
+                returncode=0,
+                stdout=payload_envelope({"results": []}),
+                stderr="",
+                timed_out=False,
+                truncated=False,
+                error=None,
+            )
+
+        monkeypatch.setattr(cbm_module, "run_command", fake_run)
+        config = ProviderConfig(
+            name="codebase-memory",
+            command=["cbm"],
+            timeout_seconds=7.0,
+        )
+        provider = CodebaseMemoryProvider(config=config)
+        provider.snapshot_match = lambda *args, **kwargs: None
+
+        provider.search_symbols(
+            SymbolRequest(repo_root=str(tmp_path), query="q", project="proj")
+        )
+        provider.search_symbols(
+            SymbolRequest(
+                repo_root=str(tmp_path),
+                query="q",
+                project="proj",
+                timeout_seconds=9.0,
+            )
+        )
+        provider.index(IndexRequest(repo_root=str(tmp_path)))
+        provider.index(
+            IndexRequest(repo_root=str(tmp_path), timeout_seconds=11.0)
+        )
+        assert calls == [7.0, 9.0, 7.0, 11.0]
+
+        overridden = CodebaseMemoryProvider(
+            config=config,
+            query_timeout_seconds=8.0,
+            index_timeout_seconds=10.0,
+        )
+        overridden.snapshot_match = lambda *args, **kwargs: None
+        overridden.search_symbols(
+            SymbolRequest(repo_root=str(tmp_path), query="q", project="proj")
+        )
+        overridden.index(IndexRequest(repo_root=str(tmp_path)))
+        assert calls[-2:] == [8.0, 10.0]
+
+    def test_explicit_zero_confidence_is_persisted(self):
+        class EvidenceLedger:
+            def __init__(self):
+                self.items = []
+
+            def record_provider_evidence(self, run_id, items):
+                self.items.extend(items)
+                return len(items)
+
+        ledger = EvidenceLedger()
+        provider = CodebaseMemoryProvider(db=ledger)
+        outcome = type("Outcome", (), {
+            "ok": True,
+            "payload": {
+                "function": "root",
+                "callers": {
+                    "cols": ["name", "confidence"],
+                    "groups": [
+                        {"qn_prefix": "pkg", "rows": [["caller", 0.0]]}
+                    ],
+                },
+            },
+        })()
+        run = type("Run", (), {"run_id": "run-zero"})()
+
+        provider._persist_evidence("trace_path", outcome, run, None)
+        assert ledger.items[0]["confidence"] == 0.0
+
 
 
 class TestLedgerAndRecords:

@@ -285,20 +285,39 @@ class CodebaseMemoryProvider:
         *,
         db: Any = None,
         command: list[str] | tuple[str, ...] | None = None,
-        query_timeout_seconds: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
-        index_timeout_seconds: float = DEFAULT_INDEX_TIMEOUT_SECONDS,
+        query_timeout_seconds: float | None = None,
+        index_timeout_seconds: float | None = None,
         max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
         provider_version: str | None = None,
     ) -> None:
         cfg_command: list[str] | None = getattr(config, "command", None)
         cfg_caps = tuple(getattr(config, "capabilities", ()) or ())
+        cfg_timeout = getattr(config, "timeout_seconds", None)
         self.command: tuple[str, ...] = tuple(
             command if command is not None else (cfg_command or ["codebase-memory-mcp"])
         )
         self.capabilities = cfg_caps
         self._db = db
-        self._query_timeout = float(query_timeout_seconds)
-        self._index_timeout = float(index_timeout_seconds)
+        query_timeout = (
+            query_timeout_seconds
+            if query_timeout_seconds is not None
+            else (
+                cfg_timeout
+                if cfg_timeout is not None
+                else DEFAULT_QUERY_TIMEOUT_SECONDS
+            )
+        )
+        index_timeout = (
+            index_timeout_seconds
+            if index_timeout_seconds is not None
+            else (
+                cfg_timeout
+                if cfg_timeout is not None
+                else self._INDEX_TIMEOUT_SECONDS
+            )
+        )
+        self._query_timeout = float(query_timeout)
+        self._index_timeout = float(index_timeout)
         self._max_output_bytes = int(max_output_bytes)
         #: repo_root(realpath) -> (resolved_project, problem, next_action);
         #: avoids one ``list_projects`` round-trip per query on the same root.
@@ -496,7 +515,11 @@ class CodebaseMemoryProvider:
                         "metadata_json": {"hop": edge.get("hop"),
                                           "edge_type": edge.get("edge_type"),
                                           "strategy": edge.get("strategy")},
-                        "confidence": edge.get("confidence") or 1.0,
+                        "confidence": (
+                            edge["confidence"]
+                            if edge.get("confidence") is not None
+                            else 1.0
+                        ),
                     })
             else:
                 rows, _more, drift = search_rows_from_payload(payload)
@@ -974,7 +997,11 @@ class CodebaseMemoryProvider:
         status so the ledger keeps the receipt. ``--progress`` forwards the
         provider's own progress stream for interactive syncs.
         """
-        timeout = request.timeout_seconds or self._INDEX_TIMEOUT_SECONDS
+        timeout = (
+            request.timeout_seconds
+            if request.timeout_seconds is not None
+            else self._index_timeout
+        )
         args: dict[str, Any] = {"repo_path": os.path.realpath(request.repo_root)}
         argv = [
             *self.command, "cli",
@@ -1169,7 +1196,11 @@ class CodebaseMemoryProvider:
         outcome = self._invoke(
             "search_graph", args,
             repo_root=request.repo_root,
-            timeout_seconds=request.timeout_seconds or self._query_timeout,
+            timeout_seconds=(
+                request.timeout_seconds
+                if request.timeout_seconds is not None
+                else self._query_timeout
+            ),
             project=project, snapshot_bind=True,
         )
         return self._structured_payload(self._query_outcome(outcome), "search_graph")
@@ -1196,7 +1227,11 @@ class CodebaseMemoryProvider:
                 "include_evidence": True,
             },
             repo_root=request.repo_root,
-            timeout_seconds=request.timeout_seconds or self._query_timeout,
+            timeout_seconds=(
+                request.timeout_seconds
+                if request.timeout_seconds is not None
+                else self._query_timeout
+            ),
             project=project, snapshot_bind=True,
         )
         return self._structured_payload(self._query_outcome(outcome), "trace_path")
@@ -1278,7 +1313,11 @@ class CodebaseMemoryProvider:
         outcome = self._invoke(
             "detect_changes", args,
             repo_root=request.repo_root,
-            timeout_seconds=request.timeout_seconds or self._query_timeout,
+            timeout_seconds=(
+                request.timeout_seconds
+                if request.timeout_seconds is not None
+                else self._query_timeout
+            ),
             project=project, snapshot_bind=True,
         )
         return self._structured_payload(self._query_outcome(outcome), "detect_changes")
@@ -1295,7 +1334,11 @@ class CodebaseMemoryProvider:
         outcome = self._invoke(
             "get_architecture", {"project": project},
             repo_root=request.repo_root,
-            timeout_seconds=request.timeout_seconds or self._query_timeout,
+            timeout_seconds=(
+                request.timeout_seconds
+                if request.timeout_seconds is not None
+                else self._query_timeout
+            ),
             project=project, snapshot_bind=True,
         )
         return self._query_outcome(outcome)
@@ -1315,7 +1358,11 @@ class CodebaseMemoryProvider:
         outcome = self._invoke(
             "check_index_coverage", args,
             repo_root=request.repo_root,
-            timeout_seconds=request.timeout_seconds or self._query_timeout,
+            timeout_seconds=(
+                request.timeout_seconds
+                if request.timeout_seconds is not None
+                else self._query_timeout
+            ),
             project=project, snapshot_bind=True,
         )
         shaped = self._query_outcome(outcome)

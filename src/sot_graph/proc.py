@@ -198,6 +198,7 @@ def run_command(
             _kill_process_group(proc)
             proc.wait(timeout=_JOIN_TIMEOUT_SECONDS)
         stdout_thread.join(timeout=_JOIN_TIMEOUT_SECONDS)
+        stderr_thread.join(timeout=_JOIN_TIMEOUT_SECONDS)
         for stream in (proc.stdout, proc.stderr):
             if stream is None:
                 continue

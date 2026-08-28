@@ -74,3 +74,18 @@ def test_env_extra_reaches_process(tmp_path) -> None:
 
     assert result.returncode == 0
     assert result.stdout.strip() == "injected-42"
+
+
+def test_stderr_reader_joined_before_return() -> None:
+    size = 256 * 1024
+    result = run_command(
+        [
+            PY,
+            "-c",
+            f"import sys; sys.stderr.write('e' * {size}); sys.stderr.flush()",
+        ],
+        max_output_bytes=size + 1,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == "e" * size

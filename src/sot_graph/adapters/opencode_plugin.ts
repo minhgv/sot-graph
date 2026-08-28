@@ -8,8 +8,97 @@
  */
 
 import { execFile } from "node:child_process";
-import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { accessSync, constants, existsSync, realpathSync, statSync } from "node:fs";
+import { delimiter, isAbsolute, join, relative, resolve, sep } from "node:path";
+
+const DEFAULT_WINDOWS_PATHEXT = [".COM", ".EXE", ".BAT", ".CMD"];
+
+const environmentValue = (env: NodeJS.ProcessEnv, name: string): string | undefined => {
+  const directValue = env[name];
+  if (directValue !== undefined) return directValue;
+  const normalizedName = name.toLowerCase();
+  return Object.entries(env).find(([key]) => key.toLowerCase() === normalizedName)?.[1];
+};
+
+const pathDelimiter = (platform: NodeJS.Platform): string => (platform === "win32" ? ";" : delimiter);
+
+const canonicalPath = (path: string): string => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+};
+
+const canonicalExistingPath = (path: string): string | undefined => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return undefined;
+  }
+};
+
+const isWithin = (root: string, candidate: string, platform: NodeJS.Platform = process.platform): boolean => {
+  const comparisonRoot = platform === "win32" ? root.toLowerCase() : root;
+  const comparisonCandidate = platform === "win32" ? candidate.toLowerCase() : candidate;
+  const relativePath = relative(comparisonRoot, comparisonCandidate);
+  return relativePath === "" || (!relativePath.startsWith(`..${sep}`) && relativePath !== ".." && !isAbsolute(relativePath));
+};
+
+const commandEnvironment = (cwd: string, platform: NodeJS.Platform = process.platform): NodeJS.ProcessEnv => {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  const pathValue = environmentValue(env, "PATH");
+
+  // Environment variable names are case-insensitive on Windows. Remove every
+  // variant before publishing the filtered canonical PATH.
+  for (const key of Object.keys(env)) {
+    const normalizedKey = key.toLowerCase();
+    if (normalizedKey === "pythonpath" || normalizedKey === "path") delete env[key];
+  }
+
+  if (pathValue !== undefined) {
+    const workspaceRoot = canonicalPath(resolve(cwd));
+    env.PATH = pathValue
+      .split(pathDelimiter(platform))
+      .flatMap((entry) => {
+        const originalEntryPath = resolve(cwd, entry || ".");
+        const canonicalEntryPath = canonicalPath(originalEntryPath);
+        const originalSotPath = join(originalEntryPath, "sot");
+        const canonicalSotPath = canonicalPath(originalSotPath);
+        const pathsToCheck = [
+          originalEntryPath,
+          canonicalEntryPath,
+          originalSotPath,
+          canonicalSotPath,
+        ];
+        if (pathsToCheck.some((candidate) => isWithin(workspaceRoot, candidate, platform))) {
+          return [];
+        }
+        return [canonicalEntryPath];
+      })
+      .join(pathDelimiter(platform));
+  }
+  return env;
+};
+
+const windowsPathSuffixes = (env: NodeJS.ProcessEnv): string[] => {
+  const configuredPathext = environmentValue(env, "PATHEXT");
+  const configuredSuffixes = (configuredPathext ?? DEFAULT_WINDOWS_PATHEXT.join(";"))
+    .split(";")
+    .map((suffix) => suffix.trim())
+    .filter((suffix) => /^\.[^./\\]+$/.test(suffix));
+  return configuredSuffixes.length > 0 ? configuredSuffixes : DEFAULT_WINDOWS_PATHEXT;
+};
+
+const isExecutableFile = (path: string, platform: NodeJS.Platform): boolean => {
+  try {
+    if (!statSync(path).isFile()) return false;
+    if (platform !== "win32") accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 export interface PluginContext {
   client?: Record<string, unknown>;
@@ -20,29 +109,73 @@ export interface PluginContext {
 }
 
 const runSot = (args: string[], cwd: string = process.cwd()): Promise<{ ok: boolean; output: string }> => {
-  const { promise, resolve } = Promise.withResolvers<{ ok: boolean; output: string }>();
-  const bin = existsSync(join(cwd, "bin", "sot")) ? join(cwd, "bin", "sot") : "sot";
+  const commandCwd = cwd || process.cwd();
+  const bin = resolveSotBinary(commandCwd);
+  if (bin === undefined || !isAbsolute(bin)) {
+    return Promise.resolve({ ok: false, output: "Error: sot executable not found on trusted PATH" });
+  }
 
+  const { promise, resolve: resolvePromise } = Promise.withResolvers<{ ok: boolean; output: string }>();
   execFile(
     bin,
     args,
     {
-      cwd,
+      cwd: commandCwd,
       timeout: 120_000,
       maxBuffer: 16_000_000,
-      env: { ...process.env, PYTHONPATH: join(cwd, "src") },
+      env: commandEnvironment(commandCwd),
     },
     (err, stdout, stderr) => {
       if (err) {
-        resolve({ ok: false, output: `Error: ${err.message}\n${stderr || ""}\n${stdout || ""}` });
+        resolvePromise({ ok: false, output: `Error: ${err.message}\n${stderr || ""}\n${stdout || ""}` });
       } else {
-        resolve({ ok: true, output: stdout || stderr });
+        resolvePromise({ ok: true, output: stdout || stderr });
       }
     }
   );
 
   return promise;
 };
+
+export function resolveSotBinary(cwd: string = process.cwd(), platform: NodeJS.Platform = process.platform): string | undefined {
+  const commandCwd = cwd || process.cwd();
+  const env = commandEnvironment(commandCwd, platform);
+  const pathValue = env.PATH;
+  if (pathValue === undefined) return undefined;
+
+  const workspaceRoot = canonicalPath(resolve(commandCwd));
+  const candidateNames =
+    platform === "win32" ? windowsPathSuffixes(env).map((suffix) => `sot${suffix}`) : ["sot"];
+  for (const pathEntry of pathValue.split(pathDelimiter(platform))) {
+    if (!pathEntry) continue;
+    const canonicalDirectory = canonicalExistingPath(pathEntry);
+    if (
+      canonicalDirectory === undefined ||
+      !isAbsolute(canonicalDirectory) ||
+      isWithin(workspaceRoot, pathEntry, platform) ||
+      isWithin(workspaceRoot, canonicalDirectory, platform)
+    ) {
+      continue;
+    }
+
+    for (const candidateName of candidateNames) {
+      const candidatePath = join(canonicalDirectory, candidateName);
+      if (!isAbsolute(candidatePath) || isWithin(workspaceRoot, candidatePath, platform)) continue;
+
+      const canonicalCandidate = canonicalExistingPath(candidatePath);
+      if (
+        canonicalCandidate === undefined ||
+        !isAbsolute(canonicalCandidate) ||
+        isWithin(workspaceRoot, canonicalCandidate, platform) ||
+        !isExecutableFile(canonicalCandidate, platform)
+      ) {
+        continue;
+      }
+      return canonicalCandidate;
+    }
+  }
+  return undefined;
+}
 
 /**
  * OpenCode Plugin Entrypoint

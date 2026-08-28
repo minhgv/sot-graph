@@ -19,8 +19,10 @@ Supports:
 
 from __future__ import annotations
 
+import json
 import os
 import platform
+import stat
 import signal
 import subprocess
 import sys
@@ -29,7 +31,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from sot_graph.locking import LockBusy
+from sot_graph.locking import LockBusy, WriteLock
 
 __all__ = [
     "run_watch",
@@ -329,14 +331,214 @@ def is_pid_alive(pid: int) -> bool:
     except OSError:
         return False
 
+def _process_identity(pid: int) -> Optional[Dict[str, str]]:
+    """Read a process start marker and command without invoking a shell.
+
+    Linux and macOS expose enough process metadata through ``/proc`` or the
+    native ``ps`` command to detect PID reuse.  Windows has neither a
+    guaranteed ``/proc`` mount nor a portable ``ps`` implementation, so do
+    not manufacture an identity from an implementation-specific command.
+    ``start_daemon`` treats the missing identity as an unverified launch.
+    """
+    if pid <= 0:
+        return None
+    if sys.platform == "win32":
+        return None
+    try:
+        command: Optional[str] = None
+        start: Optional[str] = None
+        proc_dir = Path("/proc") / str(pid)
+        if proc_dir.is_dir():
+            raw_command = (proc_dir / "cmdline").read_bytes()
+            command = " ".join(part.decode("utf-8", "replace") for part in raw_command.split(b"\0") if part)
+            stat_line = (proc_dir / "stat").read_text(encoding="utf-8", errors="replace")
+            rest = stat_line.rsplit(")", 1)[-1].split()
+            if len(rest) > 19:
+                start = rest[19]
+        if command is None:
+            command_output = subprocess.check_output(
+                ["ps", "-p", str(pid), "-o", "command="],
+                stderr=subprocess.DEVNULL,
+            )
+            command = command_output.decode("utf-8", "replace") if isinstance(command_output, bytes) else str(command_output)
+        if start is None:
+            start_output = subprocess.check_output(
+                ["ps", "-p", str(pid), "-o", "lstart="],
+                stderr=subprocess.DEVNULL,
+            )
+            start = start_output.decode("utf-8", "replace") if isinstance(start_output, bytes) else str(start_output)
+        command = command.strip()
+        start = start.strip()
+        if not command or not start:
+            return None
+        return {"command": command, "start": start}
+    except Exception:
+        return None
+
+
+
+def _process_cwd(pid: int) -> Optional[str]:
+    """Return a process cwd when the platform exposes one."""
+    try:
+        proc_cwd = Path("/proc") / str(pid) / "cwd"
+        if proc_cwd.exists():
+            return os.path.realpath(proc_cwd)
+        output = subprocess.check_output(
+            ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+            stderr=subprocess.DEVNULL,
+        )
+        text = output.decode("utf-8", "replace") if isinstance(output, bytes) else str(output)
+        for line in text.splitlines():
+            if line.startswith("n"):
+                return os.path.realpath(line[1:])
+    except Exception:
+        pass
+    return None
+
+
+def _read_pid_metadata(pid_path: Path) -> Optional[Dict[str, Any]]:
+    """Read a bounded, regular PID metadata file without following symlinks."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    fd: Optional[int] = None
+    try:
+        fd = os.open(os.fspath(pid_path), flags)
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 16 * 1024:
+            return None
+        chunks: List[bytes] = []
+        remaining = 16 * 1024
+        while remaining:
+            chunk = os.read(fd, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        text = b"".join(chunks).decode("utf-8", "replace").strip()
+    except (OSError, UnicodeError):
+        return None
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError):
+        try:
+            pid = int(text)
+        except ValueError:
+            return None
+        return {"pid": pid, "legacy": True}
+    if not isinstance(parsed, dict):
+        return None
+    try:
+        parsed["pid"] = int(parsed["pid"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return parsed
+
+
+def _write_pid_metadata(pid_path: Path, metadata: Dict[str, Any]) -> None:
+    """Atomically publish owner-scoped PID metadata with mode 0600."""
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(metadata, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n"
+    temp_path = pid_path.with_name(
+        f".{pid_path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    )
+    fd: Optional[int] = None
+    try:
+        fd = os.open(
+            os.fspath(temp_path),
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        view = memoryview(payload)
+        while view:
+            written = os.write(fd, view)
+            view = view[written:]
+        os.fsync(fd)
+        os.close(fd)
+        fd = None
+        os.replace(os.fspath(temp_path), os.fspath(pid_path))
+        os.chmod(os.fspath(pid_path), 0o600)
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _remove_pid_file(pid_path: Path) -> None:
+    try:
+        pid_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _watcher_identity_matches(
+    pid: int,
+    metadata: Dict[str, Any],
+    *,
+    is_all: bool,
+    root: Optional[str] = None,
+) -> bool:
+    """Require both a live PID and a matching watcher command identity."""
+    if not is_pid_alive(pid):
+        return False
+    if metadata.get("scope") and metadata.get("scope") != ("all" if is_all else "single"):
+        return False
+    if not is_all and root and metadata.get("root"):
+        try:
+            if os.path.realpath(str(metadata["root"])) != os.path.realpath(root):
+                return False
+        except OSError:
+            return False
+    identity = _process_identity(pid)
+    if identity is None:
+        return False
+    expected = metadata.get("identity")
+    if expected is not None and expected != identity:
+        return False
+    command = identity.get("command", "")
+    tokens = command.replace("\x00", " ").split()
+    if "sot_graph.cli" not in tokens or "watch" not in tokens:
+        return False
+    if ("--all" in tokens) != is_all:
+        return False
+    if root:
+        process_cwd = _process_cwd(pid)
+        if process_cwd and not is_all:
+            if os.path.realpath(process_cwd) != os.path.realpath(root):
+                return False
+    return True
+
 
 def _get_pid_and_log_paths(root: str, is_all: bool) -> Tuple[Path, Path]:
     if is_all:
         GLOBAL_SOT_DIR.mkdir(parents=True, exist_ok=True)
         return PID_FILE_GLOBAL, LOG_FILE_GLOBAL
-    sot_dir = Path(root) / ".sot"
+    canonical_root = Path(root).resolve()
+    sot_dir = canonical_root / ".sot"
+    if sot_dir.is_symlink():
+        try:
+            if os.path.commonpath((str(canonical_root), str(sot_dir.resolve()))) != str(canonical_root):
+                raise ValueError("watcher metadata directory resolves outside project root")
+        except ValueError:
+            raise ValueError("watcher metadata directory resolves outside project root")
     sot_dir.mkdir(parents=True, exist_ok=True)
     return sot_dir / "watch.pid", sot_dir / "watch.log"
+
+
+def _daemon_gate(pid_path: Path) -> WriteLock:
+    return WriteLock(str(pid_path.with_name(pid_path.name + ".lock")), timeout_ms=5_000)
 
 
 def start_daemon(
@@ -349,120 +551,181 @@ def start_daemon(
 ) -> Tuple[bool, str]:
     """Start watcher as a detached background daemon."""
     pid_path, log_path = _get_pid_and_log_paths(root, is_all)
-
-    # Check if already running
-    if pid_path.exists():
-        try:
-            existing_pid = int(pid_path.read_text().strip())
-            if is_pid_alive(existing_pid):
-                return False, f"Watcher daemon is already running (PID: {existing_pid})"
-        except (ValueError, OSError):
-            pass
-
-    cmd = [
-        sys.executable,
-        "-m", "sot_graph.cli",
-        "watch",
-        "--debounce-ms", str(debounce_ms),
-        "--interval-ms", str(interval_ms),
-        "--backend", backend,
-    ]
-    if is_all:
-        cmd.append("--all")
-        if base_dir:
-            cmd.extend(["--dir", base_dir])
-
-    # Open log file in append mode
-    log_file = open(log_path, "a", encoding="utf-8")
-
-    # Set up PYTHONPATH
-    env = os.environ.copy()
-    src_dir = str(Path(__file__).resolve().parent.parent)
-    if "PYTHONPATH" in env:
-        env["PYTHONPATH"] = f"{src_dir}:{env['PYTHONPATH']}"
-    else:
-        env["PYTHONPATH"] = src_dir
-
     try:
-        proc = subprocess.Popen(
-            cmd,
-            cwd=base_dir if (is_all and base_dir) else root,
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,
-            env=env,
-        )
-        pid_path.write_text(str(proc.pid), encoding="utf-8")
-        target_desc = f"all projects in {base_dir or root}" if is_all else f"project {root}"
-        return True, f"Started SOT Watcher daemon (PID: {proc.pid}) for {target_desc}.\nLogs: {log_path}"
-    except Exception as e:
-        return False, f"Failed to start daemon: {e}"
-    finally:
-        log_file.close()
+        with _daemon_gate(pid_path):
+            existing = _read_pid_metadata(pid_path)
+            if existing is not None:
+                existing_pid = int(existing.get("pid", 0))
+                scope_root = base_dir or root
+                if _watcher_identity_matches(
+                    existing_pid,
+                    existing,
+                    is_all=is_all,
+                    root=None if is_all else scope_root,
+                ):
+                    return False, f"Watcher daemon is already running (PID: {existing_pid})"
+                _remove_pid_file(pid_path)
+
+            cmd = [
+                sys.executable,
+                "-m",
+                "sot_graph.cli",
+                "watch",
+                "--debounce-ms",
+                str(debounce_ms),
+                "--interval-ms",
+                str(interval_ms),
+                "--backend",
+                backend,
+            ]
+            if is_all:
+                cmd.append("--all")
+                if base_dir:
+                    cmd.extend(["--dir", base_dir])
+
+            scope_root = str(Path(base_dir if (is_all and base_dir) else root).resolve())
+            log_file = open(log_path, "a", encoding="utf-8")
+            proc: Any = None
+            try:
+                env = os.environ.copy()
+                src_dir = str(Path(__file__).resolve().parent.parent)
+                env["PYTHONPATH"] = (
+                    f"{src_dir}{os.pathsep}{env['PYTHONPATH']}"
+                    if env.get("PYTHONPATH")
+                    else src_dir
+                )
+                proc = subprocess.Popen(
+                    cmd,
+                    cwd=scope_root,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL,
+                    start_new_session=True,
+                    env=env,
+                )
+                identity = _process_identity(int(proc.pid))
+                if identity is None:
+                    raise RuntimeError(
+                        "watcher process identity could not be verified; "
+                        "daemon start aborted"
+                    )
+                metadata = {
+                    "pid": int(proc.pid),
+                    "scope": "all" if is_all else "single",
+                    "root": os.path.realpath(scope_root),
+                    "cwd": scope_root,
+                    "argv": cmd,
+                    "identity": identity,
+                    "started_at_ns": time.time_ns(),
+                }
+                _write_pid_metadata(pid_path, metadata)
+                target_desc = f"all projects in {base_dir or root}" if is_all else f"project {root}"
+                return True, (
+                    f"Started SOT Watcher daemon (PID: {proc.pid}) for {target_desc}.\n"
+                    f"Logs: {log_path}"
+                )
+            except Exception as exc:
+                if proc is not None:
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+                return False, f"Failed to start daemon: {exc}"
+            finally:
+                log_file.close()
+    except LockBusy:
+        return False, "Watcher daemon start is already in progress; retry shortly."
+
+
 def stop_daemon(root: str, is_all: bool = False) -> Tuple[bool, str]:
-    """Stop the running background watcher daemon."""
+    """Stop only a process whose command identity matches watcher metadata."""
     pid_path, _ = _get_pid_and_log_paths(root, is_all)
-
-    if not pid_path.exists():
-        return False, "No watcher daemon PID file found (daemon is not running)."
-
     try:
-        pid = int(pid_path.read_text().strip())
-    except (ValueError, OSError):
-        pid_path.unlink(missing_ok=True)
-        return False, "Corrupted PID file removed. Daemon was not running."
+        with _daemon_gate(pid_path):
+            metadata = _read_pid_metadata(pid_path)
+            if metadata is None:
+                if pid_path.exists() or pid_path.is_symlink():
+                    _remove_pid_file(pid_path)
+                    return False, "Corrupted or unsafe PID file removed. Daemon was not running."
+                return False, "No watcher daemon PID file found (daemon is not running)."
+            pid = int(metadata.get("pid", 0))
+            if not _watcher_identity_matches(
+                pid,
+                metadata,
+                is_all=is_all,
+                root=None if is_all else root,
+            ):
+                _remove_pid_file(pid_path)
+                return False, f"PID {pid} identity mismatch; no process was signaled."
 
-    if not is_pid_alive(pid):
-        pid_path.unlink(missing_ok=True)
-        return False, f"Process {pid} is not running. Stale PID file removed."
-
-    try:
-        os.kill(pid, signal.SIGTERM)
-        # Wait up to 3s for graceful termination
-        for _ in range(30):
-            time.sleep(0.1)
-            if not is_pid_alive(pid):
-                break
-        if is_pid_alive(pid):
-            sig_kill = getattr(signal, "SIGKILL", signal.SIGTERM)
-            os.kill(pid, sig_kill)
-            time.sleep(0.2)
-        pid_path.unlink(missing_ok=True)
-        return True, f"Successfully stopped SOT Watcher daemon (PID: {pid})."
-    except Exception as e:
-        return False, f"Error stopping daemon (PID: {pid}): {e}"
+            try:
+                os.kill(pid, signal.SIGTERM)
+                for _ in range(30):
+                    time.sleep(0.1)
+                    if not is_pid_alive(pid):
+                        break
+                if is_pid_alive(pid):
+                    if not _watcher_identity_matches(
+                        pid,
+                        metadata,
+                        is_all=is_all,
+                        root=None if is_all else root,
+                    ):
+                        _remove_pid_file(pid_path)
+                        return False, f"PID {pid} identity changed; no force signal was sent."
+                    sig_kill = getattr(signal, "SIGKILL", signal.SIGTERM)
+                    os.kill(pid, sig_kill)
+                    time.sleep(0.2)
+                _remove_pid_file(pid_path)
+                return True, f"Successfully stopped SOT Watcher daemon (PID: {pid})."
+            except ProcessLookupError:
+                _remove_pid_file(pid_path)
+                return False, f"Process {pid} is not running. Stale PID file removed."
+            except OSError as exc:
+                return False, f"Error stopping daemon (PID: {pid}): {exc}"
+    except LockBusy:
+        return False, "Watcher daemon lifecycle is busy; retry shortly."
 
 
 def status_daemon(root: str, is_all: bool = False) -> Dict[str, Any]:
-    """Retrieve the status of the watcher daemon."""
+    """Retrieve status only when PID metadata names this watcher instance."""
     pid_path, log_path = _get_pid_and_log_paths(root, is_all)
-    if not pid_path.exists():
-        return {
-            "running": False,
-            "pid": None,
-            "log_path": str(log_path),
-            "scope": "all" if is_all else "single",
-            "message": "Watcher daemon is not running.",
-        }
-
     try:
-        pid = int(pid_path.read_text().strip())
-        running = is_pid_alive(pid)
-        return {
-            "running": running,
-            "pid": pid if running else None,
-            "log_path": str(log_path),
-            "scope": "all" if is_all else "single",
-            "message": f"Watcher daemon is ACTIVE (PID: {pid})" if running else f"Stale PID {pid} (process not alive)",
-        }
-    except Exception as e:
+        with _daemon_gate(pid_path):
+            metadata = _read_pid_metadata(pid_path)
+            if metadata is None:
+                return {
+                    "running": False,
+                    "pid": None,
+                    "log_path": str(log_path),
+                    "scope": "all" if is_all else "single",
+                    "message": "Watcher daemon is not running.",
+                }
+            pid = int(metadata.get("pid", 0))
+            running = _watcher_identity_matches(
+                pid,
+                metadata,
+                is_all=is_all,
+                root=None if is_all else root,
+            )
+            return {
+                "running": running,
+                "pid": pid if running else None,
+                "log_path": str(log_path),
+                "scope": "all" if is_all else "single",
+                "message": (
+                    f"Watcher daemon is ACTIVE (PID: {pid})"
+                    if running
+                    else f"PID {pid} is not the expected watcher process"
+                ),
+            }
+    except LockBusy:
         return {
             "running": False,
             "pid": None,
             "log_path": str(log_path),
             "scope": "all" if is_all else "single",
-            "message": f"Error reading daemon status: {e}",
+            "message": "Watcher daemon lifecycle is busy; retry shortly.",
         }
 
 

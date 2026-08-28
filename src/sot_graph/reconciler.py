@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import os
 import signal
+import sqlite3
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
@@ -89,11 +90,28 @@ def _worker_error(category: str, job: ParseJob) -> str:
     return f"{category}:{_relative_path(job.path, job.root_dir)}"
 
 
+def _safe_path(path: str, root_dir: str) -> Optional[str]:
+    """Return a canonical path only when it remains inside ``root_dir``."""
+    try:
+        canonical_root = os.path.realpath(os.path.abspath(root_dir))
+        canonical_path = os.path.realpath(path)
+        if os.path.commonpath((canonical_root, canonical_path)) != canonical_root:
+            return None
+        return canonical_path
+    except (OSError, ValueError):
+        return None
+
 def _parse_worker(job: ParseJob) -> ParseResult:
     """Picklable process-pool boundary; no coordinator state crosses it."""
     try:
+        safe_path = _safe_path(job.path, job.root_dir)
+        if safe_path is None:
+            return ParseResult(
+                job.path, None, job.size, job.mtime_ms, (), (), (),
+                _worker_error("unsafe", job),
+            )
         try:
-            os.stat(job.path)
+            os.stat(safe_path)
         except FileNotFoundError:
             return ParseResult(
                 job.path, None, job.size, job.mtime_ms, (), (), (),
@@ -161,19 +179,93 @@ def _parse_worker(job: ParseJob) -> ParseResult:
 class Reconciler:
     def __init__(self, db: Database, root_dir: str, extra_ignored_dirs: Optional[Set[str]] = None):
         self.db = db
-        self.root_dir = os.path.abspath(root_dir)
+        # Keep the caller's lexical root for DB compatibility (notably
+        # macOS /var -> /private/var), while using its realpath for safety.
+        requested_root = os.path.abspath(root_dir)
+        self._canonical_root = os.path.realpath(requested_root)
+        self.root_dir = self._stored_root_alias(requested_root)
         self.ignore_matcher = GitIgnoreMatcher(self.root_dir, extra_ignored_dirs=extra_ignored_dirs)
+
+    def _stored_root_alias(self, requested_root: str) -> str:
+        """Reuse an existing DB path spelling when its parent is this root."""
+        try:
+            journal_paths = sorted(self.db.all_journal_paths())
+        except (AttributeError, OSError, sqlite3.Error):
+            return requested_root
+        for stored_path in journal_paths:
+            try:
+                raw_path = os.fspath(stored_path)
+                candidate = (
+                    raw_path
+                    if os.path.isabs(raw_path)
+                    else os.path.join(requested_root, raw_path)
+                )
+                candidate = os.path.abspath(candidate)
+            except (TypeError, OSError, ValueError):
+                continue
+            parent = os.path.dirname(candidate)
+            while parent and parent != os.path.dirname(parent):
+                try:
+                    if os.path.realpath(parent) == self._canonical_root:
+                        return parent
+                except OSError:
+                    break
+                parent = os.path.dirname(parent)
+        return requested_root
+
+    def _lexical_path(self, path: str) -> Optional[str]:
+        """Return a root-contained path without resolving its final target."""
+        try:
+            raw = os.fspath(path)
+            if not raw:
+                return None
+            candidate = raw if os.path.isabs(raw) else os.path.join(self.root_dir, raw)
+            absolute = os.path.abspath(candidate)
+            if os.path.commonpath((self.root_dir, absolute)) == self.root_dir:
+                return absolute
+
+            # An absolute path may use the alternate /var or /private/var
+            # spelling.  Resolve ancestors only, never the final symlink.
+            ancestor = os.path.dirname(absolute)
+            while ancestor and ancestor != os.path.dirname(ancestor):
+                try:
+                    if os.path.realpath(ancestor) == self._canonical_root:
+                        suffix = os.path.relpath(absolute, ancestor)
+                        return os.path.abspath(os.path.join(self.root_dir, suffix))
+                except OSError:
+                    pass
+                ancestor = os.path.dirname(ancestor)
+            return None
+        except (TypeError, OSError, ValueError):
+            return None
+
+    def _delete_path_variants(self, path: str) -> None:
+        """Delete an absolute path and its root-relative DB spelling."""
+        self.db.delete_path(path)
+        relative = _relative_path(path, self.root_dir)
+        if relative != path:
+            self.db.delete_path(relative)
+
     def _normalise_path(self, path: str) -> Optional[str]:
-        """Return an absolute root-contained path, or ``None`` if unsafe."""
-        raw = os.fspath(path)
+        """Return a root-contained canonical path, or ``None`` if unsafe."""
+        try:
+            raw = os.fspath(path)
+        except TypeError:
+            return None
+        if not raw:
+            return None
         candidate = raw if os.path.isabs(raw) else os.path.join(self.root_dir, raw)
         absolute = os.path.abspath(candidate)
+        canonical = os.path.realpath(absolute)
         try:
-            if os.path.commonpath((self.root_dir, absolute)) != self.root_dir:
+            if os.path.commonpath((self._canonical_root, canonical)) != self._canonical_root:
                 return None
+            # Resolve symlinks below the project root, but preserve the
+            # caller's root spelling so existing DB IDs remain stable.
+            relative = os.path.relpath(canonical, self._canonical_root)
+            return os.path.abspath(os.path.join(self.root_dir, relative))
         except ValueError:
             return None
-        return absolute
 
     def _supported(self, path: str) -> bool:
         ext = Path(path).suffix.lower()
@@ -187,7 +279,9 @@ class Reconciler:
                 if not self.ignore_matcher.is_ignored(os.path.join(root, d), is_dir=True)
             )
             for name in sorted(files):
-                path = os.path.abspath(os.path.join(root, name))
+                path = self._normalise_path(os.path.join(root, name))
+                if path is None or not os.path.isfile(path):
+                    continue
                 if not explicit and self.ignore_matcher.is_ignored(path, is_dir=False):
                     continue
                 if explicit or self._supported(path):
@@ -225,9 +319,19 @@ class Reconciler:
     def _known_abs_paths(self) -> Set[str]:
         result: Set[str] = set()
         for path in self.db.all_journal_paths():
+            # Keep the lexical spelling as a deletion-only candidate.  Older
+            # indexes could journal an internal symlink as ``alias.py`` while
+            # the canonical scan now publishes its target as ``target.py``.
+            # Tracking both lets the deletion sweep remove the stale alias
+            # row without ever treating the alias as parse work.
+            lexical = self._lexical_path(path)
+            if lexical is not None:
+                result.add(lexical)
             normalised = self._normalise_path(path)
-            result.add(normalised if normalised is not None else os.path.abspath(path))
+            if normalised is not None:
+                result.add(normalised)
         return result
+
     def _deletion_scope(
         self, paths: Optional[Sequence[str]], known_paths: Set[str]
     ) -> Set[str]:
@@ -237,8 +341,12 @@ class Reconciler:
         requested: List[str] = []
         for value in paths:
             normalised = self._normalise_path(value)
-            if normalised is not None:
-                requested.append(normalised)
+            lexical = self._lexical_path(value)
+            for candidate in (normalised, lexical):
+                if candidate is not None and candidate not in requested:
+                    # Keep aliases in deletion scope, but never feed them to
+                    # scan() or the parser; current_paths remains canonical.
+                    requested.append(candidate)
         if not requested:
             return set()
         def is_under(base: str, candidate: str) -> bool:
@@ -314,11 +422,15 @@ class Reconciler:
                 if record.error is not None:
                     conflicts.append(record.path)
                     continue
+                safe_record_path = _safe_path(record.path, self.root_dir)
+                if safe_record_path is None:
+                    conflicts.append(record.path)
+                    continue
                 try:
-                    st = os.stat(record.path)
+                    st = os.stat(safe_record_path)
                     cur_size = int(st.st_size)
                     cur_mtime_ms = int(st.st_mtime * 1000)
-                    disk_sha = self._hash(record.path)
+                    disk_sha = self._hash(safe_record_path)
                 except OSError:
                     conflicts.append(record.path)
                     continue
@@ -372,21 +484,24 @@ class Reconciler:
         """Reconcile one path using the original v1 action vocabulary."""
         absolute = self._normalise_path(path)
         if absolute is None:
+            # Keep an escaped in-root symlink deletion-only.  Do not stat,
+            # hash, or parse the external target, and still reject the path.
+            lexical = self._lexical_path(path)
+            if lexical is not None:
+                with self._publication_gate():
+                    self._delete_path_variants(lexical)
             return "error"
-        rel_path = _relative_path(absolute, self.root_dir)
         prior = self.db.get_file_journal(absolute)
         base_generation = int(prior.get("generation") or 0) if prior else 0
         if not os.path.exists(absolute) or not os.path.isfile(absolute):
             with self._publication_gate():
-                self.db.delete_path(rel_path)
-                self.db.delete_path(absolute)
+                self._delete_path_variants(absolute)
             return "deleted"
         try:
             stat = os.stat(absolute)
         except OSError:
             with self._publication_gate():
-                self.db.delete_path(rel_path)
-                self.db.delete_path(absolute)
+                self._delete_path_variants(absolute)
             return "deleted"
         job = ParseJob(
             absolute,
@@ -400,7 +515,7 @@ class Reconciler:
             # A file can disappear after the initial stat.
             if result.error.startswith("missing:") and not os.path.exists(absolute):
                 with self._publication_gate():
-                    self.db.delete_path(absolute)
+                    self._delete_path_variants(absolute)
                 return "deleted"
             return "error"
         if prior and prior.get("sha256") == result.sha256:
@@ -453,6 +568,7 @@ class Reconciler:
                 break
         while futures:
             done, _ = wait(tuple(futures), return_when=FIRST_COMPLETED)
+
             for future in done:
                 job = futures.pop(future)
                 try:
@@ -607,7 +723,7 @@ class Reconciler:
                     dead_paths,
                     key=lambda p: _relative_path(p, self.root_dir),
                 ):
-                    self.db.delete_path(dead_path)
+                    self._delete_path_variants(dead_path)
                 deleted = len(dead_paths) + len(deleted_during_parse)
                 resolver = getattr(self.db, "resolve_all_pending_edges", None)
                 if callable(resolver):

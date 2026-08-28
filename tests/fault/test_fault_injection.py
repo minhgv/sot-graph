@@ -17,6 +17,7 @@ from pathlib import Path
 import shutil
 import sqlite3
 import tempfile
+import threading
 import time
 from typing import Any
 import unittest
@@ -351,25 +352,39 @@ class TestFaultInjection(unittest.TestCase):
         5. Verify holder A can release lock cleanly and holder B can then acquire.
         """
         lock_path = os.path.join(self.test_dir, ".sot", "write.lock")
-        
+
         lock_a = WriteLock(lock_path, timeout_ms=5000)
         lock_a.acquire()
         self.assertTrue(os.path.exists(lock_path), "Lock file must exist while held by holder A")
 
-        # Holder B attempts acquisition with short timeout (50ms)
-        lock_b = WriteLock(lock_path, timeout_ms=50)
-        with self.assertRaises(LockTimeoutError) as ctx:
-            lock_b.acquire()
-        self.assertIsInstance(ctx.exception, LockBusy)
-        self.assertIn("Could not acquire write lock", str(ctx.exception))
-        
+        # Holder B is a different thread, so reentrancy for holder A does not
+        # weaken the mutual-exclusion contract.
+        outcome = []
+        attempted = threading.Event()
+
+        def contend() -> None:
+            lock_b = WriteLock(lock_path, timeout_ms=50)
+            try:
+                lock_b.acquire()
+            except LockTimeoutError as exc:
+                outcome.append(exc)
+            finally:
+                attempted.set()
+
+        contender = threading.Thread(target=contend)
+        contender.start()
+        self.assertTrue(attempted.wait(timeout=1))
+        contender.join(timeout=2)
+        self.assertEqual(len(outcome), 1)
+        self.assertIsInstance(outcome[0], LockBusy)
+        self.assertIn("Could not acquire write lock", str(outcome[0]))
+
         # Verify lock file is still present and valid
         self.assertTrue(os.path.exists(lock_path), "Lock file must NOT be deleted by timed out requester")
 
-        # Holder A releases lock
+        # Holder A releases lock; holder B can now acquire cleanly.
         lock_a.release()
-
-        # Holder B can now acquire cleanly
+        lock_b = WriteLock(lock_path, timeout_ms=200)
         lock_b.acquire()
         lock_b.release()
     # -------------------------------------------------------------------------

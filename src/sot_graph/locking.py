@@ -14,9 +14,39 @@ acquire with a bounded timeout; on deadline the caller receives
 
 import errno
 import os
+import threading
 import time
+from dataclasses import dataclass
+from typing import Dict
 
 __all__ = ["LockBusy", "LockTimeoutError", "WriteLock"]
+
+@dataclass
+class _HeldLock:
+    fd: int
+    owner_pid: int
+    owner_thread: int
+    depth: int = 1
+
+
+_REGISTRY_GUARD = threading.RLock()
+_HELD_LOCKS: Dict[str, _HeldLock] = {}
+_REGISTRY_PID = os.getpid()
+
+
+def _reset_registry_after_fork() -> None:
+    """Drop inherited registry state after ``fork`` without touching parents."""
+    global _REGISTRY_PID
+    pid = os.getpid()
+    if _REGISTRY_PID == pid:
+        return
+    for held in _HELD_LOCKS.values():
+        try:
+            os.close(held.fd)
+        except OSError:
+            pass
+    _HELD_LOCKS.clear()
+    _REGISTRY_PID = pid
 
 _RETRY_INTERVAL_S = 0.025
 
@@ -69,7 +99,7 @@ else:
 
 
 class WriteLock:
-    """Bounded, re-entrant-per-process advisory file lock."""
+    """Bounded advisory lock re-entrant for one owning thread."""
 
     def __init__(self, path: str, timeout_ms: int = 5_000) -> None:
         if timeout_ms < 0:
@@ -77,33 +107,94 @@ class WriteLock:
         self.path = os.path.abspath(path)
         self.timeout_ms = int(timeout_ms)
         self._fd: int | None = None
+        self._acquisitions = 0
+        self._registry_key = os.path.realpath(self.path)
+        self._owner_pid: int | None = None
+        self._owner_thread: int | None = None
 
     def acquire(self) -> None:
+        """Acquire the lock, nesting when this thread already owns it."""
         directory = os.path.dirname(self.path)
         if directory:
             os.makedirs(directory, exist_ok=True)
-        # O_CREAT|O_RDWR without O_TRUNC: the lock file must keep its inode
-        # for the lifetime of the project or stale holders go unnoticed.
-        fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
+        key = os.path.realpath(self.path)
+        pid = os.getpid()
+        thread_id = threading.get_ident()
         deadline = time.monotonic() + self.timeout_ms / 1000.0
-        try:
-            while not _try_acquire(fd):
-                if time.monotonic() >= deadline:
-                    raise LockTimeoutError(
-                        f"Could not acquire write lock on {self.path} within {self.timeout_ms}ms"
-                    )
-                time.sleep(_RETRY_INTERVAL_S)
-        except BaseException:
-            os.close(fd)
-            raise
-        self._fd = fd
+
+        while True:
+            with _REGISTRY_GUARD:
+                _reset_registry_after_fork()
+                held = _HELD_LOCKS.get(key)
+                if held is not None:
+                    if held.owner_pid == pid and held.owner_thread == thread_id:
+                        held.depth += 1
+                        self._registry_key = key
+                        self._owner_pid = pid
+                        self._owner_thread = thread_id
+                        self._acquisitions += 1
+                        self._fd = held.fd
+                        return
+                else:
+                    fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
+                    try:
+                        if _try_acquire(fd):
+                            _HELD_LOCKS[key] = _HeldLock(fd, pid, thread_id)
+                            self._registry_key = key
+                            self._owner_pid = pid
+                            self._owner_thread = thread_id
+                            self._acquisitions = 1
+                            self._fd = fd
+                            return
+                    except BaseException:
+                        try:
+                            os.close(fd)
+                        except OSError:
+                            pass
+                        raise
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+
+            if time.monotonic() >= deadline:
+                raise LockTimeoutError(
+                    f"Could not acquire write lock on {self.path} within {self.timeout_ms}ms"
+                )
+            time.sleep(_RETRY_INTERVAL_S)
 
     def release(self) -> None:
-        if self._fd is None:
+        """Release one nesting level and close the shared descriptor at zero."""
+        if self._acquisitions <= 0:
             return
-        _release(self._fd)
-        os.close(self._fd)
-        self._fd = None
+        pid = os.getpid()
+        thread_id = threading.get_ident()
+        with _REGISTRY_GUARD:
+            _reset_registry_after_fork()
+            held = _HELD_LOCKS.get(self._registry_key)
+            if held is None:
+                # A forked child may inherit a lock object after its copied
+                # descriptor was closed while resetting the local registry.
+                self._acquisitions = 0
+                self._fd = None
+                return
+            if held.owner_pid != pid or held.owner_thread != thread_id:
+                raise RuntimeError(
+                    "write lock must be released by its owning process/thread"
+                )
+            self._acquisitions -= 1
+            held.depth -= 1
+            self._fd = held.fd if self._acquisitions else None
+            if held.depth > 0:
+                return
+            _HELD_LOCKS.pop(self._registry_key, None)
+            _release(held.fd)
+            try:
+                os.close(held.fd)
+            except OSError:
+                pass
+            self._owner_pid = None
+            self._owner_thread = None
 
     def __enter__(self) -> "WriteLock":
         self.acquire()

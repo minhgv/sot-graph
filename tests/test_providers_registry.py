@@ -12,7 +12,11 @@ import pytest
 
 from sot_graph.cli import main as cli_main
 from sot_graph.config import DEFAULT_PROVIDERS, SotConfig
-from sot_graph.providers_registry import detect_providers, resolve_capability
+from sot_graph.providers_registry import (
+    detect_providers,
+    providers_doctor,
+    resolve_capability,
+)
 
 
 # PATH discovery resolves a bare executable name; on Windows CreateProcess
@@ -104,6 +108,22 @@ class TestDetect:
         statuses = detect_providers(str(tmp_path), cfg)
         assert sorted(names(statuses)) == ["scip", "sot-builtin"]
 
+    @requires_spawned_fake_bin
+    def test_allow_external_false_does_not_probe_configured_executable(
+        self, tmp_path: Path, fake_bin: Path
+    ):
+        marker = tmp_path / "probed"
+        make_fake_exe(
+            fake_bin,
+            "gitnexus",
+            f"#!/bin/sh\ntouch '{marker}'\necho 'gitnexus 1.2.3'\n",
+        )
+        statuses = detect_providers(
+            str(tmp_path), config_with_defaults(allow_external=False)
+        )
+        assert sorted(names(statuses)) == ["scip", "sot-builtin"]
+        assert not marker.exists()
+
 
 class TestResolveCapability:
     @requires_spawned_fake_bin
@@ -160,6 +180,20 @@ class TestCliProviders:
         assert rc == 0
         report = json.loads(captured.out)
         assert report["ok"] is True
+
+
+    def test_doctor_required_external_provider_gated_by_policy(self, tmp_path: Path):
+        cfg = config_with_defaults(allow_external=False)
+        cfg.providers["gitnexus"].enabled = True
+
+        report = providers_doctor(str(tmp_path), cfg)
+        entry = next(row for row in report["providers"] if row["name"] == "gitnexus")
+
+        assert report["ok"] is False
+        assert entry["enabled"] is True
+        assert entry["usable"] is False
+        assert entry["probe_engine"] == "gated"
+        assert "allow_external=false" in entry["detail"]
 
     def test_doctor_exit_code_one_when_required_unhealthy(
         self, tmp_path: Path, fake_bin: Path, capsys: pytest.CaptureFixture

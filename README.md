@@ -79,6 +79,31 @@ sot setup --harness all --workspace-only
 | **OpenCode** | `~/.config/opencode/opencode.json`<br>`~/.config/opencode/skill/sot-graph/SKILL.md`<br>`~/.config/opencode/plugins/sot-graph/index.ts`<br>`.opencode/opencode.json`<br>`.opencode/skills/sot-graph/SKILL.md` | OpenCode skill integration, local MCP server configuration, and file permissions |
 | **ZCode IDE** | `~/.zcode/config.json`<br>`~/.zcode/skills/sot-graph/SKILL.md`<br>`~/.zcode/commands/sot-*.md`<br>`.zcode/config.json`<br>`.zcode/skills/sot-graph/SKILL.md`<br>`.zcode/commands/sot-*.md` | MCP server registration, slash command suite (`/sot-search`, `/sot-map`, `/sot-explore`, `/sot-usages`, `/sot-rename`), and IDE skill |
 
+### Native OMP/OpenCode Adapter Safety
+
+The native TypeScript adapters resolve the installed `sot` command to an
+absolute canonical executable from the trusted process `PATH` before invoking
+it. They treat environment-variable names case-insensitively (including
+Windows-shaped `Path` and `PythonPath` keys), remove every `PATH`/`PythonPath`
+variant, filter both the original and canonical forms of each `PATH` entry and
+its `sot` target whenever either form is under the canonical workspace root,
+and publish only canonical representations of retained external entries. On
+Windows, executable candidates follow the configured `PATHEXT` suffix order.
+They never inject the workspace `src` directory through `PYTHONPATH`.
+Session-start reconciliation remains best-effort when `sot` is unavailable, and
+OMP schedules a debounced reconcile after successful `write`, `edit`, `ast_edit`,
+or `patch` tool results.
+
+The OMP `sot_diff_impact` adapter rejects revision targets beginning with `-`
+before invoking the CLI, preventing option-like targets from being
+reinterpreted as command flags.
+
+For the OMP `sot_pack` tool, `depth` is translated to the CLI's `--max-hops`
+option and `tokens` is forwarded as `--max-tokens`. The destructive OMP
+`sot_clean` reset requires an explicit `confirm: true` argument when `all: true`
+(unless `dry_run: true`); only an explicit confirmation adds the CLI `--yes`
+flag.
+
 ---
 
 ## CLI & Agent Tool Usage Reference

@@ -220,6 +220,33 @@ class McpService:
         finally:
             conn.close()
 
+    def _reconcile_before_analysis(self) -> Dict[str, Any]:
+        """Refresh the graph through the normal writer/reconciler path."""
+        if self._closed:
+            raise McpServiceError("closed", "MCP service is closed")
+
+        from sot_graph.reconciler import Reconciler
+
+        writer = Database(self.db_path)
+        try:
+            summary = Reconciler(writer, self.project_root).reconcile()
+            summary_dict = summary.as_dict()
+            if summary_dict.get("failed", 0):
+                status = "failed"
+            elif summary_dict.get("conflicts", 0):
+                status = "conflicts"
+            else:
+                status = "success"
+            return {**summary_dict, "status": status}
+        except Exception as exc:
+            raise McpServiceError(
+                "reconcile_failed",
+                "graph reconciliation failed before diff analysis",
+            ) from exc
+        finally:
+            writer.close()
+
+
     def _bounded(self, value: Any, maximum: int, default: int = 1) -> int:
         try:
             number = int(value)
@@ -1093,6 +1120,10 @@ class McpService:
             DiffImpactEngine,
             format_diff_impact_markdown,
         )
+        reconcile_result = (
+            self._reconcile_before_analysis() if auto_reconcile else None
+        )
+
 
         def op(conn: sqlite3.Connection) -> Dict[str, Any]:
             view = _ConnView(conn)
@@ -1127,6 +1158,11 @@ class McpService:
                 "result": result_dict,
                 "snapshot": snapshot,
                 "stale_files": stale,
+                **(
+                    {"reconcile": reconcile_result}
+                    if reconcile_result is not None
+                    else {}
+                ),
             }
             if format.lower() == "markdown":
                 payload["markdown"] = format_diff_impact_markdown(res)

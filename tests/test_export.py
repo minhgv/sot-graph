@@ -61,6 +61,26 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(saved, out_path)
         self.assertTrue(Path(out_path).exists())
         self.assertGreater(Path(out_path).stat().st_size, 500)
+    def test_html_visualizer_escapes_hostile_metadata(self) -> None:
+        graph = AnalyticsGraph()
+        graph.add_node(
+            "hostile",
+            label='</script><img src=x onerror="alert(1)">',
+            path='</div><script>alert("path")</script>',
+            kind="function",
+        )
+        html = generate_html_visualizer(
+            graph, title='</title><script>alert("title")</script>'
+        )
+
+        self.assertIn(
+            "&lt;/title&gt;&lt;script&gt;alert(&quot;title&quot;)&lt;/script&gt;",
+            html,
+        )
+        self.assertIn(r"\u003c/script\u003e", html)
+        self.assertNotIn("<script>alert(", html)
+        self.assertNotIn("innerHTML", html)
+
 
     def test_graphrag_json_export(self) -> None:
         graph = AnalyticsGraph.from_database(self.db)

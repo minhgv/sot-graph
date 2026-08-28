@@ -4,6 +4,7 @@ sot_graph.db — SQLite schema and storage for the Source-of-Truth Knowledge Gra
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -13,6 +14,7 @@ import stat
 import sys
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 from urllib.parse import quote
@@ -809,30 +811,61 @@ class Database:
         }
 
     def delete_path(self, path: str) -> None:
-        """Remove a file's rows.
+        """Remove one file and all graph rows that depend on its nodes.
 
-        Inbound edges from OTHER files that point at this file's nodes would
-        dangle once the nodes are gone; re-queue them as pending rows so the
-        next resolution pass can re-attach them wherever the symbols now live
-        (e.g. after the file is moved or renamed).
+        Inbound references are retained as unresolved pending edges so a later
+        reconcile can attach them to a moved/recreated definition.  The
+        confirmed edge rows themselves are removed in the same transaction,
+        including rows published by other source files.
         """
         with self.conn:
-            requeued = self.conn.execute(
-                "SELECT e.path, e.src, e.relation, e.line, n.symbol, n.fqn, n.kind "
-                "FROM graph_edges e JOIN graph_nodes n ON e.dst = n.id "
-                "WHERE n.path = ? AND e.path != ?",
-                (path, path),
-            ).fetchall()
-            if requeued:
-                self.conn.executemany(
-                    "INSERT OR REPLACE INTO pending_edges"
-                    "(path, src, dst_symbol, relation, line, call_kind, import_source) "
-                    "VALUES (?,?,?,?,?,?,?)",
-                    [
-                        (e_path, src, self._requeue_symbol(row), relation, line,
-                         "UNKNOWN", self._requeue_import_source(row))
-                        for e_path, src, relation, line, *row in requeued
-                    ],
+            deleted_ids = {
+                row[0]
+                for row in self.conn.execute(
+                    "SELECT id FROM graph_nodes WHERE path = ?", (path,)
+                ).fetchall()
+            }
+            if deleted_ids:
+                marks = ",".join("?" for _ in deleted_ids)
+                requeued = self.conn.execute(
+                    "SELECT e.path, e.src, e.relation, e.line, "
+                    "n.symbol, n.fqn, n.kind "
+                    "FROM graph_edges e JOIN graph_nodes n ON e.dst = n.id "
+                    f"WHERE n.path = ? AND e.path != ? AND e.src NOT IN ({marks})",
+                    (path, path, *deleted_ids),
+                ).fetchall()
+                if requeued:
+                    self.conn.executemany(
+                        "INSERT INTO pending_edges "
+                        "(path, src, dst_symbol, relation, line, call_kind, "
+                        "import_source, resolution_state) VALUES (?,?,?,?,?,?,?,?) "
+                        "ON CONFLICT(path, src, dst_symbol, relation) DO UPDATE SET "
+                        "line = COALESCE(pending_edges.line, excluded.line), "
+                        "call_kind = excluded.call_kind, "
+                        "import_source = excluded.import_source, "
+                        "resolution_state = 'UNRESOLVED'",
+                        [
+                            (
+                                e_path,
+                                src,
+                                self._requeue_symbol([symbol, fqn, kind]),
+                                relation,
+                                line,
+                                "UNKNOWN",
+                                self._requeue_import_source([symbol, fqn, kind]),
+                                "UNRESOLVED",
+                            )
+                            for e_path, src, relation, line, symbol, fqn, kind
+                            in requeued
+                        ],
+                    )
+                self.conn.execute(
+                    f"DELETE FROM graph_edges WHERE src IN ({marks}) OR dst IN ({marks})",
+                    (*deleted_ids, *deleted_ids),
+                )
+                self.conn.execute(
+                    f"DELETE FROM pending_edges WHERE src IN ({marks})",
+                    tuple(deleted_ids),
                 )
             self.conn.execute("DELETE FROM graph_nodes WHERE path = ?", (path,))
             self.conn.execute("DELETE FROM graph_edges WHERE path = ?", (path,))
@@ -889,80 +922,445 @@ class Database:
         new_mtime_ms: Optional[int] = None,
         new_size: Optional[int] = None,
     ) -> bool:
-        """Atomically rehome a file and all its nodes, edges, and journal in 01 SQLite transaction."""
-        now = int(time.time())
+        """Rehome a file and every identity reference in one transaction.
+
+        Extracted node IDs contain a 12-character hash of the source path.
+        A path move therefore requires more than changing ``graph_nodes.path``:
+        all endpoint references, pending rows, and provider evidence must move
+        to the new namespace together or the graph temporarily points at
+        deleted IDs.
+        """
+        old_raw = os.fspath(old_path)
+        new_raw = os.fspath(new_path)
+
+
+        def path_variant_pairs(source: str, destination: str) -> Tuple[Tuple[str, str], ...]:
+            """Return deterministic source/destination spelling pairs.
+
+            A legacy index can hash either a relative, normalized, absolute,
+            canonical, or slash-normalized path.  Build every corresponding
+            pair before touching the database so later rewrites cannot change
+            the set of source forms being considered.
+            """
+            source_raw = os.fspath(source)
+            destination_raw = os.fspath(destination)
+            source_candidates = (
+                source_raw,
+                os.path.normpath(source_raw),
+                os.path.abspath(source_raw),
+                os.path.realpath(source_raw),
+            )
+            destination_candidates = (
+                destination_raw,
+                os.path.normpath(destination_raw),
+                os.path.abspath(destination_raw),
+                os.path.realpath(destination_raw),
+            )
+            pairs: List[Tuple[str, str]] = []
+            for source_candidate, destination_candidate in zip(
+                source_candidates, destination_candidates
+            ):
+                pairs.append((source_candidate, destination_candidate))
+                pairs.append((
+                    source_candidate.replace(os.sep, "/"),
+                    destination_candidate.replace(os.sep, "/"),
+                ))
+            return tuple(pairs)
+
+        path_pairs = path_variant_pairs(old_raw, new_raw)
+        old_forms = {source for source, _ in path_pairs if source}
+        namespace_targets: Dict[str, str] = {}
+        for old_candidate, new_candidate in path_pairs:
+            old_namespace = hashlib.sha256(old_candidate.encode("utf-8")).hexdigest()[:12]
+            new_namespace = hashlib.sha256(new_candidate.encode("utf-8")).hexdigest()[:12]
+            # Duplicate source spellings (for example raw == normpath) must
+            # keep their first deterministic destination instead of being
+            # overwritten by a later, differently spelled alias.
+            namespace_targets.setdefault(old_namespace, new_namespace)
+
+        namespace_rules: Tuple[Tuple[str, str], ...] = tuple(
+            sorted(
+                (
+                    (f"{prefix}{old_namespace}", f"{prefix}{new_namespace}")
+                    for old_namespace, new_namespace in namespace_targets.items()
+                    for prefix in ("file:", "sym:")
+                ),
+                key=lambda pair: (-len(pair[0]), pair[0]),
+            )
+        )
+
+        path_targets: Dict[str, str] = {}
+        for source, _ in path_pairs:
+            if source:
+                path_targets.setdefault(source, new_raw)
+        path_pattern = re.compile(
+            "|".join(
+                re.escape(source)
+                for source in sorted(path_targets, key=lambda item: (-len(item), item))
+            )
+        )
+
+        def remap_id(value: Any) -> Any:
+            if not isinstance(value, str) or not value:
+                return value
+            for token, replacement in namespace_rules:
+                if value == token:
+                    return replacement
+                if value.startswith(token + ":"):
+                    return replacement + value[len(token):]
+            # Very old indexes used the path itself as the node namespace.
+            for old_form in sorted(old_forms, key=lambda item: (-len(item), item)):
+                for prefix, replacement_prefix in (
+                    ("", new_raw),
+                    ("file:", f"file:{new_raw}"),
+                    ("sym:", f"sym:{new_raw}"),
+                ):
+                    token = prefix + old_form
+                    if value == token:
+                        return replacement_prefix
+                    for separator in (":", "|", "#"):
+                        if value.startswith(token + separator):
+                            return replacement_prefix + value[len(token):]
+            return value
+
+        def rewrite_path(value: Any) -> Any:
+            if isinstance(value, str):
+                return path_targets.get(value, value)
+            return value
+
+        def rewrite_text(value: Any) -> Any:
+            if not isinstance(value, str):
+                return value
+            # A single regex pass matches only the original value.  Sequential
+            # ``str.replace`` calls could feed ``new_raw`` into a shorter old
+            # spelling and rewrite the newly generated destination again.
+            return path_pattern.sub(
+                lambda match: path_targets[match.group(0)],
+                value,
+            )
+
+        def rewrite_reference(value: Any) -> Any:
+            """Rewrite a stored ID/path once, always matching the source."""
+            if not isinstance(value, str) or not value:
+                return value
+            return remap_id(rewrite_text(value))
+
+        def rewrite_json(value: Any) -> Any:
+            if not isinstance(value, str):
+                return value
+            try:
+                decoded = json.loads(value)
+            except (TypeError, ValueError):
+                return rewrite_text(value)
+
+            def visit(item: Any) -> Any:
+                if isinstance(item, str):
+                    return rewrite_reference(item)
+                if isinstance(item, list):
+                    return [visit(entry) for entry in item]
+                if isinstance(item, dict):
+                    return {key: visit(entry) for key, entry in item.items()}
+                return item
+
+            rewritten = visit(decoded)
+            if rewritten == decoded:
+                return value
+            return json.dumps(rewritten, ensure_ascii=False, separators=(",", ":"))
+
+        old_form_values = tuple(sorted(old_forms))
+        path_marks = ",".join("?" for _ in old_form_values)
+
         with self.conn:
-            # 1. Update file_journal
-            if new_sha256 is not None and new_size is not None and new_mtime_ms is not None:
-                self.conn.execute(
-                    "UPDATE file_journal SET path = ?, sha256 = ?, size = ?, mtime_ms = ?, "
-                    "generation = generation + 1, reconciled_at = ? WHERE path = ?",
-                    (new_path, new_sha256, new_size, new_mtime_ms, now, old_path),
-                )
-            else:
-                self.conn.execute(
-                    "UPDATE file_journal SET path = ?, generation = generation + 1, "
-                    "reconciled_at = ? WHERE path = ?",
-                    (new_path, now, old_path),
-                )
+            def distinct_paths(table: str, column: str) -> Set[str]:
+                rows = self.conn.execute(
+                    f"SELECT DISTINCT {column} FROM {table} "
+                    f"WHERE {column} IN ({path_marks})",
+                    old_form_values,
+                ).fetchall()
+                return {str(row[0]) for row in rows if row[0] is not None}
 
-            # 2. Update graph_nodes (triggers will maintain FTS5)
-            self.conn.execute(
-                "UPDATE graph_nodes SET path = ?, "
-                "id = REPLACE(id, ?, ?), "
-                "label = REPLACE(label, ?, ?), "
-                "body = REPLACE(body, ?, ?), "
-                "updated_at = ? WHERE path = ?",
-                (new_path, old_path, new_path, old_path, new_path, old_path, new_path, now, old_path),
-            )
-
-            # 3. Update graph_edges
-            self.conn.execute(
-                "UPDATE graph_edges SET path = ?, "
-                "src = REPLACE(src, ?, ?), "
-                "dst = REPLACE(dst, ?, ?) "
-                "WHERE path = ?",
-                (new_path, old_path, new_path, old_path, new_path, old_path),
-            )
-            self.conn.execute(
-                "UPDATE graph_edges SET src = REPLACE(src, ?, ?) "
-                "WHERE path != ? AND src LIKE ? || '%'",
-                (old_path, new_path, new_path, old_path),
-            )
-            self.conn.execute(
-                "UPDATE graph_edges SET dst = REPLACE(dst, ?, ?) "
-                "WHERE path != ? AND dst LIKE ? || '%'",
-                (old_path, new_path, new_path, old_path),
-            )
-
-            # 4. Update pending_edges
-            self.conn.execute(
-                "UPDATE pending_edges SET path = ?, "
-                "src = REPLACE(src, ?, ?) "
-                "WHERE path = ?",
-                (new_path, old_path, new_path, old_path),
-            )
-            self.conn.execute(
-                "UPDATE pending_edges SET src = REPLACE(src, ?, ?) "
-                "WHERE path != ? AND src LIKE ? || '%'",
-                (old_path, new_path, new_path, old_path),
-            )
-
-            # 5. Domain tables
-            for tbl, col in [
+            stored_paths: Set[str] = set()
+            for table, column in (
+                ("file_journal", "path"),
+                ("graph_nodes", "path"),
+                ("graph_edges", "path"),
+                ("pending_edges", "path"),
+            ):
+                stored_paths.update(distinct_paths(table, column))
+            for table, column in (
                 ("ui_navigation", "file_path"),
                 ("ui_decision_nodes", "file_path"),
                 ("be_execution_steps", "file_path"),
                 ("api_cross_bindings", "fe_file"),
                 ("api_cross_bindings", "be_file"),
-            ]:
+                ("provider_evidence", "path"),
+                ("provider_evidence", "file_path"),
+            ):
+                try:
+                    stored_paths.update(distinct_paths(table, column))
+                except sqlite3.OperationalError:
+                    # Keep compatibility with a partially migrated legacy DB.
+                    continue
+
+            if not stored_paths:
+                stored_paths.add(old_raw)
+            if new_raw not in stored_paths:
+                for table in ("file_journal", "graph_nodes"):
+                    if self.conn.execute(
+                        f"SELECT 1 FROM {table} WHERE path = ? LIMIT 1", (new_raw,)
+                    ).fetchone():
+                        raise ValueError(
+                            f"cannot rehome {old_raw!r}: destination {new_raw!r} "
+                            "already has indexed rows"
+                        )
+
+            node_rows = self.conn.execute(
+                f"SELECT id, path, label, body FROM graph_nodes "
+                f"WHERE path IN ({path_marks})",
+                old_form_values,
+            ).fetchall()
+            all_node_ids = {
+                str(row[0])
+                for row in self.conn.execute("SELECT id FROM graph_nodes").fetchall()
+            }
+
+            edge_rows = self.conn.execute(
+                "SELECT path, src, dst, relation, line FROM graph_edges"
+            ).fetchall()
+            affected_edges = [
+                row
+                for row in edge_rows
+                if row[0] in stored_paths
+                or remap_id(row[1]) != row[1]
+                or remap_id(row[2]) != row[2]
+            ]
+            pending_rows = self.conn.execute(
+                "SELECT path, src, dst_symbol, relation, line, language, "
+                "call_kind, receiver, import_source, resolution_state "
+                "FROM pending_edges"
+            ).fetchall()
+            affected_pending = [
+                row
+                for row in pending_rows
+                if row[0] in stored_paths or remap_id(row[1]) != row[1]
+            ]
+
+            id_map: Dict[str, str] = {}
+            for row in node_rows:
+                old_id = str(row[0])
+                new_id = str(remap_id(old_id))
+                if new_id != old_id:
+                    id_map[old_id] = new_id
+            for row in affected_edges:
+                for old_id in (str(row[1]), str(row[2])):
+                    new_id = str(remap_id(old_id))
+                    if new_id != old_id:
+                        id_map.setdefault(old_id, new_id)
+            for row in affected_pending:
+                old_id = str(row[1])
+                new_id = str(remap_id(old_id))
+                if new_id != old_id:
+                    id_map.setdefault(old_id, new_id)
+
+            old_node_ids = {str(row[0]) for row in node_rows}
+            mapped_ids = set(id_map.values())
+            for mapped_id in mapped_ids:
+                if mapped_id in all_node_ids and mapped_id not in old_node_ids:
+                    raise ValueError(
+                        f"cannot rehome {old_raw!r}: destination node ID "
+                        f"{mapped_id!r} already exists"
+                    )
+            if len(mapped_ids) != len(id_map):
+                raise ValueError(
+                    f"cannot rehome {old_raw!r}: node namespace mapping collides"
+                )
+
+            # Remove affected keys before changing their path/endpoint values;
+            # INSERT OR IGNORE below performs schema-level deduplication.
+            if affected_edges:
+                self.conn.executemany(
+                    "DELETE FROM graph_edges WHERE path = ? AND src = ? "
+                    "AND dst = ? AND relation = ?",
+                    [(row[0], row[1], row[2], row[3]) for row in affected_edges],
+                )
+            if affected_pending:
+                self.conn.executemany(
+                    "DELETE FROM pending_edges WHERE path = ? AND src = ? "
+                    "AND dst_symbol = ? AND relation = ?",
+                    [(row[0], row[1], row[2], row[3]) for row in affected_pending],
+                )
+
+            journal_paths = distinct_paths("file_journal", "path")
+            if len(journal_paths) > 1:
+                raise ValueError(
+                    f"cannot rehome {old_raw!r}: multiple journal aliases exist"
+                )
+            if journal_paths:
+                journal_path = next(iter(journal_paths))
+                if (
+                    new_sha256 is not None
+                    and new_size is not None
+                    and new_mtime_ms is not None
+                ):
+                    self.conn.execute(
+                        "UPDATE file_journal SET path = ?, sha256 = ?, size = ?, "
+                        "mtime_ms = ?, generation = generation + 1, reconciled_at = ? "
+                        "WHERE path = ?",
+                        (
+                            new_raw,
+                            new_sha256,
+                            new_size,
+                            new_mtime_ms,
+                            int(time.time()),
+                            journal_path,
+                        ),
+                    )
+                else:
+                    self.conn.execute(
+                        "UPDATE file_journal SET path = ?, generation = generation + 1, "
+                        "reconciled_at = ? WHERE path = ?",
+                        (new_raw, int(time.time()), journal_path),
+                    )
+
+            # Temporarily free old primary keys, then publish the final IDs
+            # after path/label/body updates.  References are reinserted below.
+            temp_ids: Dict[str, str] = {
+                old_id: f"__sot_rehome__{uuid.uuid4().hex}"
+                for old_id in id_map
+                if old_id in all_node_ids
+            }
+            for old_id, temp_id in temp_ids.items():
+                self.conn.execute(
+                    "UPDATE graph_nodes SET id = ? WHERE id = ?",
+                    (temp_id, old_id),
+                )
+
+            now = int(time.time())
+            for old_id, path_value, label, body in node_rows:
+                current_id = temp_ids.get(str(old_id), str(old_id))
+                final_id = id_map.get(str(old_id), str(old_id))
+                self.conn.execute(
+                    "UPDATE graph_nodes SET id = ?, path = ?, label = ?, body = ?, "
+                    "updated_at = ? WHERE id = ?",
+                    (
+                        final_id,
+                        new_raw,
+                        rewrite_text(label),
+                        rewrite_text(body),
+                        now,
+                        current_id,
+                    ),
+                )
+
+            if affected_edges:
+                self.conn.executemany(
+                    "INSERT OR IGNORE INTO graph_edges(path, src, dst, relation, line) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    [
+                        (
+                            rewrite_path(row[0]),
+                            remap_id(row[1]),
+                            remap_id(row[2]),
+                            row[3],
+                            row[4],
+                        )
+                        for row in affected_edges
+                    ],
+                )
+            if affected_pending:
+                self.conn.executemany(
+                    "INSERT OR IGNORE INTO pending_edges "
+                    "(path, src, dst_symbol, relation, line, language, call_kind, "
+                    "receiver, import_source, resolution_state) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        (
+                            rewrite_path(row[0]),
+                            remap_id(row[1]),
+                            row[2],
+                            row[3],
+                            row[4],
+                            row[5],
+                            row[6],
+                            row[7],
+                            rewrite_text(row[8]),
+                            row[9],
+                        )
+                        for row in affected_pending
+                    ],
+                )
+
+            for table, column in (
+                ("ui_navigation", "file_path"),
+                ("ui_decision_nodes", "file_path"),
+                ("be_execution_steps", "file_path"),
+                ("api_cross_bindings", "fe_file"),
+                ("api_cross_bindings", "be_file"),
+                ("provider_evidence", "path"),
+                ("provider_evidence", "file_path"),
+            ):
                 try:
                     self.conn.execute(
-                        f"UPDATE {tbl} SET {col} = ? WHERE {col} = ?",
-                        (new_path, old_path),
+                        f"UPDATE {table} SET {column} = ? "
+                        f"WHERE {column} IN ({path_marks})",
+                        (new_raw, *old_form_values),
                     )
-                except Exception:
-                    pass
+                except sqlite3.OperationalError:
+                    continue
+
+            try:
+                evidence_rows = self.conn.execute(
+                    "SELECT id, symbol, src_symbol, target_symbol, dst_symbol, "
+                    "metadata_json FROM provider_evidence"
+                ).fetchall()
+                for evidence_id, symbol, src_symbol, target_symbol, dst_symbol, metadata in evidence_rows:
+                    values = {
+                        "symbol": rewrite_reference(symbol),
+                        "src_symbol": rewrite_reference(src_symbol),
+                        "target_symbol": rewrite_reference(target_symbol),
+                        "dst_symbol": rewrite_reference(dst_symbol),
+                        "metadata_json": rewrite_json(metadata),
+                    }
+                    if any(
+                        values[column] != original
+                        for column, original in (
+                            ("symbol", symbol),
+                            ("src_symbol", src_symbol),
+                            ("target_symbol", target_symbol),
+                            ("dst_symbol", dst_symbol),
+                            ("metadata_json", metadata),
+                        )
+                    ):
+                        self.conn.execute(
+                            "UPDATE provider_evidence SET symbol = ?, src_symbol = ?, "
+                            "target_symbol = ?, dst_symbol = ?, metadata_json = ? "
+                            "WHERE id = ?",
+                            (
+                                values["symbol"],
+                                values["src_symbol"],
+                                values["target_symbol"],
+                                values["dst_symbol"],
+                                values["metadata_json"],
+                                evidence_id,
+                            ),
+                        )
+            except sqlite3.OperationalError:
+                pass
+
+            try:
+                community_rows = self.conn.execute(
+                    "SELECT community_id, nodes_json FROM graph_communities"
+                ).fetchall()
+                for community_id, nodes_json in community_rows:
+                    rewritten = rewrite_json(nodes_json)
+                    if rewritten != nodes_json:
+                        self.conn.execute(
+                            "UPDATE graph_communities SET nodes_json = ? "
+                            "WHERE community_id = ?",
+                            (rewritten, community_id),
+                        )
+            except sqlite3.OperationalError:
+                pass
         return True
 
     def update_node_path(self, node_id: str, old_path: str, new_path: str) -> None:
