@@ -1,0 +1,27 @@
+{
+  "timestamp": "2026-08-28T13:30:00Z",
+  "environment": {
+    "arch": "arm64",
+    "os": "darwin",
+    "python": "3.14.6"
+  },
+  "metrics": {
+    "fts_search_p50_ms": 1.128,
+    "fts_search_p95_ms": 2.433,
+    "explore_depth_1_p50_ms": 0.028,
+    "explore_depth_1_p95_ms": 0.108,
+    "explore_depth_2_p50_ms": 0.201,
+    "explore_depth_2_p95_ms": 0.426,
+    "pack_context_p50_ms": 18.815,
+    "pack_context_p95_ms": 270.744,
+    "monorepo_reconcile_150_files_workers_2_p50_ms": 322.243,
+    "federated_fallback_explore_p50_ms": 0.004
+  },
+  "context_reduction": {
+    "gate_threshold_percent": 60.0,
+    "min_reduction_percent": 84.8,
+    "mean_reduction_percent": 89.1,
+    "max_reduction_percent": 93.5,
+    "gate_passed": true
+  }
+}

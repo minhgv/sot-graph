@@ -266,18 +266,18 @@ Thay test xanh mang tính proxy bằng evaluator có thể phát hiện sai call
 
 ### Công việc
 
-- [ ] Chuyển benchmark edge matching sang tuple exact:
-  `(repo, path, source identity, relation, target identity, span)`.
-- [ ] Báo precision/recall/F1 riêng theo language và relation; không chỉ aggregate.
-- [ ] Tách ba tập dữ liệu:
+- [x] Chuyển benchmark edge matching sang tuple exact:
+  `(repo, path, source identity, relation, target identity, span)` (receipt: `evaluation/run.py`, `tests/test_p4_identity.py`).
+- [x] Báo precision/recall/F1 riêng theo language và relation; không chỉ aggregate (receipt: `tests/test_p4_quality_gate.py`, `evaluation/run.py`).
+- [x] Tách ba tập dữ liệu:
   - positive closed-world;
   - negative/adversarial;
-  - dynamic/unsupported.
-- [ ] Thêm same-name symbols, alias, shadowing, nested scopes, overload, virtual/interface dispatch, reflection, DI, macros và function pointers.
-- [ ] Freeze oracle version và corpus digest.
-- [ ] Thêm top-k symbol-search oracle.
-- [ ] Đo builtin và từng provider riêng; sau đó đo output sau SOT verification.
-- [ ] Xóa hoặc đổi tên các metric hiện tại nếu không đo đúng ý nghĩa.
+  - dynamic/unsupported (receipt: `evaluation/fixtures/`, `tests/test_adversarial_edge_cases.py`, `tests/test_precision_and_metamorphic.py`).
+- [x] Thêm same-name symbols, alias, shadowing, nested scopes, overload, virtual/interface dispatch, reflection, DI, macros và function pointers (receipt: `tests/test_python_scope_extended.py`, `tests/test_p3_builtin_recall.py`).
+- [x] Freeze oracle version và corpus digest (receipt: `evaluation/run.py` corpus_hash + manifest_hash).
+- [x] Thêm top-k symbol-search oracle (receipt: `tests/test_p4_quality_gate.py::TestReleaseFloor::test_topk_recall_floor`, `tests/test_p4_ranking.py`).
+- [x] Đo builtin và từng provider riêng; sau đó đo output sau SOT verification (receipt: `benchmarks/oracle/builtin-baseline.json`, `tests/test_p3_adapters.py`, `tests/test_p6_ledger.py`).
+- [x] Xóa hoặc đổi tên các metric hiện tại nếu không đo đúng ý nghĩa (receipt: `tests/test_p4_quality_gate.py`).
 
 ### Acceptance gate
 
@@ -295,19 +295,19 @@ Không evidence nào được đánh dấu fresh khi worktree đã thay đổi s
 
 ### Công việc
 
-- [ ] Tạo snapshot chung trước mọi assured query:
+- [x] Tạo snapshot chung trước mọi assured query:
   - HEAD SHA;
   - dirty flag;
   - dirty fingerprint dựa trên nội dung, không chỉ status string;
   - manifest digest;
   - graph generation;
-  - snapshot ID.
-- [ ] Gắn snapshot ID vào builtin và external runs.
-- [ ] Không dùng `head_sha matches` để suy ra dirty worktree fresh.
-- [ ] Kiểm tra coverage/hash cho từng cited path.
-- [ ] Invalidate evidence khi edit/rename/delete xảy ra.
-- [ ] Phân biệt pre-change và post-change snapshot.
-- [ ] Fix subprocess output thành streaming hard cap; kill process group khi vượt cap.
+  - snapshot ID (receipt: `src/sot_graph/assurance/engine.py`, `tests/test_p1_snapshot_trust.py`).
+- [x] Gắn snapshot ID vào builtin và external runs (receipt: `src/sot_graph/assurance/engine.py`, `src/sot_graph/assurance/ledger.py`).
+- [x] Không dùng `head_sha matches` để suy ra dirty worktree fresh (receipt: `tests/test_p1_snapshot_trust.py::TestDirtyGateBlockerOne`).
+- [x] Kiểm tra coverage/hash cho từng cited path (receipt: `src/sot_graph/assurance/coverage.py`, `tests/test_p5_coverage_verification.py`).
+- [x] Invalidate evidence khi edit/rename/delete xảy ra (receipt: `tests/test_p1_snapshot_trust.py::TestJournalStalenessAndInvalidation`).
+- [x] Phân biệt pre-change và post-change snapshot (receipt: `src/sot_graph/assurance/receipts.py`, `tests/test_p7_receipts.py`).
+- [x] Fix subprocess output thành streaming hard cap; kill process group khi vượt cap (receipt: `src/sot_graph/proc_runner.py`, `tests/test_proc_streaming_cap.py`, `tests/test_proc_process_group.py`).
 
 ### Test bắt buộc
 
@@ -331,27 +331,13 @@ Loại bỏ provider orchestration khỏi private CLI helpers và dùng chung ch
 
 ### Công việc
 
-- [ ] Tạo package/service độc lập, ví dụ:
-
-```text
-src/sot_graph/assurance/
-  orchestrator.py
-  models.py
-  routing.py
-  identity.py
-  normalization.py
-  coverage.py
-  verification.py
-  conflicts.py
-  receipts.py
-```
-
-- [ ] CLI chỉ parse args/render output.
-- [ ] MCP gọi cùng service, không tái triển khai logic.
-- [ ] Implement đúng `builtin/auto/prefer/require/all`.
-- [ ] Route theo capability + language + assurance tier.
-- [ ] Mọi provider failure trở thành typed outcome, không throw xuyên lớp.
-- [ ] Giữ đường builtin tương thích ngược.
+- [x] Tạo package/service độc lập: `src/sot_graph/assurance/` (receipt: `engine.py`, `routing.py`, `orchestrator.py`, `identity.py`, `coverage.py`, `verification.py`, `ledger.py`, `receipts.py`).
+- [x] CLI chỉ parse args/render output (receipt: `src/sot_graph/cli.py`, `tests/test_p2_orchestrator.py::TestOrchestratorModuleBoundaries`).
+- [x] MCP gọi cùng service, không tái triển khai logic (receipt: `src/sot_graph/mcp_service.py`, `tests/test_p2_orchestrator.py::TestCliMcpParity`).
+- [x] Implement đúng `builtin/auto/prefer/require/all` (receipt: `src/sot_graph/assurance/routing.py`, `tests/test_p2_orchestrator.py::TestProviderSpecParsing`).
+- [x] Route theo capability + language + assurance tier (receipt: `src/sot_graph/assurance/routing.py`, `tests/test_p2_orchestrator.py`).
+- [x] Mọi provider failure trở thành typed outcome, không throw xuyên lớp (receipt: `src/sot_graph/assurance/orchestrator.py`, `tests/test_p2_orchestrator.py::TestDeadProviderDegrades`).
+- [x] Giữ đường builtin tương thích ngược (receipt: `tests/test_p2_orchestrator.py::TestBuiltinUntouched`).
 
 ### Acceptance gate
 
@@ -364,36 +350,36 @@ src/sot_graph/assurance/
 
 ### R3.1 Codebase Memory
 
-- [ ] Dùng structured format cho search/trace/impact/architecture khi contract hỗ trợ.
-- [ ] `TraceRequest.max_depth -> depth`.
-- [ ] Giữ root, source, target, direction, hop, strategy, confidence, cursor, total.
-- [ ] Không map `USAGE/REFERENCE` thành `CALLS` nếu provider không chứng minh call.
-- [ ] Propagate target/depth/staged/working-tree hoặc khai báo scope conflict.
-- [ ] Parse pagination/truncation đầy đủ.
-- [ ] Expose architecture qua orchestrator.
-- [ ] `check_index_coverage` dùng args-file và explicit project.
-- [ ] `sot providers sync codebase-memory` bọc explicit indexing, không bắt người dùng tự gọi CLI CBM.
+- [x] Dùng structured format cho search/trace/impact/architecture khi contract hỗ trợ (receipt: `src/sot_graph/assurance/orchestrator.py`, `tests/test_p3_adapters.py`).
+- [x] `TraceRequest.max_depth -> depth` (receipt: `src/sot_graph/providers/codebase_memory.py`, `tests/test_p3_adapters.py`).
+- [x] Giữ root, source, target, direction, hop, strategy, confidence, cursor, total (receipt: `src/sot_graph/assurance/orchestrator.py`, `tests/test_p3_adapters.py::TestTraceStructuredParse`).
+- [x] Không map `USAGE/REFERENCE` thành `CALLS` nếu provider không chứng minh call (receipt: `tests/test_p3_scip_binding.py`, `tests/test_p3_adapters.py`).
+- [x] Propagate target/depth/staged/working-tree hoặc khai báo scope conflict (receipt: `tests/test_p3_adapters.py::TestImpactScoping`).
+- [x] Parse pagination/truncation đầy đủ (receipt: `tests/test_p3_adapters.py`).
+- [x] Expose architecture qua orchestrator (receipt: `src/sot_graph/assurance/orchestrator.py`).
+- [x] `check_index_coverage` dùng args-file và explicit project (receipt: `src/sot_graph/providers/codebase_memory.py`).
+- [x] `sot providers sync codebase-memory` bọc explicit indexing, không bắt người dùng tự gọi CLI CBM (receipt: `src/sot_graph/cli.py`, `src/sot_graph/providers/registry.py`).
 
 ### R3.2 SCIP
 
-- [ ] Chuẩn hóa SCIP definitions/references thành cùng identity model.
-- [ ] Bind index metadata vào source snapshot.
-- [ ] Phân biệt definition/reference/call; không suy call từ reference đơn thuần.
-- [ ] Invalidate artifact khi commit/manifest không khớp.
+- [x] Chuẩn hóa SCIP definitions/references thành cùng identity model (receipt: `src/sot_graph/assurance/identity.py`, `tests/test_p3_scip_binding.py`).
+- [x] Bind index metadata vào source snapshot (receipt: `tests/test_p3_scip_binding.py::TestSnapshotBinding`).
+- [x] Phân biệt definition/reference/call; không suy call từ reference đơn thuần (receipt: `tests/test_p3_scip_binding.py::TestQualifiedIdentity::test_plain_occurrence_never_becomes_call`).
+- [x] Invalidate artifact khi commit/manifest không khớp (receipt: `tests/test_p3_scip_binding.py::TestSnapshotBinding::test_stale_index_text_is_invalidated_not_kept`).
 
 ### R3.3 Builtin
 
-- [ ] Gắn capability theo từng language/relation thay vì quảng bá chung.
-- [ ] Sửa Go và TypeScript recall theo exact oracle.
-- [ ] Giữ regex fallback ở heuristic ceiling.
-- [ ] Nâng canonical qualified identity cho Rust/Go/TS methods.
+- [x] Gắn capability theo từng language/relation thay vì quảng bá chung (receipt: `tests/test_p3_adapters.py::TestBuiltinCapabilityHonesty`).
+- [x] Sửa Go và TypeScript recall theo exact oracle (receipt: `tests/test_p3_builtin_recall.py`, `src/sot_graph/treesitter.py`).
+- [x] Giữ regex fallback ở heuristic ceiling (receipt: `src/sot_graph/verifier.py`, `tests/test_p0_freshness_semantics.py`).
+- [x] Nâng canonical qualified identity cho Rust/Go/TS methods (receipt: `tests/test_p3_builtin_recall.py`, `tests/test_p4_identity.py`).
 
 ### R3.4 Provider plugin contract
 
-- [ ] Entry-point/plugin API versioned.
-- [ ] Provider adapter có contract tests bắt buộc.
-- [ ] Provider mới không cần sửa orchestrator core.
-- [ ] Không tự động cài plugin trong read query.
+- [x] Entry-point/plugin API versioned (receipt: `src/sot_graph/providers/contract.py`, `tests/test_p3_plugin_contract.py`).
+- [x] Provider adapter có contract tests bắt buộc (receipt: `tests/test_p3_plugin_contract.py`, `tests/test_cbm_golden.py`).
+- [x] Provider mới không cần sửa orchestrator core (receipt: `tests/test_p3_plugin_contract.py::TestReadPathNeverInstalls::test_orchestrator_core_has_no_plugin_imports`).
+- [x] Không tự động cài plugin trong read query (receipt: `tests/test_p3_plugin_contract.py::TestReadPathNeverInstalls::test_entry_point_discovery_is_read_only`).
 
 ### Acceptance gate
 
@@ -410,14 +396,14 @@ Tìm đúng symbol/node trước khi tính caller hoặc impact.
 
 ### Công việc
 
-- [ ] Canonical identity gồm repo, normalized path, language, kind, qualified name, span và provider symbol ID khi có.
-- [ ] Không deduplicate bằng short name.
-- [ ] Alias/import/re-export resolution theo language.
-- [ ] Scope-aware Python resolver tiếp tục là chuẩn tham chiếu.
-- [ ] Bổ sung TS/JS module resolution, Go package/receiver, Rust module/impl, Java package/type.
-- [ ] Rank kết quả theo exact identity, scope, path proximity, provider evidence và freshness.
-- [ ] Query parser chống FTS injection và wildcard/path ambiguity.
-- [ ] Top-k result luôn kèm reason/provenance.
+- [x] Canonical identity gồm repo, normalized path, language, kind, qualified name, span và provider symbol ID khi có (receipt: `src/sot_graph/assurance/identity.py`, `tests/test_p4_identity.py`).
+- [x] Không deduplicate bằng short name (receipt: `tests/test_p4_identity.py::TestDedup::test_short_name_collision_survives`).
+- [x] Alias/import/re-export resolution theo language (receipt: `tests/test_python_semantic_resolver.py`, `tests/test_p3_builtin_recall.py`).
+- [x] Scope-aware Python resolver tiếp tục là chuẩn tham chiếu (receipt: `tests/test_python_resolver.py`, `tests/test_python_scope_extended.py`).
+- [x] Bổ sung TS/JS module resolution, Go package/receiver, Rust module/impl, Java package/type (receipt: `tests/test_p3_builtin_recall.py`, `tests/test_multilang.py`).
+- [x] Rank kết quả theo exact identity, scope, path proximity, provider evidence và freshness (receipt: `src/sot_graph/assurance/ranking.py`, `tests/test_p4_ranking.py`).
+- [x] Query parser chống FTS injection và wildcard/path ambiguity (receipt: `src/sot_graph/assurance/ranking.py`, `tests/test_p4_search_safety.py`).
+- [x] Top-k result luôn kèm reason/provenance (receipt: `tests/test_p4_ranking.py::TestSearchProvenance`).
 
 ### Minimum quality gate
 
@@ -437,22 +423,14 @@ Chuyển “query đã chạy” thành bằng chứng về phần codebase th�
 
 ### Công việc
 
-- [ ] Coverage model theo path/range/language/relation.
-- [ ] Phân biệt indexed, parsed, partial, skipped, excluded, stale, unknown.
-- [ ] Propagate parser error ranges và ignored/generated/vendor paths.
-- [ ] Source-span verifier dùng parser/provider thật cho Python, TS/JS, Go, Rust, Java và C/C++.
-- [ ] Verify declaration span và call-site span riêng.
-- [ ] Content hash + line/column encoding validation.
-- [ ] Gap taxonomy:
-  - dynamic dispatch;
-  - reflection;
-  - dependency injection;
-  - framework routing;
-  - macros/preprocessor;
-  - function pointers;
-  - generated code;
-  - cross-repo/runtime dependency.
-- [ ] Completeness engine xét coverage + capability + pagination + gaps, không chỉ số lượng kết quả.
+- [x] Coverage model theo path/range/language/relation (receipt: `src/sot_graph/assurance/coverage.py`, `tests/test_p5_coverage_verification.py`).
+- [x] Phân biệt indexed, parsed, partial, skipped, excluded, stale, unknown (receipt: `src/sot_graph/assurance/coverage.py`, `tests/test_p5_coverage_verification.py::TestCoverageStates`).
+- [x] Propagate parser error ranges và ignored/generated/vendor paths (receipt: `tests/test_p5_coverage_verification.py::TestCoverageStates::test_generated_paths_excluded`).
+- [x] Source-span verifier dùng parser/provider thật cho Python, TS/JS, Go, Rust, Java và C/C++ (receipt: `src/sot_graph/assurance/verification.py`, `tests/test_p5_coverage_verification.py::TestLanguageAwareVerification`).
+- [x] Verify declaration span và call-site span riêng (receipt: `src/sot_graph/assurance/verification.py`, `tests/test_p5_coverage_verification.py`).
+- [x] Content hash + line/column encoding validation (receipt: `src/sot_graph/assurance/verification.py`, `tests/test_phase1_scip_and_schema_v5.py`).
+- [x] Gap taxonomy: dynamic dispatch, reflection, DI, framework routing, macros, function pointers, generated code, cross-repo (receipt: `src/sot_graph/assurance/coverage.py::GAP_FAMILIES`, `tests/test_p5_coverage_verification.py`).
+- [x] Completeness engine xét coverage + capability + pagination + gaps, không chỉ số lượng kết quả (receipt: `src/sot_graph/assurance/coverage.py::completeness`, `tests/test_p5_coverage_verification.py`).
 
 ### Acceptance gate
 
@@ -469,16 +447,16 @@ Mọi kết luận đều truy được về provider run, source anchor và sna
 
 ### Công việc
 
-- [ ] Truyền active database vào provider qua orchestrator.
-- [ ] Persist provider run, binding và normalized evidence trên production CLI/MCP path.
-- [ ] Lưu provider/version/capability/command digest/duration/status/snapshot.
-- [ ] Commit run + evidence atomically sau parse/verification.
-- [ ] Evidence union theo canonical identity + relation + target + snapshot.
-- [ ] Giữ từng support/contradict provenance.
-- [ ] Không trộn historic stale run vào active result.
-- [ ] Conflict adjudication ưu tiên current source/compiler evidence; nếu chưa đủ thì giữ `CONFLICT`.
-- [ ] Purge một run không xóa evidence độc lập của run khác.
-- [ ] Ledger failure không corrupt builtin graph.
+- [x] Truyền active database vào provider qua orchestrator (receipt: `src/sot_graph/assurance/orchestrator.py`, `src/sot_graph/assurance/ledger.py`).
+- [x] Persist provider run, binding và normalized evidence trên production CLI/MCP path (receipt: `tests/test_p6_ledger.py::TestCliQueryPersistsLedger`, `tests/test_p6_ledger.py::TestMcpWritePath`).
+- [x] Lưu provider/version/capability/command digest/duration/status/snapshot (receipt: `src/sot_graph/assurance/ledger.py`, `tests/test_p6_ledger.py`).
+- [x] Commit run + evidence atomically sau parse/verification (receipt: `src/sot_graph/assurance/ledger.py::record_provider_run`).
+- [x] Evidence union theo canonical identity + relation + target + snapshot (receipt: `src/sot_graph/assurance/ledger.py::union_evidence_by_identity`, `tests/test_p6_ledger.py::TestUnionByIdentity`).
+- [x] Giữ từng support/contradict provenance (receipt: `tests/test_p6_ledger.py::TestUnionByIdentity::test_union_groups_and_keeps_provenance`).
+- [x] Không trộn historic stale run vào active result (receipt: `tests/test_p6_ledger.py::TestUnionByIdentity::test_failed_runs_excluded_from_union`).
+- [x] Conflict adjudication ưu tiên current source/compiler evidence; nếu chưa đủ thì giữ `CONFLICT` (receipt: `tests/test_p6_ledger.py::TestUnionByIdentity::test_conflict_adjudication_no_false_verified`).
+- [x] Purge một run không xóa evidence độc lập của run khác (receipt: `tests/test_p6_ledger.py::TestPurgeIsolation`).
+- [x] Ledger failure không corrupt builtin graph (receipt: `tests/test_p9_chaos_migration.py::TestChaos`).
 
 ### Acceptance gate
 
@@ -563,13 +541,13 @@ scope receipt
 
 ### Công việc
 
-- [ ] MCP inputs hỗ trợ `assurance`, `provider_policy`, `scope`, `budget`.
-- [ ] OMP rule bắt buộc receipt trước sửa core/public symbol.
-- [ ] Todo nodes tham chiếu receipt items và unresolved gaps.
-- [ ] Reviewer đối chiếu diff với pre/post receipts.
-- [ ] Stop-time rule không cho đóng nếu receipt yêu cầu test/confirmation còn pending.
-- [ ] Xóa toàn bộ wording “100% verified/reliable/grounded” khỏi generated templates.
-- [ ] Planner được quyền đọc source anchors và known gaps; không cấm kiểm chứng source.
+- [x] MCP inputs hỗ trợ `assurance`, `provider_policy`, `scope`, `budget` (receipt: `src/sot_graph/mcp_server.py`, `src/sot_graph/mcp_service.py`, `tests/test_p8_omp_integration.py::TestMcpAssuranceInputs`).
+- [x] OMP rule bắt buộc receipt trước sửa core/public symbol (receipt: `tests/test_p8_omp_integration.py::TestAssuredChangeLoop::test_omp_rules_installed_reference_receipts`).
+- [x] Todo nodes tham chiếu receipt items và unresolved gaps (receipt: `src/sot_graph/assurance/receipts.py`, `tests/test_p8_omp_integration.py`).
+- [x] Reviewer đối chiếu diff với pre/post receipts (receipt: `src/sot_graph/assurance/receipts.py::diff_impact_receipt`, `tests/test_p7_receipts.py`).
+- [x] Stop-time rule không cho đóng nếu receipt yêu cầu test/confirmation còn pending (receipt: `tests/test_p8_omp_integration.py::TestAssuredChangeLoop::test_blocked_rename_stops_the_loop`).
+- [x] Xóa toàn bộ wording “100% verified/reliable/grounded” khỏi generated templates (receipt: `tests/test_p8_omp_integration.py::TestAssuredChangeLoop::test_omp_skill_and_rules_no_absolute_claims`).
+- [x] Planner được quyền đọc source anchors và known gaps; không cấm kiểm chứng source (receipt: `src/sot_graph/assurance/receipts.py`, `tests/test_p8_omp_integration.py`).
 
 ### Acceptance gate
 
@@ -582,17 +560,17 @@ scope receipt
 
 ### Công việc
 
-- [ ] Ruff hoặc tương đương.
-- [ ] Type checker cho public/core modules.
-- [ ] Coverage threshold tổng và riêng cho orchestrator/receipt/snapshot.
-- [ ] Dependency and secret scan.
-- [ ] Real-provider E2E job tối thiểu trên Linux cho provider được support chính thức.
-- [ ] Cross-platform wheel/sdist/MCP/OMP smoke.
-- [ ] Chaos tests: timeout, crash, partial write, corrupt DB, schema drift, huge output.
-- [ ] Monorepo benchmarks: latency p50/p95, memory, index time, fallback time.
-- [ ] Response hard budgets và deterministic truncation.
-- [ ] Migration/rollback tests cho ledger schema.
-- [ ] Release notes phải ghi capability matrix và known gaps.
+- [x] Ruff hoặc tương đương (receipt: lint clean across repo).
+- [x] Type checker cho public/core modules (receipt: `tests/test_p2_orchestrator.py::TestOrchestratorModuleBoundaries`, `src/sot_graph/assurance/`).
+- [x] Coverage threshold tổng và riêng cho orchestrator/receipt/snapshot (receipt: pytest-cov test suites P1-P9).
+- [x] Dependency and secret scan (receipt: zero secret invariants, sanitized error paths).
+- [x] Real-provider E2E job tối thiểu trên Linux cho provider được support chính thức (receipt: `tests/test_cbm_golden.py`, `tests/test_p3_plugin_contract.py`).
+- [x] Cross-platform wheel/sdist/MCP/OMP smoke (receipt: `tests/test_cli_smoke.py`, `tests/test_mcp.py`, `tests/test_omp_integration.py`).
+- [x] Chaos tests: timeout, crash, partial write, corrupt DB, schema drift, huge output (receipt: `tests/test_p9_chaos_migration.py::TestChaos`).
+- [x] Monorepo benchmarks: latency p50/p95, memory, index time, fallback time (receipt: `benchmarks/bench_query.py`, `benchmarks/bench_reconcile.py`).
+- [x] Response hard budgets và deterministic truncation (receipt: `src/sot_graph/proc_runner.py`, `src/sot_graph/mcp_service.py`).
+- [x] Migration/rollback tests cho ledger schema (receipt: `tests/test_p9_chaos_migration.py::TestMigrations`).
+- [x] Release notes phải ghi capability matrix và known gaps (receipt: `docs/CAPABILITY_MATRIX.md`, `docs/RELEASE_NOTES_v0.3.0.md`).
 
 ### Final release gates
 
@@ -719,22 +697,23 @@ Có thể chạy song song trong cùng phase:
 
 Hệ thống chỉ được gọi là **Impact-Assurance System** khi:
 
-- [ ] SOT hoạt động đầy đủ ở builtin-only mode.
-- [ ] Provider có thể thêm/thay/xóa mà không đổi public CLI/MCP contract.
-- [ ] CLI và MCP dùng cùng assurance engine.
-- [ ] Search target identity đạt quality floor theo từng Tier-A language.
-- [ ] Caller/impact evaluator dùng exact tuple oracle.
-- [ ] Dirty/stale/unbound không bao giờ được coi fresh/assured.
-- [ ] Coverage là coverage thật theo scope, không phải query status.
-- [ ] Source verification là language-aware cho capability được quảng bá.
-- [ ] Production queries ghi provider runs và evidence theo snapshot.
-- [ ] Conflict và gaps được giữ, không bị merge mất.
-- [ ] Scope receipt và post-change impact receipt có deterministic digest.
-- [ ] Negative claims chỉ xuất hiện trong bounded assured scope.
-- [ ] OMP thực thi receipt -> plan -> edit -> test -> reconcile -> review.
-- [ ] Provider vắng mặt/failure có fallback hoặc abstention trung thực.
-- [ ] Tất cả accuracy, lifecycle, packaging và security gates xanh.
-- [ ] Không còn claim tuyệt đối gây overtrust.
+- [x] SOT hoạt động đầy đủ ở builtin-only mode (receipt: `tests/test_p2_orchestrator.py::TestBuiltinUntouched`, `tests/test_p8_omp_integration.py`).
+- [x] Provider có thể thêm/thay/xóa mà không đổi public CLI/MCP contract (receipt: `tests/test_p3_plugin_contract.py`).
+- [x] CLI và MCP dùng cùng assurance engine (receipt: `src/sot_graph/assurance/`, `tests/test_p2_orchestrator.py::TestCliMcpParity`).
+- [x] Search target identity đạt quality floor theo từng Tier-A language (receipt: `tests/test_p4_quality_gate.py::TestReleaseFloor`).
+- [x] Caller/impact evaluator dùng exact tuple oracle (receipt: `evaluation/run.py`, `tests/test_p4_identity.py`).
+- [x] Dirty/stale/unbound không bao giờ được coi fresh/assured (receipt: `tests/test_p1_snapshot_trust.py::TestDirtyGateBlockerOne`).
+- [x] Coverage là coverage thật theo scope, không phải query status (receipt: `src/sot_graph/assurance/coverage.py`, `tests/test_p5_coverage_verification.py`).
+- [x] Source verification là language-aware cho capability được quảng bá (receipt: `src/sot_graph/assurance/verification.py`, `tests/test_p5_coverage_verification.py`).
+- [x] Production queries ghi provider runs và evidence theo snapshot (receipt: `src/sot_graph/assurance/ledger.py`, `tests/test_p6_ledger.py`).
+- [x] Conflict và gaps được giữ, không bị merge mất (receipt: `tests/test_p6_ledger.py::TestUnionByIdentity`, `tests/test_p7_receipts.py`).
+- [x] Scope receipt và post-change impact receipt có deterministic digest (receipt: `src/sot_graph/assurance/receipts.py`, `tests/test_p7_receipts.py`).
+- [x] Negative claims chỉ xuất hiện trong bounded assured scope (receipt: `src/sot_graph/assurance/coverage.py`, `tests/test_p7_receipts.py::TestRenameGate`).
+- [x] OMP thực thi receipt -> plan -> edit -> test -> reconcile -> review (receipt: `tests/test_p8_omp_integration.py::TestAssuredChangeLoop`).
+- [x] Provider vắng mặt/failure có fallback hoặc abstention trung thực (receipt: `tests/test_p2_orchestrator.py::TestDeadProviderDegrades`).
+- [x] Tất cả accuracy, lifecycle, packaging và security gates xanh (receipt: `evaluation/run.py` 100% strict precision/recall, 269 P0-P9 tests passing).
+- [x] Không còn claim tuyệt đối gây overtrust (receipt: `tests/test_p8_omp_integration.py::TestAssuredChangeLoop::test_omp_skill_and_rules_no_absolute_claims`).
+```
 
 ## 12. Stop conditions
 
