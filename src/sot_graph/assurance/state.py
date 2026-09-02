@@ -1,4 +1,4 @@
-"""sot_graph.assurance.state - canonical assurance state machine (P0).
+"""sot_graph.assurance.state - canonical assurance state machine (P0 / P1).
 
 The ONE decision function behind every assurance surface (CLI receipts,
 MCP tools, tests). No surface computes its own status vocabulary: facts
@@ -6,19 +6,25 @@ go in, the canonical status + reason codes come out. Fail-closed: any
 missing or below-threshold fact downgrades the verdict - there is no
 default path that upgrades toward ASSURED_WITHIN_SCOPE.
 
-Contract 1 (plan P0 trust-chain, 2026-08-28). Evaluation order is
-first-hit wins; each branch carries exactly one reason code.
+Contract 1 (plan P0/P1 trust-chain, 2026-08-28):
+Gathers all active failure reasons and reduces to the highest-severity
+status via the canonical severity lattice:
+  ABSTAINED > UNVERIFIABLE > STALE > CONFLICTED > PARTIAL > ASSURED_WITHIN_SCOPE
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import Any, Dict, List, Optional
+__all__ = [
+    "CANONICAL_STATUSES",
+    "CLAIM_PROFILES",
+    "STATUS_SEVERITY",
+    "AssuranceFacts",
+    "decide",
+]
 
-__all__ = ["CANONICAL_STATUSES", "AssuranceFacts", "decide"]
-
-#: Canonical receipt-status vocabulary (Contract 1). ``ASSURED`` alone no
-#: longer exists; every status emitted by receipts must be a member.
+#: Canonical receipt-status vocabulary (Contract 1).
 CANONICAL_STATUSES = (
     "ASSURED_WITHIN_SCOPE",
     "PARTIAL",
@@ -27,6 +33,23 @@ CANONICAL_STATUSES = (
     "UNVERIFIABLE",
     "ABSTAINED",
 )
+
+#: Claim profiles
+CLAIM_PROFILES = (
+    "presence",
+    "absence",
+    "exhaustive",
+)
+
+#: Status severity ranking (highest to lowest).
+STATUS_SEVERITY: Dict[str, int] = {
+    "ABSTAINED": 50,
+    "UNVERIFIABLE": 40,
+    "STALE": 30,
+    "CONFLICTED": 20,
+    "PARTIAL": 10,
+    "ASSURED_WITHIN_SCOPE": 0,
+}
 
 
 @dataclass(frozen=True)
@@ -40,7 +63,7 @@ class AssuranceFacts:
     stale_files: List[str] = field(default_factory=list)
     #: coverage basis == "measured"
     coverage_measured: bool = False
-    coverage_fraction: float | None = None
+    coverage_fraction: Optional[float] = None
     coverage_floor: float = 0.9
     parser_failures: int = 0
     #: evidence ledger entries below SUPPORTED
@@ -54,52 +77,90 @@ class AssuranceFacts:
     absence_claim: bool = True
     #: rename/delete gate
     gate_blocked: bool = False
+    #: dynamic constructs that could not be statically resolved
+    dynamic_dispatch_unresolved: bool = False
+    #: Claim profile: "presence" | "absence" | "exhaustive"
+    claim_profile: str = "absence"
 
 
-def decide(facts: AssuranceFacts) -> dict:
-    """Pure decision over :class:`AssuranceFacts` (Contract 1 order).
+def decide(facts: AssuranceFacts) -> Dict[str, Any]:
+    """Pure decision over :class:`AssuranceFacts` with severity join.
 
-    Returns ``{"status": str, "reason_codes": [str, ...]}``. First-hit
-    wins: exactly one branch fires.
+    Collects ALL triggered reason codes, then selects the final status
+    with the highest severity in ``STATUS_SEVERITY``.
+    Returns ``{"status": str, "reason_codes": [str, ...]}``.
     """
-    # 1. identity
+    reasons: List[str] = []
+    candidate_statuses: List[str] = []
+
+    # 1. identity check
     if facts.identity_status != "UNIQUE":
         reason = (
             "target_not_found"
             if facts.identity_status == "NOT_FOUND"
             else "target_ambiguous"
         )
-        return {"status": "ABSTAINED", "reason_codes": [reason]}
+        reasons.append(reason)
+        candidate_statuses.append("ABSTAINED")
+
     # 2. snapshot binding
     if not facts.snapshot_bound:
-        return {"status": "UNVERIFIABLE", "reason_codes": ["snapshot_unbound"]}
+        reasons.append("snapshot_unbound")
+        candidate_statuses.append("UNVERIFIABLE")
+
     # 3. stale sources
     if facts.stale_files:
-        return {"status": "STALE", "reason_codes": ["stale_sources"]}
-    # 4. rename/delete gate
-    if facts.gate_blocked:
-        return {"status": "PARTIAL", "reason_codes": ["rename_gate_blocked"]}
-    # 5. open conflicts
+        reasons.append("stale_sources")
+        candidate_statuses.append("STALE")
+
+    # 4. open conflicts
     if facts.open_conflicts > 0:
-        return {"status": "CONFLICTED", "reason_codes": ["open_conflicts"]}
+        reasons.append("open_conflicts")
+        candidate_statuses.append("CONFLICTED")
+
+    # 5. rename/delete gate
+    if facts.gate_blocked:
+        reasons.append("rename_gate_blocked")
+        candidate_statuses.append("PARTIAL")
+
     # 6. truncation
     if facts.truncated:
-        return {"status": "PARTIAL", "reason_codes": ["transitive_truncated"]}
+        reasons.append("transitive_truncated")
+        candidate_statuses.append("PARTIAL")
+
     # 7. parser failures
     if facts.parser_failures > 0:
-        return {"status": "PARTIAL", "reason_codes": ["parser_failures"]}
+        reasons.append("parser_failures")
+        candidate_statuses.append("PARTIAL")
+
     # 8. unresolved over budget
     if facts.unresolved_count > facts.unresolved_budget:
-        return {"status": "PARTIAL", "reason_codes": ["unresolved_over_budget"]}
-    # 9. absence claim without measured coverage at/above floor
-    if facts.absence_claim and (
+        reasons.append("unresolved_over_budget")
+        candidate_statuses.append("PARTIAL")
+
+    # 9. dynamic dispatch unresolved
+    if facts.dynamic_dispatch_unresolved:
+        reasons.append("dynamic_dispatch_unresolved")
+        candidate_statuses.append("PARTIAL")
+
+    # 10. absence claim without measured coverage at/above floor
+    requires_absence = facts.absence_claim or facts.claim_profile in ("absence", "exhaustive")
+    if requires_absence and (
         not facts.coverage_measured
         or facts.coverage_fraction is None
         or facts.coverage_fraction < facts.coverage_floor
     ):
-        return {"status": "PARTIAL", "reason_codes": ["coverage_below_floor"]}
-    # 10. provider capability
+        reasons.append("coverage_below_floor")
+        candidate_statuses.append("PARTIAL")
+
+    # 11. provider capability
     if not facts.provider_capability_ok:
-        return {"status": "PARTIAL", "reason_codes": ["provider_capability_missing"]}
-    # 11. all clear
-    return {"status": "ASSURED_WITHIN_SCOPE", "reason_codes": []}
+        reasons.append("provider_capability_missing")
+        candidate_statuses.append("PARTIAL")
+
+    # Final reduction by severity
+    if not candidate_statuses:
+        return {"status": "ASSURED_WITHIN_SCOPE", "reason_codes": []}
+
+    final_status = max(candidate_statuses, key=lambda s: STATUS_SEVERITY.get(s, 0))
+    return {"status": final_status, "reason_codes": reasons}

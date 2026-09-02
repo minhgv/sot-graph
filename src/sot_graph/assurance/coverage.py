@@ -22,13 +22,16 @@ results:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 __all__ = [
     "CoverageState",
     "GAP_TAXONOMY",
     "FileCoverage",
     "CoverageReport",
+    "ScopeManifest",
+    "build_scope_manifest",
+    "is_quarantined",
     "repo_coverage",
     "completeness",
     "coverage_note",
@@ -65,6 +68,42 @@ GAP_TAXONOMY: Dict[str, str] = {
     "parser-failed": "files whose parse failed (PARSE_ERROR/PARSER_UNAVAILABLE)",
     "unresolved-edge": "pending edges still UNRESOLVED/AMBIGUOUS",
 }
+_DYNAMIC_PATTERNS: Dict[str, List[Tuple[re.Pattern, str]]] = {
+    "python": [
+        (re.compile(r"\b(getattr|setattr|eval|exec|importlib|__import__)\b"), "dynamic_reflection"),
+        (re.compile(r"\b(globals|locals)\(\)\s*\["), "dynamic_symbol_lookup"),
+    ],
+    "typescript": [
+        (re.compile(r"\beval\s*\("), "dynamic_eval"),
+        (re.compile(r"\bimport\s*\("), "dynamic_import"),
+        (re.compile(r"\b(window|globalThis)\s*\["), "dynamic_global_lookup"),
+    ],
+    "javascript": [
+        (re.compile(r"\beval\s*\("), "dynamic_eval"),
+        (re.compile(r"\bimport\s*\("), "dynamic_import"),
+        (re.compile(r"\b(window|globalThis)\s*\["), "dynamic_global_lookup"),
+    ],
+    "java": [
+        (re.compile(r"\bClass\.forName\b"), "dynamic_class_loading"),
+        (re.compile(r"\b(getMethod|getDeclaredMethod|invoke)\b"), "dynamic_reflection"),
+        (re.compile(r"\bProxy\.newProxyInstance\b"), "dynamic_proxy"),
+    ],
+    "go": [
+        (re.compile(r"\breflect\.(ValueOf|TypeOf|New|MakeFunc)\b"), "dynamic_reflection"),
+        (re.compile(r"\.\(\s*type\s*\)"), "dynamic_type_switch"),
+        (re.compile(r"\.\(\s*any\s*\)|\.\(\s*interface\{\}\s*\)"), "dynamic_any_assertion"),
+    ],
+    "rust": [
+        (re.compile(r"\b(std::any::Any|downcast_ref)\b"), "dynamic_any_downcast"),
+        (re.compile(r"(&\s*dyn\s+\w+|Box<\s*dyn\s+[^>]+>|\bdyn\s+[A-Z]\w*)"), "dynamic_trait_object"),
+    ],
+    "c": [
+        (re.compile(r"\b(dlopen|dlsym)\b"), "dynamic_library_loading"),
+    ],
+    "cpp": [
+        (re.compile(r"\b(dlopen|dlsym)\b"), "dynamic_library_loading"),
+    ],
+}
 
 _GENERATED_PARTS = frozenset(
     {"node_modules", ".venv", "venv", "dist", "build", "vendor", "target"}
@@ -78,8 +117,6 @@ _OUTCOME_TO_STATE = {
     "PARSE_ERROR": CoverageState.SKIPPED,
     "PARSER_UNAVAILABLE": CoverageState.SKIPPED,
 }
-
-
 def _is_excluded(path: str) -> bool:
     parts = path.replace("\\", "/").split("/")
     return any(p in _GENERATED_PARTS for p in parts[:-1]) or bool(_PB_RE.search(parts[-1]))
@@ -283,3 +320,126 @@ def coverage_note(report: CoverageReport) -> str:
     pct = f"{frac * 100:.0f}%" if frac is not None else "?"
     gaps = f"; gaps: {', '.join(sorted(report.gaps))}" if report.gaps else ""
     return f"coverage: {pct} of {total} journal files measured{gaps}"
+
+
+@dataclass(frozen=True)
+class ScopeManifest:
+    """Explicit Bounded Scope declaration (P1 / R5)."""
+
+    included_files: List[str] = field(default_factory=list)
+    excluded_patterns: List[str] = field(default_factory=list)
+    parser_error_files: List[str] = field(default_factory=list)
+    unsupported_constructs: List[str] = field(default_factory=list)
+    quarantined_files: List[str] = field(default_factory=list)
+    manifest_digest: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "included_files": list(self.included_files),
+            "excluded_patterns": list(self.excluded_patterns),
+            "parser_error_files": list(self.parser_error_files),
+            "unsupported_constructs": list(self.unsupported_constructs),
+            "quarantined_files": list(self.quarantined_files),
+            "manifest_digest": self.manifest_digest,
+        }
+
+
+def build_scope_manifest(
+    db: Any,
+    repo_root: str,
+    target_paths: Sequence[str] = (),
+    excluded_patterns: Sequence[str] = (),
+) -> ScopeManifest:
+    """Build deterministic ScopeManifest for explicit bounded scope."""
+    import hashlib
+
+    default_exclusions = sorted(set(list(_GENERATED_PARTS) + list(excluded_patterns)))
+    canonical_root = os.path.realpath(repo_root)
+
+    try:
+        rows = db.conn.execute(
+            "SELECT path, parser_outcome, parser_error FROM file_journal"
+        ).fetchall()
+    except Exception:
+        rows = []
+
+    included: List[str] = []
+    parser_errors: List[str] = []
+    quarantined: List[str] = []
+    unsupported: List[str] = []
+
+    targets = set(target_paths) if target_paths else None
+
+    for r in rows:
+        p_raw, outcome, _ = str(r[0]), r[1], r[2]
+        abs_cand = os.path.realpath(
+            p_raw if os.path.isabs(p_raw) else os.path.join(canonical_root, p_raw)
+        )
+        try:
+            is_inside = os.path.commonpath([canonical_root, abs_cand]) == canonical_root
+        except ValueError:
+            is_inside = False
+
+        if not is_inside:
+            parser_errors.append(p_raw)
+            quarantined.append(p_raw)
+            unsupported.append(f"{p_raw}:path_traversal_out_of_repo")
+            continue
+
+        p = os.path.relpath(abs_cand, canonical_root).replace("\\", "/")
+        if _is_excluded(p) or any(exc in p for exc in default_exclusions):
+            continue
+        if targets is not None and p not in targets and p_raw not in targets:
+            continue
+        included.append(p)
+        if outcome in ("PARSE_ERROR", "PARSER_UNAVAILABLE"):
+            parser_errors.append(p)
+            quarantined.append(p)
+    included.sort()
+    for inc in included:
+        abs_p = os.path.join(repo_root, inc)
+        if not os.path.isfile(abs_p):
+            parser_errors.append(inc)
+            quarantined.append(inc)
+            unsupported.append(f"{inc}:missing_source")
+            continue
+        lang = _language_of(inc)
+        patterns = _DYNAMIC_PATTERNS.get(lang, [])
+        if patterns:
+            try:
+                with open(abs_p, "r", encoding="utf-8", errors="ignore") as fh:
+                    buffer = ""
+                    for chunk in iter(lambda: fh.read(65536), ""):
+                        combined = (buffer[-1024:] + chunk) if buffer else chunk
+                        buffer = chunk
+                        for pat, kind in patterns:
+                            tag = f"{inc}:{kind}"
+                            if tag not in unsupported and pat.search(combined):
+                                unsupported.append(tag)
+            except OSError:
+                parser_errors.append(inc)
+                quarantined.append(inc)
+                unsupported.append(f"{inc}:unreadable_source")
+    parser_errors = sorted(list(set(parser_errors)))
+    quarantined = sorted(list(set(quarantined)))
+    unsupported = sorted(list(set(unsupported)))
+    hasher = hashlib.sha256()
+    for inc in included:
+        hasher.update(f"inc:{inc}\n".encode("utf-8"))
+    for exc in default_exclusions:
+        hasher.update(f"exc:{exc}\n".encode("utf-8"))
+    digest = f"sha256:{hasher.hexdigest()}"
+
+    return ScopeManifest(
+        included_files=included,
+        excluded_patterns=default_exclusions,
+        parser_error_files=parser_errors,
+        unsupported_constructs=unsupported,
+        quarantined_files=quarantined,
+        manifest_digest=digest,
+    )
+
+
+def is_quarantined(path: str, manifest: ScopeManifest) -> bool:
+    """Check if a file path is quarantined by scope manifest."""
+    return path in manifest.quarantined_files or path in manifest.parser_error_files

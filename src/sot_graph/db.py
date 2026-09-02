@@ -1656,6 +1656,16 @@ class Database:
                     ]
                     if len(matched) == 1:
                         chosen = matched[0]
+            # Priority 3c: Same-directory candidate matching for same-package symbols
+            if chosen is None and not imp and len(candidates) > 1:
+                import os
+                caller_dir = os.path.dirname(path)
+                same_dir_matches = [
+                    (node_id, node_path) for node_id, node_path in candidates
+                    if os.path.dirname(node_path) == caller_dir
+                ]
+                if len(same_dir_matches) == 1:
+                    chosen = same_dir_matches[0]
             # Priority 4: Unique project symbol (cross-file only; same-file shadowed calls stay unresolved)
             if chosen is None and len(candidates) == 1:
                 if candidates[0][1] != path:
@@ -2448,6 +2458,29 @@ class Database:
                 branch=branch,
             )
 
+    def get_provider_binding(
+        self, sot_repo_id: str, provider_name: str
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch the active provider binding row for (sot_repo_id, provider_name)."""
+        row = self.conn.execute(
+            "SELECT id, sot_repo_id, provider_name, provider_project_id, "
+            "provider_generation, head_sha, branch, updated_at "
+            "FROM provider_project_bindings "
+            "WHERE sot_repo_id = ? AND provider_name = ?",
+            (sot_repo_id, provider_name),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row[0],
+            "sot_repo_id": row[1],
+            "provider_name": row[2],
+            "provider_project_id": row[3],
+            "provider_generation": row[4],
+            "head_sha": row[5],
+            "branch": row[6],
+            "updated_at": row[7],
+        }
     def _upsert_binding_row(
         self,
         sot_repo_id: str,

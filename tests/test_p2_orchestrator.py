@@ -368,11 +368,15 @@ class TestCliMcpParity:
         snap_mcp = res["snapshot"]
         stale_mcp = res["stale_files"]
 
-        assert _digest(snap_cli) == _digest(snap_mcp), (
-            "CLI and MCP must derive identical snapshot descriptors from one engine"
+        # Canonical snapshot comparison: ignore temporal timestamp and transient DB row ID
+        canon_cli = {k: v for k, v in snap_cli.items() if k not in ("captured_at", "snapshot_id")}
+        canon_mcp = {k: v for k, v in snap_mcp.items() if k not in ("captured_at", "snapshot_id")}
+        assert _digest(canon_cli) == _digest(canon_mcp), (
+            "CLI and MCP must derive identical canonical snapshot descriptors from one engine"
         )
+        assert snap_cli.get("descriptor_digest") == snap_mcp.get("descriptor_digest")
+        assert snap_cli.get("scope_digest") == snap_mcp.get("scope_digest")
         assert stale_cli == stale_mcp == []
-
     def test_mcp_usages_carries_assurance_fields(self, repo):
         service = McpService(str(repo / ".sot" / "sot.db"), str(repo))
         res = service.usages("target")

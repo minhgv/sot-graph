@@ -109,6 +109,9 @@ def wrap_envelope(
     coverage: Optional[Dict[str, Any]] = None,
     known_gaps: Optional[List[str]] = None,
     truncated: bool = False,
+    claim_profile: Optional[str] = None,
+    assurance: Optional[Dict[str, Any]] = None,
+    scope_manifest: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Wrap output in the standard North-Star response envelope.
     
@@ -149,7 +152,12 @@ def wrap_envelope(
         envelope["known_gaps"] = known_gaps
     if truncated:
         envelope["truncated"] = True
-
+    if claim_profile is not None:
+        envelope["claim_profile"] = claim_profile
+    if assurance is not None:
+        envelope["assurance"] = assurance
+    if scope_manifest is not None:
+        envelope["scope_manifest"] = scope_manifest
     # Seamless backward compatibility: expose top-level keys if data is a dict
     if isinstance(data, dict):
         for k, v in data.items():

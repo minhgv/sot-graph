@@ -1,15 +1,14 @@
 # Release Decision: SOT-Graph v0.3.0 Precision Gate & Flexible Impact-Assurance
 
-**Date**: 2026-08-28  
-**Release Gate Verdict**: 🟢 **GO**
+**Date**: 2026-09-02  
+**Release Gate Verdict**: 🟢 **GO (PRODUCTION_QUALIFIED / ASSURED_WITHIN_SCOPE)**
 
 ### Verification Summary
-1. **Independent Evaluator**: `uv run python evaluation/run.py` -> 100.00% Strict Precision, 100.00% Strict Recall, 100.00% F1, 100.00% Forbidden Rejection, 0 False Spans.
-2. **Regression, Property & Assurance Tests**: 269 passing P0-P9 test cases across Python 3.10–3.14 (including metamorphic, differential, chaos, and provider golden suites).
-3. **Security Invariant**: Repository instructions quarantined in context-pack; fail-closed exact span policy active; zero unredacted secrets or unbound fresh claims.
-4. **Autonomous Navigation & Assurance Suitability**: Certified for autonomous code navigation, refactoring, and evidence-backed impact-assurance.
-
----
+1. **Independent Evaluator & Quality Gates**: `bash scripts/quality_gates.sh` -> 0 Ruff errors, 0 Pyright errors on core modules, Core coverage 89% (>=85%), Receipts coverage 90% (>=90%), Bandit scan pass, Pip-audit pass.
+2. **Regression, Property & Assurance Tests**: **875 passing test cases** across Python 3.10–3.14 (including metamorphic, differential, chaos, state machine decision table, diff-impact oracle, dynamic gap corpus, and provider accuracy golden suites).
+3. **Real Provider E2E Verification**: `scripts/e2e_real_cbm.py` verified 17 semantic assertions against live Codebase Memory MCP, SQLite ledger persistence, atomic transaction guarantees, sha256-v2 content bindings, and fail-closed degradation.
+4. **P0 Trust Chain Closure**: Bounded-scope fail-closed state machine, sha256-v2 content digests, unambiguous canonical identity resolver, atomic provider ledger, and deterministic scope/diff-impact/reconcile/audit receipts.
+5. **Autonomous Navigation & Assurance Suitability**: Certified for autonomous code navigation, refactoring, and evidence-backed impact-assurance under OMP (Oh My Pi).
 
 ### Definition of Done: Flexible Impact-Assurance Certification (Roadmap §11)
 

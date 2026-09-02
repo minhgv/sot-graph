@@ -717,7 +717,11 @@ def cmd_reconcile(args: argparse.Namespace, reconciler: Reconciler) -> int:
     except KeyboardInterrupt:
         return 130
     elapsed = time.time() - start_t
-    if args.json:
+    if getattr(args, "receipt", False):
+        from sot_graph.assurance.receipts import reconcile_receipt
+        receipt = reconcile_receipt(reconciler.db, reconciler.root_dir, reconcile_result=summary.as_dict())
+        print(json.dumps(receipt, indent=2))
+    elif args.json:
         print(json.dumps(summary.as_dict(), sort_keys=True))
     else:
         conflict_note = (
@@ -1012,12 +1016,17 @@ def cmd_verify(args: argparse.Namespace, reconciler: Reconciler) -> int:
     return 0
 
 
-def cmd_doctor(args: argparse.Namespace, db: Database) -> int:
+def cmd_doctor(args: argparse.Namespace, db: Database, root: Optional[str] = None) -> int:
     diag = db.integrity_check()
+    if getattr(args, "receipt", False):
+        from sot_graph.assurance.receipts import audit_receipt
+        repo_root = root or os.path.dirname(os.path.dirname(os.path.abspath(db.db_path)))
+        receipt = audit_receipt(db, repo_root, doctor_report=diag)
+        print(json.dumps(receipt, indent=2))
+        return 0 if diag.get("ok", False) else 1
     if getattr(args, "json", False):
         print(json.dumps(diag, indent=2))
-        return 0 if diag["ok"] else 1
-
+        return 0 if diag.get("ok", False) else 1
     st = diag["stats"]
     print("\n🩺 SOT-Graph Doctor Report:")
     print("=" * 55)
@@ -1888,6 +1897,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Files per deterministic transaction window (default: 64)",
     )
     p_rec.add_argument("--json", action="store_true", help="Output summary as JSON")
+    p_rec.add_argument("--receipt", action="store_true", help="Emit a post-reconcile assurance receipt as JSON")
     p_rec.add_argument(
         "--force",
         action="store_true",
@@ -1917,7 +1927,7 @@ def build_parser() -> argparse.ArgumentParser:
     # doctor
     p_doc = subparsers.add_parser("doctor", help="Check database and graph health statistics")
     p_doc.add_argument("--json", action="store_true", help="Output health diagnostic in JSON format")
-    # clean
+    p_doc.add_argument("--receipt", action="store_true", help="Emit a system integrity audit receipt as JSON")
     p_clean = subparsers.add_parser("clean", help="Remove stale or reset graph data safely")
     p_clean.add_argument("--dry-run", action="store_true", help="Classify without changing the database")
     p_clean.add_argument("--all", dest="reset", action="store_true", help="Reset generated graph data")
@@ -2191,7 +2201,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         elif args.command == "verify":
             return cmd_verify(args, reconciler)
         elif args.command == "doctor":
-            return cmd_doctor(args, db)
+            return cmd_doctor(args, db, root)
         elif args.command == "report":
             return cmd_report(args, db, root)
         elif args.command == "cluster":

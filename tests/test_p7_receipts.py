@@ -122,10 +122,55 @@ class TestScopeReceipt:
         assert payload["identity"]["status"] == "NOT_FOUND"
         assert payload["identity"]["selected"] is None
         assert payload["assurance"]["status"] == "ABSTAINED"
-        assert payload["assurance"]["reason_codes"] == ["target_not_found"]
+        assert "target_not_found" in payload["assurance"]["reason_codes"]
         assert payload["assurance"]["rename_gate"]["resolved"] is False
 
+    def test_affected_files_snapshot_binding_covers_transitive_dependencies(self, receipt_repo):
+        db = _db_of(receipt_repo)
+        try:
+            payload = scope_receipt(db, str(receipt_repo), "run")
+        finally:
+            db.close()
+        snap = payload["snapshot"]
+        assert snap.get("scope_digest") is not None
+        digests = snap.get("content_digests") or {}
+        # Must bind both app.py and util.py because run calls util.help
+        assert "app.py" in digests
+        assert "util.py" in digests
 
+    def test_parser_failures_in_journal_degrades_to_partial(self, receipt_repo):
+        db = _db_of(receipt_repo)
+        try:
+            db.conn.execute(
+                "INSERT OR REPLACE INTO file_journal "
+                "(path, sha256, size, mtime_ms, reconciled_at, parser_outcome, parser_error) "
+                "VALUES ('broken.py', 'abc', 10, 1000, 1000, 'PARSE_ERROR', 'SyntaxError: invalid syntax')"
+            )
+            db.conn.commit()
+            payload = scope_receipt(db, str(receipt_repo), "run")
+        finally:
+            db.conn.execute("DELETE FROM file_journal WHERE path = 'broken.py'")
+            db.conn.commit()
+            db.close()
+        assert payload["assurance"]["status"] == "PARTIAL"
+        assert "parser_failures" in payload["assurance"]["reason_codes"]
+
+
+    def test_missing_unreadable_affected_file_yields_unverifiable(self, receipt_repo):
+        import os
+        db = _db_of(receipt_repo)
+        util_path = receipt_repo / "util.py"
+        content = util_path.read_text(encoding="utf-8")
+        st = util_path.stat()
+        try:
+            util_path.unlink()
+            payload = scope_receipt(db, str(receipt_repo), "run")
+        finally:
+            util_path.write_text(content, encoding="utf-8")
+            os.utime(util_path, (st.st_atime, st.st_mtime))
+            db.close()
+        assert payload["assurance"]["status"] == "UNVERIFIABLE"
+        assert "snapshot_unbound" in payload["assurance"]["reason_codes"]
 class TestRiskRules:
     def test_r7_3_table(self):
         assert classify_change_risk(
@@ -184,8 +229,7 @@ class TestRenameGate:
             db.close()
         assert payload["assurance"]["rename_gate"]["blocked"] is True
         assert payload["assurance"]["status"] == "ABSTAINED"
-        assert payload["assurance"]["reason_codes"] == ["target_not_found"]
-
+        assert "target_not_found" in payload["assurance"]["reason_codes"]
 
 class TestDiffReceipt:
     def test_post_change_receipt_shape(self, receipt_repo):

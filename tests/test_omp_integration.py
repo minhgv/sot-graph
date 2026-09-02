@@ -32,14 +32,22 @@ class TestOMPIntegrationScenarios(unittest.TestCase):
     def setUpClass(cls):
         cls.env = os.environ.copy()
         cls.env["PYTHONPATH"] = str(REPO_ROOT / "src")
+        cls.tmp_dir = tempfile.TemporaryDirectory()
+        cls.db_path = Path(cls.tmp_dir.name) / "sot.db"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp_dir.cleanup()
 
     def run_sot(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
+        has_db = any(a == "--db" or a.startswith("--db=") for a in args)
+        extra_args = [] if has_db else ["--db", str(self.db_path)]
         if sys.platform == "win32":
             # bin/sot is a bash launcher; on Windows drive the CLI module
             # directly with the same PYTHONPATH the launcher exports.
-            cmd = [sys.executable, "-m", "sot_graph.cli"] + args
+            cmd = [sys.executable, "-m", "sot_graph.cli"] + extra_args + args
         else:
-            cmd = [str(BIN_SOT)] + args
+            cmd = [str(BIN_SOT)] + extra_args + args
         proc = subprocess.run(
             cmd,
             cwd=str(REPO_ROOT),
@@ -57,7 +65,7 @@ class TestOMPIntegrationScenarios(unittest.TestCase):
         res = self.run_sot(["reconcile", "--workers", "2"])
         self.assertIn("Reconcile complete", res.stdout)
         self.assertIn("failed", res.stdout)
-        self.assertTrue((REPO_ROOT / ".sot" / "sot.db").exists())
+        self.assertTrue(self.db_path.exists())
 
     def test_scenario_02_verified_search_trust_verdicts(self):
         """Scenario 2: Search with Trust Verdicts and Content Coverage."""

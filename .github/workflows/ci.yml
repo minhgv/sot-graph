@@ -153,18 +153,9 @@ jobs:
       - name: Install real codebase-memory-mcp 0.10.8
         run: uv pip install codebase-memory-mcp==0.10.8
 
-      - name: Configure provider + run one federated query
+      - name: Run Real Provider E2E Validation Script
         run: |
-          mkdir -p /tmp/cbm-e2e/.sot
-          cat > /tmp/cbm-e2e/.sot/config.toml <<'EOF'
-          allow_external = true
-          [providers.codebase-memory]
-          command = ["codebase-memory-mcp"]
-          EOF
-          uv run sot --root /tmp/cbm-e2e reconcile
-          uv run sot --root /tmp/cbm-e2e providers detect --format json
-          uv run sot --root /tmp/cbm-e2e usages "extract_graphql" --provider auto ||             uv run sot --root /tmp/cbm-e2e search "extract"
-
+          uv run python scripts/e2e_real_cbm.py
   package-smoke:
     name: Package & Smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

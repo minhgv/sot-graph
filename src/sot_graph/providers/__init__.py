@@ -13,3 +13,7 @@ Modules:
 - ``normalization``: versioned CBM-relation -> SOT canonical mapping table
   and trust-ceiling rules reusing existing evidence enums.
 """
+
+from .scip import ScipProvider
+
+__all__ = ["ScipProvider"]

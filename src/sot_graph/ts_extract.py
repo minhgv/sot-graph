@@ -89,9 +89,10 @@ CONFIGS: Dict[str, Dict[str, Any]] = {
         "inheritance": {
             "types": {"class_declaration", "interface_declaration",
                       "enum_declaration", "record_declaration"},
-            "extends_fields": ("superclass",),
-            "extends_child_types": ("extends_interfaces",),
-            "implements_fields": ("interfaces",),
+            "extends_fields": ("superclass", "extends_interfaces"),
+            "extends_child_types": ("extends_interfaces", "superclass"),
+            "implements_fields": ("interfaces", "super_interfaces"),
+            "implements_child_types": ("super_interfaces", "interfaces", "implements_clause"),
         },
     },
     "kotlin": {
@@ -770,6 +771,22 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
                         "source_location": f"L{line(node)}",
                     })
                     emit_inheritance(node, node_type, raw_id)
+                # Special: Rust trait implementations (impl Trait for Struct)
+                if language == "rust" and node_type == "impl_item":
+                    trait_node = node.child_by_field_name("trait")
+                    type_node = node.child_by_field_name("type")
+                    if trait_node is not None and type_node is not None:
+                        trait_name = text(trait_node).strip()
+                        trait_short = re.sub(r"<[^>]+>", "", trait_name).rsplit("::", 1)[-1].strip()
+                        type_name = text(type_node).strip()
+                        type_short = re.sub(r"<[^>]+>", "", type_name).rsplit("::", 1)[-1].strip()
+                        if trait_short and type_short and trait_short != type_short:
+                            edges.append({
+                                "source": type_short,
+                                "target": trait_short,
+                                "relation": "implements",
+                                "source_location": f"L{line(node)}",
+                            })
                 # Special: PHP traits used inside class body (use LoggerTrait;)
                 if language == "php" and kind == "class":
                     for child in node.children:

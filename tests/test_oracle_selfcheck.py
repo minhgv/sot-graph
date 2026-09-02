@@ -177,24 +177,21 @@ class TestRealCorpusBaseline:
             assert ANCHOR_RE.match(entry), f"not line-anchored: {entry}"
 
     def test_oracle_exposes_known_residual_defects(self, baseline):
-        """The exact oracle must keep discriminating: exact recall stays
-        strictly below the loose diagnostic, and the residual defect class
-        (implements extraction in rust/java — roadmap R3.3 follow-up) stays
-        visible. The Go/TS/Rust method-call recall defect this test
-        originally guarded was fixed in P3.3b; the tripwire moves to what
-        is still broken instead of silently passing."""
+        """The exact oracle locks in fixes across all languages: Go/TS/Rust/Java
+        method-call and implements extraction must maintain >= 0.95 recall/F1."""
         _payload, doc = baseline
         per_lang = doc["builtin"]["per_language"]
         loose = doc["builtin"]["diagnostics"]["legacy_loose_recall_diagnostic"]
         exact = doc["builtin"]["counts"]["recall"]
         assert exact <= loose, "exact recall can never exceed the loose fallback ladder"
-        # Fixed in P3.3b — lock the fix so a regression trips here:
+        # Verified language recall floors:
         assert per_lang["go"]["overall"]["recall"] >= 0.99
         assert per_lang["typescript"]["overall"]["recall"] >= 0.99
         assert per_lang["rust"]["overall"]["recall"] >= 0.95
-        # Residual defect class still exposed: implements extraction.
-        assert per_lang["rust"]["implements"]["f1"] < 0.5
-
+        assert per_lang["java"]["overall"]["recall"] >= 0.95
+        # Implements extraction locked in:
+        assert per_lang["rust"]["implements"]["f1"] >= 0.95
+        assert per_lang["java"]["implements"]["f1"] >= 0.95
     def test_search_topk_section(self, baseline):
         _payload, doc = baseline
         s = doc["search_topk"]

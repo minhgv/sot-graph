@@ -42,8 +42,8 @@ def federation_plan(provider_spec: Optional[str], root: str, command_kind: str, 
     """
     from sot_graph.config import load_config
     from sot_graph.providers.codebase_memory import CodebaseMemoryProvider
+    from sot_graph.providers.scip import ScipProvider
     from sot_graph.providers_registry import resolve_capability
-
     try:
         mode, name = parse_provider_spec(provider_spec)
     except ValueError as exc:
@@ -92,17 +92,24 @@ def federation_plan(provider_spec: Optional[str], root: str, command_kind: str, 
     for target in names:
         assert target is not None
         pcfg = cfg.providers.get(target)
-        if (
-            pcfg is None or pcfg.enabled is False
-            or pcfg.integration != "cli" or target not in QUERYABLE_PROVIDERS
-        ):
-            msg = f"provider '{target}' is not queryable through an adapter in P1"
+        if target not in QUERYABLE_PROVIDERS:
+            msg = f"provider '{target}' is not queryable through an adapter"
             if mode == "require":
                 plan["fail_message"] = msg
             else:
                 plan["warnings"].append(f"{msg}; using sot-builtin only")
             continue
-        provider = CodebaseMemoryProvider(config=pcfg, db=db)
+        if pcfg is not None and pcfg.enabled is False:
+            msg = f"provider '{target}' is disabled in configuration"
+            if mode == "require":
+                plan["fail_message"] = msg
+            else:
+                plan["warnings"].append(f"{msg}; using sot-builtin only")
+            continue
+        if target == "scip":
+            provider = ScipProvider()
+        else:
+            provider = CodebaseMemoryProvider(config=pcfg, db=db)
         st = provider.probe(root)
         statuses.append({
             "name": target, "installed": st.installed, "healthy": st.healthy,

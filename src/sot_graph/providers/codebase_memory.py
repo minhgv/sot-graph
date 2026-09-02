@@ -888,6 +888,17 @@ class CodebaseMemoryProvider:
         head = payload.get("head_sha")
         branch = payload.get("branch")
         status = payload.get("status")
+        if not head and (status in ("ready", "ok")) and self._db is not None and project is not None:
+            db_binding_api = getattr(self._db, "get_provider_binding", None)
+            if db_binding_api is not None:
+                row = (
+                    db_binding_api(repo_root, PROVIDER_NAME)
+                    or db_binding_api(os.path.realpath(repo_root), PROVIDER_NAME)
+                )
+                if row and row.get("provider_project_id") == project:
+                    head = row.get("head_sha")
+                    if not branch:
+                        branch = row.get("branch")
         return SnapshotBinding(
             project=project,
             head_sha=head if isinstance(head, str) else None,
@@ -1023,7 +1034,10 @@ class CodebaseMemoryProvider:
             if request.timeout_seconds is not None
             else self._index_timeout
         )
-        args: dict[str, Any] = {"repo_path": os.path.realpath(request.repo_root)}
+        repo_path = os.path.realpath(request.repo_root)
+        pre_head = get_head_sha(repo_path)
+        pre_dirty, _ = dirty_state(repo_path)
+        args: dict[str, Any] = {"repo_path": repo_path}
         argv = [
             *self.command, "cli",
             *(["--progress"] if progress else []),
@@ -1041,7 +1055,7 @@ class CodebaseMemoryProvider:
                 args_file = handle.name
             argv[argv.index("@ARGS@")] = args_file
             result = run_command(
-                argv, cwd=os.path.realpath(request.repo_root),
+                argv, cwd=repo_path,
                 timeout_seconds=timeout,
                 max_output_bytes=self._max_output_bytes,
             )
@@ -1051,6 +1065,7 @@ class CodebaseMemoryProvider:
             return self._index_record(
                 request, result=None, status="spawn_failed",
                 duration_ms=duration_ms, detail=str(exc), redacted=("index_repository",),
+                pre_head=pre_head, pre_dirty=pre_dirty,
             )
         finally:
             if args_file is not None:
@@ -1078,11 +1093,13 @@ class CodebaseMemoryProvider:
         return self._index_record(
             request, result=result, status=status, duration_ms=duration_ms,
             detail=detail, redacted=tuple(redact_argv(result.argv)),
+            pre_head=pre_head, pre_dirty=pre_dirty,
         )
 
     def _index_record(
         self, request: IndexRequest, *, result, status: str,
         duration_ms: int, detail: str, redacted: tuple,
+        pre_head: str | None = None, pre_dirty: bool | None = None,
     ) -> ProviderRunRecord:
         record = ProviderRunRecord(
             run_id=f"run_{int(time.time())}_{uuid.uuid4().hex[:8]}",
@@ -1098,47 +1115,52 @@ class CodebaseMemoryProvider:
         )
         if result is not None and self._db is not None:
             try:
-                self._db.record_provider_run(
-                    PROVIDER_NAME,
-                    provider_version=self._version,
-                    capability="index_repository",
-                    snapshot_hash=None,
-                    project_root=os.path.realpath(request.repo_root),
-                    position_encoding="UTF-8",
-                    arguments_json=json.dumps(list(record.arguments_redacted)),
-                    run_id=record.run_id,
-                    status=status,
-                    exit_code=result.returncode,
-                    duration_ms=duration_ms,
-                    command_digest=_command_digest(record.arguments_redacted),
-                )
+                snap_hash = None
+                binding_dict = None
                 if status == "ok":
-                    # P6: bind the index run to the snapshot it produced.
-                    # index_repository returns no head_sha on this wire;
-                    # read it back through index_status right after.
-                    match = self.snapshot_match(
-                        request.repo_root,
-                        project=None,
+                    repo_path = os.path.realpath(request.repo_root)
+                    post_head = get_head_sha(repo_path)
+                    post_dirty, _ = dirty_state(repo_path)
+                    if (
+                        pre_head is not None
+                        and pre_head == post_head
+                        and pre_dirty is False
+                        and post_dirty is False
+                    ):
+                        self._project_cache.pop(repo_path, None)
+                        resolved_proj, _, _ = self.resolve_project(request.repo_root)
+                        if resolved_proj:
+                            snap_hash = post_head
+                            binding_dict = {
+                                "sot_repo_id": request.repo_root,
+                                "provider_name": PROVIDER_NAME,
+                                "provider_project_id": resolved_proj,
+                                "head_sha": snap_hash,
+                                "branch": None,
+                            }
+                run_dict = {
+                    "provider_name": PROVIDER_NAME,
+                    "provider_version": self._version,
+                    "capability": "index_repository",
+                    "snapshot_hash": snap_hash,
+                    "project_root": os.path.realpath(request.repo_root),
+                    "position_encoding": "UTF-8",
+                    "arguments_json": json.dumps(list(record.arguments_redacted)),
+                    "run_id": record.run_id,
+                    "status": status,
+                    "exit_code": result.returncode,
+                    "duration_ms": duration_ms,
+                    "command_digest": _command_digest(record.arguments_redacted),
+                }
+                outcome_api = getattr(self._db, "record_provider_outcome", None)
+                if outcome_api is not None:
+                    outcome_api(
+                        run=run_dict,
+                        binding=binding_dict,
+                        evidence=[],
                     )
-                    if match is not None and match.bound:
-                        snap = match.cbm_head_sha
-                        with self._db.conn:
-                            self._db.conn.execute(
-                                "UPDATE provider_runs SET snapshot_hash = ? "
-                                "WHERE id = ?",
-                                (snap, record.run_id),
-                            )
-                        binding_api = getattr(
-                            self._db, "record_provider_binding", None
-                        )
-                        if binding_api is not None and match.project:
-                            binding_api(
-                                request.repo_root,
-                                PROVIDER_NAME,
-                                match.project,
-                                head_sha=snap,
-                                branch=match.branch,
-                            )
+                else:
+                    self._db.record_provider_run(**run_dict)
             except Exception as exc:  # noqa: BLE001 - sidecar isolation
                 logger.warning("cbm index run ledger write failed: %s", exc)
         else:

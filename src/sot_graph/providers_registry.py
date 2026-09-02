@@ -106,10 +106,10 @@ def discover_plugin_providers() -> list[ProviderStatus]:
 #: routing and reports stay honest.
 BUILTIN_LANGUAGE_SCORECARD: dict[str, dict[str, float]] = {
     "python": {"calls": 0.997, "extends": 1.0},
-    "java": {"calls": 0.996, "implements": 0.0},
+    "java": {"calls": 0.996, "implements": 1.0},
     "typescript": {"calls": 0.995, "implements": 1.0},
     "go": {"calls": 1.0},
-    "rust": {"calls": 0.988, "implements": 0.0},
+    "rust": {"calls": 0.992, "implements": 1.0},
 }
 
 

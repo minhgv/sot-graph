@@ -35,6 +35,7 @@ METHOD_CAPABILITIES: dict[str, str | None] = {
     "probe": None,
     "ensure_index": None,
     "search_symbols": "symbols",
+    "usages": "usages",
     "trace": "trace",
     "impact": "impact",
     "architecture": "architecture",

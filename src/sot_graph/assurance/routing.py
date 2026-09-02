@@ -16,15 +16,15 @@ __all__ = [
     "supports_capability",
 ]
 
-#: Providers this codebase can actually query through an adapter (P1: CBM only).
-QUERYABLE_PROVIDERS = frozenset({"codebase-memory"})
-
+#: Providers this codebase can actually query through an adapter (P1: CBM & SCIP).
+QUERYABLE_PROVIDERS = frozenset({"codebase-memory", "scip"})
 #: METHOD_CAPABILITIES speaks in method-ish capability strings while provider
 #: config advertises guide §11.3 names; alias so negotiation stays table-driven.
 CAPABILITY_ALIASES: Dict[str, Tuple[str, ...]] = {
     "trace": ("trace", "callgraph"),
     "impact": ("impact",),
     "search_symbols": ("symbols",),
+    "usages": ("usages", "symbols", "references"),
 }
 
 #: Command kind -> guide §11.3 capability used for registry ranking.
