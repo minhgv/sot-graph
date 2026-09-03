@@ -1,6 +1,6 @@
 # Module-Scope Evaluation Report
 
-Generated: 2026-09-03 23:54:42  |  commit: `7dd9e54`
+Generated: 2026-09-03 23:56:11  |  commit: `9aeeba2`
 
 | Scope | ruff | pyright | pytest | probes (bugs) | gate |
 |---|---|---|---|---|---|
@@ -14,7 +14,7 @@ Generated: 2026-09-03 23:54:42  |  commit: `7dd9e54`
 **Probes: 0 bug(s) still present, 0 probe error(s).**
 
 ## Probes — assurance
-- ✅ `coverage-mtime-false-stale` — P1 coverage.py:229 — OK (39ms)
+- ✅ `coverage-mtime-false-stale` — P1 coverage.py:229 — OK (40ms)
   - state=unknown (sha-based staleness consistent)
 - ✅ `tests-to-run-none` — P1 receipts.py:563 — OK (4ms)
   - tests_to_run reads TestImpact.path; no 'test_file' reference
@@ -22,11 +22,11 @@ Generated: 2026-09-03 23:54:42  |  commit: `7dd9e54`
 ## Probes — core-storage
 - ✅ `journal-like-wildcard` — P1 db.py:676 — OK (5ms)
   - wildcard path did not match a different journal row
-- ✅ `manifest-digest-collapse` — P1 envelope.py:29 — OK (2ms)
+- ✅ `manifest-digest-collapse` — P1 envelope.py:29 — OK (3ms)
   - fail-closed, states distinguishable: ['<raised:OperationalError>', '<raised:ProgrammingError>']
 
 ## Probes — extraction
-- ✅ `nested-gitignore` — P2 ignore.py:101,184 — OK (2ms)
+- ✅ `nested-gitignore` — P2 ignore.py:101,184 — OK (1ms)
   - scoped rules anchored correctly and nested files loaded
 
 ## Probes — query-analytics

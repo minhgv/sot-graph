@@ -165,3 +165,18 @@ Sau G1 nên bổng probe mới từ các P2 còn lại vào `PROBES` registry c�
 
 ### Việc còn treo (G6 — không chặn)
 Iterative walk thay đệ quy sâu, inode-verify lock, vector invalidate theo reconcile, SCIP cache, benchmark trước/sau cho các index G5.
+
+## 7. G6 — Robustness dài hạn (2026-09-03) — HOÀN TẤT
+
+**Trạng thái:** `pytest 939/939` (+7 test hồi quy mới) · `ruff` + `pyright` 0 lỗi toàn cây · `module_eval --strict-probes` ALL PASS, 0 bug, exit 0.
+
+| Mục | Sửa | Test hồi quy |
+|---|---|---|
+| locking.py | Sau flock: verify fd inode == path inode và nlink ≥ 1; inode mồ côi (lock bị xóa/thay giữa open–flock, vd `git clean -x`) bị từ chối, release rồi contend lại trên path sống | 2 test fault-injection (scenario 4b replaced, 4c unlinked) |
+| analytics/graph.py | `detect_cycles` đệ quy → iterative 3-colour DFS (GRAY/BLACK + stack LIFO push đảo); chuỗi phụ thuộc 50k node không còn RecursionError | smoke 50k chain + 2-cycle đúng + cancel vẫn raise |
+| vector.py | `index_nodes` thêm `ORDER BY id` (subset >5000 hết xoay vòng giữa các lần chạy); sửa leak early-return (graph rỗng giờ dọn sạch graph_vec); thêm `prune_orphans()` gọi cuối `Reconciler.reconcile()` — embedding hết "thấy ma" node đã xóa | 3 test (deterministic subset, reconcile prune, empty rebuild) |
+| providers/scip.py | Cache parse 1-entry theo (realpath, mtime_ns, size); probe + query trên cùng index chỉ parse 1 lần (index SCIP hàng trăm MB); đổi file → cache miss; trả bản copy chống poison | 1 test đếm parse-call |
+| ts_extract.py | `walk()` đệ quy ~250 dòng → `visit()` trả pending-list + driver stack LIFO push đảo (bảo toàn thứ tự duyệt pre-order gốc, mọi nhánh return sớm giữ nguyên); bundle minified lồng 3000 tầng parse bình thường thay vì RecursionError mất cả file | 1 test deep-nest 3000 |
+| db.py (nợ G5) | `_resolve_pending_edges_pass` nhận `filter_symbols`/`filter_path` push xuống SQL (`dst_symbol IN` chunk 250 OR `path =`) — per-file commit hết materialize cả bảng pending; `rehome_file_atomically` bỏ 3 scan toàn bảng (graph_nodes ids, graph_edges, pending_edges) → pre-filter SQL prefix-LIKE (path forms × `file:`/`sym:` namespace + hashed namespace tokens) + IN-probe chunked cho membership test | 60 test rehome/pending/identity/storage xanh |
+
+**Bài học rehome:** pre-filter theo prefix-path KHÔNG đủ — `remap_id` còn đổi hashed namespace ids (`file:<sha12>`/`sym:<sha12>`) không chứa text path; phải thêm prefix của namespace tokens vào điều kiện SQL nếu không cross-file edges tới file đổi tên bị sót (test `test_rehome_updates_hashed_ids_and_all_edge_endpoints` bắt đúng case này).
