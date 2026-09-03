@@ -69,7 +69,7 @@ class HashEmbedder:
 
 def load_extension(conn) -> bool:
     """Load sqlite-vec into a connection; returns success."""
-    if not SQLITE_VEC_AVAILABLE:
+    if not SQLITE_VEC_AVAILABLE or sqlite_vec is None:
         return False
     try:
         conn.enable_load_extension(True)
@@ -92,26 +92,51 @@ def ensure_table(conn, dim: int = DEFAULT_DIM) -> bool:
 
 
 def index_nodes(conn, embedder: Optional[HashEmbedder] = None, *, limit: int = 5000) -> int:
-    """(Re)embed graph nodes into the vector table; returns embedded count."""
+    """(Re)embed graph nodes into the vector table; returns embedded count.
+
+    The subset is ordered by id so repeated runs embed the same nodes:
+    without an ORDER BY SQLite returns rows in scan order and a graph
+    larger than ``limit`` silently rotates its embedding set between runs.
+    """
     embedder = embedder or HashEmbedder()
     if not ensure_table(conn, embedder.dim):
         return 0
     rows = conn.execute(
         "SELECT id, label, symbol, keywords, COALESCE(body, '') FROM graph_nodes "
-        "WHERE kind != 'file' LIMIT ?", (limit,)
+        "WHERE kind != 'file' ORDER BY id LIMIT ?", (limit,)
     ).fetchall()
-    if not rows:
-        return 0
     texts = [f"{label} {symbol or ''} {keywords or ''} {body[:512]}"
              for _, label, symbol, keywords, body in rows]
     vectors = embedder.embed(texts)
     with conn:
+        # Full rebuild — even an empty result must clear stale vectors
+        # left behind by deleted nodes.
         conn.execute(f"DELETE FROM {_TABLE}")
-        conn.executemany(
-            f"INSERT INTO {_TABLE}(node_id, embedding) VALUES (?, ?)",
-            [(rows[i][0], _vec_blob(vectors[i])) for i in range(len(rows))],
-        )
+        if rows:
+            conn.executemany(
+                f"INSERT INTO {_TABLE}(node_id, embedding) VALUES (?, ?)",
+                [(rows[i][0], _vec_blob(vectors[i])) for i in range(len(rows))],
+            )
     return len(rows)
+
+
+def prune_orphans(conn) -> int:
+    """Drop vector rows whose node no longer exists; returns pruned count.
+
+    Reconcile deletes and renames nodes without knowing about the optional
+    vector table, so deleted ids keep answering vector queries until the
+    next full re-embed. Read paths filter unresolvable ids, but the rows
+    should not rot between embeds either.
+    """
+    try:
+        with conn:
+            cur = conn.execute(
+                f"DELETE FROM {_TABLE} WHERE node_id NOT IN (SELECT id FROM graph_nodes)"
+            )
+        return cur.rowcount or 0
+    except Exception:
+        # sqlite-vec not installed / table absent / read-only DB: nothing to do.
+        return 0
 
 
 def _vec_blob(vector: Sequence[float]) -> bytes:
@@ -146,16 +171,31 @@ def reciprocal_rank_fusion(*rankings: Sequence[str], k: int = RRF_K) -> Dict[str
     return scores
 
 
-def hybrid_search(db, query: str, *, limit: int = 10,
+def hybrid_search(db, query: str, *, limit: int = 10, scope: Optional[str] = None,
                   embedder: Optional[HashEmbedder] = None) -> Dict[str, Any]:
     """Fuse BM25 (always) with vector similarity (when available).
 
-    Returns hits with ``fused_score``, ``sources`` provenance, and the
-    original search_fts payloads for verdict computation upstream.
+    ``scope`` narrows both retrieval legs to a path subtree, matching
+    ``db.search_fts`` semantics so hybrid results respect the same filter
+    as plain search. Returns hits with ``fused_score``, ``sources``
+    provenance, and the original search_fts payloads for verdict
+    computation upstream.
     """
-    fts_hits = db.search_fts(query, limit=limit * 2)
-    fts_order = [h["id"] for h in fts_hits]
+    fts_hits = db.search_fts(query, limit=limit * 2, scope=scope)
     vec_hits = vector_search(db.conn, query, embedder, limit=limit * 2)
+    if scope:
+        # Vector leg: keep only nodes inside the scope subtree.
+        prefix = scope.replace("\\", "/").rstrip("/") + "/"
+        def _in_scope(node_id: str) -> bool:
+            row = db.conn.execute(
+                "SELECT path FROM graph_nodes WHERE id = ?", (node_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            p = str(row[0]).replace("\\", "/")
+            return p == scope.rstrip("/") or p.startswith(prefix)
+        vec_hits = [(nid, s) for nid, s in vec_hits if _in_scope(nid)]
+    fts_order = [h["id"] for h in fts_hits]
     vec_order = [node_id for node_id, _ in vec_hits]
 
     if not vec_order:
@@ -192,6 +232,7 @@ def hybrid_search(db, query: str, *, limit: int = 10,
     return {
         "query": query,
         "mode": "hybrid" if vec_order else "bm25",
+        "scope": scope or None,
         "results": hits,
         "returned": len(hits),
     }

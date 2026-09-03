@@ -665,6 +665,7 @@ def extract_routing_architecture(
                 )
 
         # 2. Detect UI Navigation / Page Routes
+        route_path = ""
         is_ui = False
         if layer == ArchitecturalLayer.PRESENTATION or any(k in path_lower for k in ["/page/", "/pages/", "/screen/", "/screens/", "/views/", "/ui/", "/widgets/", "/components/"]):
             if any(k in label_lower for k in ["page", "screen", "view", "dialog", "widget"]) and ("class " in label_lower or "widget" in label_lower):
@@ -889,8 +890,8 @@ def detect_architectural_violations(
                             f"'{dst_label}', bypassing the Business Logic / BLoC / Service layer."
                         ),
                         recommendation=(
-                            f"Route interaction through a dedicated BLoC event, ViewModel, or UseCase. "
-                            f"Prevent direct repository or API client instantiation in UI widgets."
+                            "Route interaction through a dedicated BLoC event, ViewModel, or UseCase. "
+                            "Prevent direct repository or API client instantiation in UI widgets."
                         ),
                     )
                 )
@@ -913,8 +914,8 @@ def detect_architectural_violations(
                             f"depends on higher Presentation layer ({dst_label})."
                         ),
                         recommendation=(
-                            f"Invert dependency using interfaces, callbacks, or reactive streams. "
-                            f"Lower layers must never reference UI widgets or screens."
+                            "Invert dependency using interfaces, callbacks, or reactive streams. "
+                            "Lower layers must never reference UI widgets or screens."
                         ),
                     )
                 )

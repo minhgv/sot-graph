@@ -38,11 +38,11 @@ When to use:
 | :--- | :--- | :--- |
 | **Search Codebase** | `sot search "<query>" [-n 5] [--hybrid]` | `xd://sot_search` |
 | **Repository Map** | `sot map [--focus <areas>] [--tokens 1024]` | `xd://sot_map` |
-| **Trace Call Graph** | `sot explore "<symbol>" [--depth 2]` | `xd://sot_explore` |
+| **Trace Call Graph** | `sot explore "<symbol>" [--max-hops 2]` | `xd://sot_explore` |
 | **Inspect Usages** | `sot usages "<symbol>"` | `xd://sot_usages` |
 | **Implementations** | `sot implementations "<interface>"` | `xd://sot_implementations` |
 | **Rename Impact** | `sot rename "<symbol>" [--to <new_name>]` | `xd://sot_rename` |
-| **Pack Subgraph** | `sot pack "<symbol>" [--depth 2] [-o <file>]`| `xd://sot_pack` |
+| **Pack Subgraph** | `sot pack "<symbol>" [--max-hops 2] [-o <file>]`| `xd://sot_pack` |
 | **Synchronize DB** | `sot reconcile [--workers 4]` | `xd://sot_reconcile` |
 | **Batch Reconcile** | `sot batch-reconcile <dir> [--workers 4]` | CLI |
 | **Audit Drift** | `sot verify [--deep]` | `xd://sot_verify` |
@@ -55,13 +55,13 @@ When to use:
 | **Interactive Viz** | `sot viz [-o graph.html]` | `xd://sot_viz` |
 | **Export Graph** | `sot export -f <graphrag/obsidian/scip>` | `xd://sot_export` |
 | **Fact Bundler** | `sot bundle [-o .sot/bundle/] [--include-tests]` | `xd://sot_bundle` |
-| **Full-Stack Trace** | `sot trace "<target>" [--depth 2] [-o <file>]` | `xd://sot_trace` |
+| **Full-Stack Trace** | `sot trace "<target>" [--max-hops 2] [-o <file>]` | `xd://sot_trace` |
 | **UI Decision Tree** | `sot ui-tree "<component>"` | `xd://sot_ui_tree` |
 | **Backend Flow** | `sot be-flow "<service>"` | `xd://sot_backend_flow` |
 | **Feature Inventory** | `sot solution inventory [module] [-o <file>]` | `xd://sot_solution_inventory` |
 | **Micro-steps Decompose** | `sot solution steps "<method>" [--format table/json]` | `xd://sot_solution_steps` |
 | **Solution Bundle** | `sot solution bundle [module] [-o <file>]` | `xd://sot_solution_bundle` |
-| **Diff Impact** | `sot diff-impact [target] [--staged] [--depth 2]` | `xd://sot_diff_impact` |
+| **Diff Impact** | `sot diff-impact [target] [--staged] [--max-hops 2]` | `xd://sot_diff_impact` |
 | **Commit History** | `sot log [-n 10] [--author <name>] [--since <date>]` | `xd://sot_git_history` |
 | **Embed Index** | `sot embed [--limit 5000]` | CLI |
 | **File Watcher** | `sot watch [--debounce-ms 200]` | CLI (Daemon) |
@@ -107,7 +107,7 @@ Before modifying, refactoring, or renaming core functions/classes:
 
 ## 6. Self-Healing & Drift Reconciliation
 - If you create, move, or delete files, run:
-  `sot reconcile` or `sot_reconcile` tool (or `sot batch-reconcile` for monorepo roots).
+  `sot reconcile` tool (or `sot batch-reconcile` for monorepo roots).
 - After completing tricky bugs or complex architectural designs, record knowledge:
   `sot insert --title "..." --body "..." --keywords "..."`.
 

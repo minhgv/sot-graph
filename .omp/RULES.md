@@ -50,11 +50,11 @@ When requested to review or synthesize comprehensive architecture documentation 
 ## 8. Two-Tier Context & Code Intelligence Directive (SOT-Graph + Context-Mode)
 
 ### Tier 1: SOT-Graph First (Code Intelligence & Navigation)
-1. **Zero Raw-Code Discovery**:
+1. **Zero Raw-Code Discovery & Pre-Read Gate (STRICT)**:
+   - Bare `read(path)` on source files (>100 lines) without a line-range selector is BANNED.
    - NEVER run sequential full-file reads or blind `grep`/`glob` across repositories when `.sot/sot.db` or SOT tools exist.
-   - Use SOT-Graph (`sot search`, `sot explore`, `sot usages`, `sot implementations`, `sot pack`) to locate symbols, class hierarchies, caller chains, and dependencies in sub-second time.
+   - Prioritize SOT-Graph (`sot search`, `sot explore`, `sot usages`, `sot implementations`, `sot pack`) and LSP (`definition`, `references`) to locate symbols, class hierarchies, caller chains, and dependencies in sub-second time.
    - (Note: codebase-memory and graphify are strictly backend extractors; do NOT configure or invoke them as direct agent skills/MCPs to prevent context bloat).
-2. **AST Range-Bounded Reading**:
    - Inspect source code strictly using line-anchored range selectors (`file:start-end`) pinpointed by SOT-Graph coordinates or AST signatures.
 3. **Reverse Call-Graph Blast Radius**:
    - Prior to modifying or refactoring any method/function/class, run `sot usages` / `sot explore` / `sot diff-impact` to audit all upstream callers and incoming references.

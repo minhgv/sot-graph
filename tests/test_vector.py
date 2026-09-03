@@ -8,7 +8,7 @@ from pathlib import Path
 from sot_graph.db import Database
 from sot_graph.reconciler import Reconciler
 
-from sot_graph.vector import HashEmbedder, reciprocal_rank_fusion
+from sot_graph.vector import HashEmbedder, _vec_blob, index_nodes, prune_orphans, reciprocal_rank_fusion
 
 try:
     import sqlite_vec  # noqa: F401
@@ -95,6 +95,58 @@ class HybridSearchTests(unittest.TestCase):
         self.assertEqual(res["mode"], "bm25")
         self.assertGreaterEqual(res["returned"], 1)
         self.assertEqual(res["results"][0]["sources"], ["bm25"])
+
+    def test_index_nodes_is_deterministic_subset(self):
+        """With limit below the node count, two runs embed the same ids."""
+        first = index_nodes(self.db.conn, limit=2)
+        ids_first = {
+            r[0] for r in self.db.conn.execute("SELECT node_id FROM graph_vec")
+        }
+        index_nodes(self.db.conn, limit=2)
+        ids_second = {
+            r[0] for r in self.db.conn.execute("SELECT node_id FROM graph_vec")
+        }
+        self.assertEqual(first, 2)
+        self.assertEqual(ids_first, ids_second,
+                         "same limit must select the same deterministic subset")
+
+    def test_reconcile_prunes_orphaned_vector_rows(self):
+        """Deleting a source file and reconciling must drop its embeddings."""
+        before = self.db.conn.execute("SELECT COUNT(*) FROM graph_vec").fetchone()[0]
+        self.assertGreater(before, 0)
+        victim = next(iter(PROJECT))
+        os.remove(os.path.join(self.test_dir, victim))
+        Reconciler(self.db, self.test_dir).reconcile(workers=1)
+        orphan = self.db.conn.execute(
+            "SELECT COUNT(*) FROM graph_vec WHERE node_id NOT IN "
+            "(SELECT id FROM graph_nodes)"
+        ).fetchone()[0]
+        self.assertEqual(orphan, 0, "vector rows must not outlive their nodes")
+
+    def test_prune_orphans_and_empty_rebuild_clear_table(self):
+        # Simulate rows for nodes that no longer exist.
+        with self.db.conn:
+            self.db.conn.execute(
+                "INSERT INTO graph_vec(node_id, embedding) VALUES (?, ?)",
+                ("ghost:node", _vec_blob(HashEmbedder().embed_query("x"))),
+            )
+        pruned = prune_orphans(self.db.conn)
+        self.assertGreaterEqual(pruned, 1)
+        remaining = self.db.conn.execute("SELECT COUNT(*) FROM graph_vec").fetchone()[0]
+        all_ids = {
+            r[0] for r in self.db.conn.execute("SELECT id FROM graph_nodes")
+        }
+        self.assertEqual(remaining, len(all_ids & {
+            r[0] for r in self.db.conn.execute("SELECT node_id FROM graph_vec")
+        }))
+        # An empty graph must also clear the vector table (the early return
+        # used to leave stale rows behind forever).
+        with self.db.conn:
+            self.db.conn.execute("DELETE FROM graph_nodes WHERE kind != 'note'")
+        count = index_nodes(self.db.conn)
+        left = self.db.conn.execute("SELECT COUNT(*) FROM graph_vec").fetchone()[0]
+        self.assertEqual(count, 0)
+        self.assertEqual(left, 0)
 
 
 if __name__ == "__main__":

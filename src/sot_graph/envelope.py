@@ -5,31 +5,37 @@ sot_graph.envelope — North-Star Versioned Response Envelope for CLI and MCP.
 from __future__ import annotations
 
 import hashlib
-import json
 import sqlite3
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 
 RESPONSE_SCHEMA_VERSION = "2.0.0"
 
 
 def compute_manifest_digest(db: Any) -> str:
-    """Compute deterministic sha256 digest of tracked files in file_journal."""
-    try:
-        conn = getattr(db, "conn", None) or db
-        if not isinstance(conn, sqlite3.Connection):
-            return "sha256:empty"
-        rows = conn.execute(
-            "SELECT path, sha256 FROM file_journal ORDER BY path ASC"
-        ).fetchall()
-        if not rows:
-            return "sha256:empty"
-        hasher = hashlib.sha256()
-        for p, s in rows:
-            hasher.update(f"{p}:{s}\n".encode("utf-8"))
-        return f"sha256:{hasher.hexdigest()}"
-    except Exception:
-        return "sha256:unknown"
+    """Compute deterministic sha256 digest of tracked files in file_journal.
+
+    Fail-closed: storage errors propagate to the caller instead of
+    collapsing into a constant ``sha256:unknown`` — a constant sentinel
+    makes every erroring state (closed connection, missing schema, locked
+    DB) compare EQUAL during snapshot comparisons and silently mis-attest.
+    An empty journal is a real, attestable state and keeps its own stable
+    digest.
+    """
+    conn = getattr(db, "conn", None) or db
+    if not isinstance(conn, sqlite3.Connection):
+        raise TypeError(
+            f"compute_manifest_digest expects a sqlite3 connection, got {type(conn)!r}"
+        )
+    rows = conn.execute(
+        "SELECT path, sha256 FROM file_journal ORDER BY path ASC"
+    ).fetchall()
+    if not rows:
+        return "sha256:empty"
+    hasher = hashlib.sha256()
+    for p, s in rows:
+        hasher.update(f"{p}:{s}\n".encode("utf-8", errors="surrogateescape"))
+    return f"sha256:{hasher.hexdigest()}"
 
 
 def compute_snapshot_generation(db: Any) -> int:
@@ -126,7 +132,17 @@ def wrap_envelope(
     - data
     """
     snap_gen = generation if generation is not None else compute_snapshot_generation(db)
-    digest = manifest_digest if manifest_digest is not None else compute_manifest_digest(db)
+    # compute_manifest_digest is deliberately fail-closed; the transport
+    # envelope must still ship when the backing DB is broken or a partial
+    # test double — record an explicit, non-sha256 marker instead.
+    fallbacks = list(fallbacks_applied or [])
+    digest = manifest_digest
+    if digest is None:
+        try:
+            digest = compute_manifest_digest(db)
+        except (sqlite3.Error, TypeError) as exc:
+            digest = f"unavailable:{type(exc).__name__}"
+            fallbacks.append("manifest_digest:unavailable")
     provs = providers if providers is not None else get_active_providers(db)
 
     # Normalize completeness - never allow GLOBAL_COMPLETE
@@ -139,7 +155,7 @@ def wrap_envelope(
         "manifest_digest": digest,
         "completeness": completeness,
         "providers": provs,
-        "fallbacks_applied": fallbacks_applied or [],
+        "fallbacks_applied": fallbacks,
         "conflicts_detected": conflicts_detected or [],
         "data": data,
     }

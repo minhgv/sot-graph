@@ -169,6 +169,14 @@ class SnapshotBindingTest(unittest.TestCase):
             " position_encoding TEXT DEFAULT 'UTF-8', arguments_json TEXT,"
             " created_at INTEGER NOT NULL)"
         )
+        # Real v5 databases journal files; bind_snapshot's manifest digest
+        # reads this table, so the fixture must match the historical schema.
+        conn.execute(
+            "CREATE TABLE file_journal ("
+            " path TEXT PRIMARY KEY, sha256 TEXT, size INTEGER,"
+            " mtime_ms INTEGER, generation INTEGER NOT NULL DEFAULT 1,"
+            " updated_at INTEGER NOT NULL)"
+        )
         conn.execute(
             "INSERT INTO provider_runs (id, provider_name, capability, created_at)"
             " VALUES ('run_legacy', 'scip-compiler-ast', 'symbols', 1700000000)"

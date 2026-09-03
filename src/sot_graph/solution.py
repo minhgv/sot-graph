@@ -237,7 +237,9 @@ def generate_feature_inventory(db, module: str = "", *, out_file: Optional[str] 
             risk_badge = f"**{r['risk']}**"
             md_lines.append(f"| {idx} | {r['name']} | {r['category']} | {risk_badge} | {r['description']} | `{r['key_files']}` |")
     else:
-        md_lines.append("| 1 | Tích hợp Webhook & Đồng bộ dữ liệu | SYNC/WEBHOOK | **HIGH** | Đồng bộ danh sách thuê bao và sự kiện nghiệp vụ | `unipay-api` |")
+        md_lines.append(
+            "| — | *(Không tìm thấy tính năng liên quan nào trong đồ thị — không tổng hợp giả định)* | — | — | — | — |"
+        )
 
     md_lines.extend([
         "",
@@ -422,24 +424,11 @@ def extract_execution_steps(db, method_or_service: str, *, format_mode: str = "t
                     })
                     order += 1
 
-    # If steps list is still empty, synthesize standard 10-step template
-    if not steps:
-        steps = [
-            {"tt": 1, "name": "Nhận request & Validate tham số", "code": "@Valid @RequestBody<br>DeductRequest request", "description": "Nhận yêu cầu thanh toán từ Client, kiểm tra các trường bắt buộc (msisdn, amount).", "category": "VALIDATE"},
-            {"tt": 2, "name": "Kiểm tra thuê bao trong DB nội bộ", "code": "Optional<PostpaidSubscriber> sub =<br>postpaidRepo.findByMsisdn(msisdn);", "description": "Truy vấn CSDL Unipay trên bảng postpaid_subscriber theo số điện thoại.", "category": "LOCAL_DB"},
-            {"tt": 3, "name": "Rẽ nhánh loại thuê bao", "code": "if (!sub.isPresent()) {<br>return processPrepaid(request);<br>}", "description": "Nếu không tìm thấy bản ghi trả sau, chuyển sang luồng trả trước.", "category": "BUSINESS_CHECK"},
-            {"tt": 4, "name": "Khởi tạo kết nối DB BCCS", "code": "JdbcTemplate bccsJdbc =<br>bccsDataSourceConfig.getJdbcTemplate();", "description": "Lấy kết nối DataSource phụ tới BCCS từ pool cấu hình.", "category": "EXTERNAL_DB"},
-            {"tt": 5, "name": "Truy vấn hạn mức & nợ cước BCCS", "code": "CreditInfo info = bccsJdbc.queryForObject(<br>\"SELECT credit_limit, debt FROM...\", mapper);", "description": "Thực thi SQL sang BCCS lấy hạn mức tín dụng và số nợ cước hiện tại.", "category": "EXTERNAL_DB"},
-            {"tt": 6, "name": "Kiểm tra điều kiện hạn mức", "code": "if (info.getDebt() + amount ><br>info.getCreditLimit())", "description": "So sánh tổng nợ mới với hạn mức tín dụng cho phép.", "category": "BUSINESS_CHECK"},
-            {"tt": 7, "name": "Xử lý lỗi vượt hạn mức", "code": "throw new BusinessException(<br>\"POSTPAID_LIMIT_EXCEEDED\");", "description": "Ngắt giao dịch và ném ngoại lệ nghiệp vụ POSTPAID_LIMIT_EXCEEDED (HTTP 400).", "category": "EXCEPTION"},
-            {"tt": 8, "name": "Thực hiện ghi nhận trừ tiền Core", "code": "coreLedgerService.recordTransaction(<br>msisdn, amount, TxType.DEBIT);", "description": "Ghi sổ cái giao dịch, trừ tiền và cập nhật số dư trong CSDL.", "category": "MUTATION"},
-            {"tt": 9, "name": "Ghi log kiểm toán (Audit Trail)", "code": "auditLogService.logAction(<br>actorId, \"DEDUCT_POSTPAID\", txnId);", "description": "Ghi nhận lịch sử giao dịch vào bảng audit_logs phục vụ đối soát.", "category": "AUDIT"},
-            {"tt": 10, "name": "Trả kết quả giao dịch", "code": "return ResponseEntity.ok(<br>new PaymentResponse(\"SUCCESS\", txnId));", "description": "Đóng gói kết quả thành công và phản hồi về cho Client với HTTP 200 OK.", "category": "RESPONSE"},
-        ]
-
     # Calculate Manpower Effort rank
     step_count = len(steps)
-    if step_count <= 4:
+    if step_count == 0:
+        manpower_rank = "N/A (không có dữ liệu)"
+    elif step_count <= 4:
         manpower_rank = "NVJ1 (Đơn giản - ≤4 bước)"
     elif step_count <= 8:
         manpower_rank = "NVJ2 (Trung bình - 5-8 bước)"
@@ -452,14 +441,23 @@ def extract_execution_steps(db, method_or_service: str, *, format_mode: str = "t
         "",
         f"> **Định mức nhân công (Manpower Effort):** `{manpower_rank}` ({step_count} bước xử lý)",
         "",
-        "| TT | Tên bước | Lệnh thực thi | Mô tả chi tiết logic |",
-        "| :---: | :--- | :--- | :--- |",
     ]
-    for s in steps:
-        lines.append(f"| {s['tt']} | {s['name']} | `{s['code']}` | {s['description']} |")
+    if not steps:
+        lines.append(
+            f"> ⚠️ **NOT_FOUND:** không tìm thấy bước xử lý nào cho `{method_or_service}` "
+            "trong be_execution_steps hoặc thân node của đồ thị — không tổng hợp giả định."
+        )
+    else:
+        lines.extend([
+            "| TT | Tên bước | Lệnh thực thi | Mô tả chi tiết logic |",
+            "| :---: | :--- | :--- | :--- |",
+        ])
+        for s in steps:
+            lines.append(f"| {s['tt']} | {s['name']} | `{s['code']}` | {s['description']} |")
 
     return {
         "method_or_service": method_or_service,
+        "status": "FOUND" if steps else "NOT_FOUND",
         "step_count": step_count,
         "manpower_rank": manpower_rank,
         "steps": steps,
@@ -467,18 +465,56 @@ def extract_execution_steps(db, method_or_service: str, *, format_mode: str = "t
     }
 
 
+def _resolve_service_symbol(conn: Any, module: str) -> str:
+    """Pick a service symbol that actually exists in the graph/steps data.
+
+    Never fabricates: returns "" (=> NOT_FOUND) when nothing matches.
+    """
+    try:
+        row = conn.execute(
+            "SELECT DISTINCT service_symbol FROM be_execution_steps "
+            "WHERE service_symbol LIKE ? ORDER BY service_symbol LIMIT 1",
+            (f"%{module}%",),
+        ).fetchone() if module else conn.execute(
+            "SELECT service_symbol FROM be_execution_steps "
+            "ORDER BY COUNT(*) DESC LIMIT 1"
+        ).fetchone()
+        if row and row[0]:
+            return str(row[0])
+    except Exception:
+        pass
+    try:
+        row = conn.execute(
+            "SELECT symbol FROM graph_nodes WHERE kind = 'service' AND symbol LIKE ? "
+            "LIMIT 1", (f"%{module}%",),
+        ).fetchone() if module else conn.execute(
+            "SELECT symbol FROM graph_nodes WHERE kind = 'service' LIMIT 1"
+        ).fetchone()
+        if row and row[0]:
+            return str(row[0])
+    except Exception:
+        pass
+    return ""
+
+
 def generate_solution_bundle(db, module: str = "", *, out_file: Optional[str] = None) -> Dict[str, Any]:
     """
     Synthesize complete Stage 2 Context Bundle for Solution.md and downstream subagents.
     Includes UI Form Fields, DataTable Types, API Specs, 4-Column Step Tables, Schema DDL, and Mermaid diagrams.
+
+    Sections 2, 4 (partial), 5, 6 are template scaffolding, NOT graph-derived;
+    they are labelled as such so no unverified content is presented as fact.
     """
+    conn = getattr(db, "conn", db)
     inventory = generate_feature_inventory(db, module)
-    steps_result = extract_execution_steps(db, f"{module}ServiceImpl.process" if module else "MobileBalanceServiceImpl.deduct")
+    service_symbol = _resolve_service_symbol(conn, module)
+    steps_result = extract_execution_steps(db, service_symbol)
 
     md_lines = [
         f"# CONTEXT BUNDLE & TÀI LIỆU GIẢI PHÁP: {module or 'HỆ THỐNG UNIPAY'}",
         "",
-        "> **SOT-Graph Verified Solution Bundle:** Gói dữ liệu sự thật đầy đủ phục vụ sinh Solution.md và cung cấp trực tiếp cho các subagent downstream (DBDesign, HDSD, KBKT, Manpower, NghiepVu) mà không cần quét lại mã nguồn.",
+        f"> **Solution Bundle cho module:** `{module or service_symbol or 'N/A'}` — PHẦN 1 & 3 được suy ra từ đồ thị/AST (SOT-Graph). "
+        "PHẦN 2, 4 (trừ bảng bước xử lý), 5, 6 là **khung template GỢI Ý, chưa được đồ thị kiểm chứng** — phải đối chiếu với module thực tế trước khi sử dụng.",
         "",
         "---",
         "## PHẦN 1: TỔNG QUAN VÀ PHẠM VI TÍNH NĂNG (STAGE 1 SCOPE)",

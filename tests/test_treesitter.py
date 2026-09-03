@@ -352,6 +352,33 @@ public class GenericRepo extends java.util.AbstractMap<String, String>
         ids = {n["symbol"] for n in parsed["nodes"] if n["kind"] != "file"}
         self.assertIn("Server.Handle", ids)
 
+    def test_deeply_nested_source_does_not_recursion_error(self):
+        """Minified-style nesting must not cost the whole file its symbols.
+
+        The AST walk used to recurse once per nesting level; at ~1000 levels
+        (trivial for minified bundles) it raised RecursionError and the file
+        was recorded as a parse failure instead of being indexed.
+        """
+        if not (LANGS.get("typescript") or LANGS.get("javascript")):
+            self.skipTest("grammar for ts/js not installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            depth = 3000  # well beyond the default recursion limit (1000)
+            target = Path(tmp) / "deep.js"
+            target.write_text(
+                "const deep = " + "[" * depth + "]" * depth + ";\n",
+                encoding="utf-8",
+            )
+            root = Path(tmp)
+            parsed = parse_file_graph(str(target), str(root))
+        self.assertIsNone(
+            parsed.get("error") or parsed.get("parse_error"),
+            "deep nesting must parse without RecursionError",
+        )
+        self.assertTrue(
+            any(n.get("kind") == "file" for n in parsed["nodes"]),
+            "the file node must still be indexed",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

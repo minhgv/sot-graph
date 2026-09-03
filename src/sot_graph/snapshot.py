@@ -302,6 +302,24 @@ def bind_snapshot(conn: sqlite3.Connection, repo_root: str) -> str:
 
     now = int(time.time())
     snapshot_id = f"snap_{now}_{uuid.uuid4().hex[:8]}"
+    # Tri-state dirtiness, persisted fail-closed: the snapshots schema has
+    # no NULL-dirty column, so an unverifiable worktree (git status failed
+    # INSIDE a repo) must never be recorded as clean — store dirty=1. A
+    # plain non-git directory is the one legitimate dirty=0 case: there is
+    # no HEAD to diverge from and the row is explicitly non-git
+    # (commit_sha NULL, fingerprint NULL). The fingerprint keeps the
+    # compute_dirty_fingerprint semantics: stable digest of the (possibly
+    # empty) status entry set whenever git answers at all.
+    dirty, _ = dirty_state(repo_root)
+    dirty_fp = compute_dirty_fingerprint(repo_root)
+    if dirty is None:
+        inside = _run_git(repo_root, "rev-parse", "--is-inside-work-tree")
+        is_repo = bool(
+            inside is not None
+            and inside.returncode == 0
+            and inside.stdout.strip() == "true"
+        )
+        dirty = is_repo
     conn.execute(
         "INSERT INTO snapshots "
         "(id, repo_root, commit_sha, dirty, dirty_fingerprint, manifest_digest, "
@@ -310,8 +328,8 @@ def bind_snapshot(conn: sqlite3.Connection, repo_root: str) -> str:
             snapshot_id,
             repo_root,
             get_head_sha(repo_root),
-            int(is_dirty(repo_root)),
-            compute_dirty_fingerprint(repo_root),
+            int(dirty),
+            dirty_fp,
             compute_manifest_digest(conn),
             "sha256-v1",
             compute_snapshot_generation(conn),

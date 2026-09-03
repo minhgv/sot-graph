@@ -13,7 +13,7 @@ import os
 import re
 import struct
 import time
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 
 ROLE_DEFINITION = 0x1
@@ -204,18 +204,21 @@ def _parse_scip_symbol_info(payload: bytes) -> Dict[str, Any]:
         elif field_num == 2 and wire_type == 2:
             sym_info["documentation"].append(val.decode("utf-8", errors="replace"))
         elif field_num == 3 and wire_type == 2:
-            # Could be documentation string or relationship message
-            try:
-                # Check if it decodes as UTF-8 text documentation
-                text = val.decode("utf-8")
-                sym_info["documentation"].append(text)
-            except Exception:
-                sym_info["relationships"].append(_parse_scip_relationship(val))
+            # SCIP proto: field 3 of SymbolInformation is ALWAYS
+            # repeated Relationship (a Relationship payload is usually also
+            # valid UTF-8, so decode-sniffing laundered relationships into
+            # documentation junk and dropped every implements/is_definition
+            # edge on binary indexes).
+            sym_info["relationships"].append(_parse_scip_relationship(val))
         elif field_num == 4:
             if wire_type == 2:
                 sym_info["relationships"].append(_parse_scip_relationship(val))
             elif wire_type == 0:
                 sym_info["kind"] = val
+        elif field_num == 17 and wire_type == 0:
+            # Modern SCIP: oneof kind { SymbolKind symbol_kind = 4 (legacy);
+            # Kind kind = 17 } — prefer the current enum when present.
+            sym_info["kind"] = val
         elif field_num == 5 and wire_type == 2:
             sym_info["display_name"] = val.decode("utf-8", errors="replace")
     return sym_info

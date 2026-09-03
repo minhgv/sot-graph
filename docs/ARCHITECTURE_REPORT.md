@@ -2,7 +2,7 @@
 
 > **Nguồn phân tích:** Single Source of Truth (`sot-graph` AST & Graph Analytics Engine)  
 > **Mục tiêu:** Bóc tách kiến trúc tổng thể, phân rã 100% modules & chức năng con, phân tích State Machine, luồng điều phối đa tiến trình, và lộ trình tối ưu hóa P0/P1/P2.  
-> **Pattern & Modularity:** Modular Layered Architecture (Python 3.10+) — Modularity Score ($Q = 0.420$) — 🟢 **STRONG MODULARITY**
+> **Pattern & Modularity:** Modular Layered Architecture (Python 3.10+) — Modularity Score (Q = 0.420) — 🟢 **STRONG MODULARITY**
 
 ---
 
@@ -189,7 +189,7 @@ Theo báo cáo Fact Bundle `01_module_inventory.md` và đồ thị `sot-graph`,
 * **Entities / Models chính:** `AnalyticsGraph`, `AnalysisResult`, `GraphMetrics`, `CommunityInfo`
 * **Chức năng chi tiết:**
   1. **Zero-Dependency Topology Engine:** Xây dựng đồ thị Network Directed Graph thuần Python (không cần `networkx`).
-  2. **Louvain Community Detection & Modularity ($Q$):** Tự động phân cụm chức năng theo mật độ liên kết nội bộ, đo lường điểm Modularity $Q$ của toàn hệ thống ($Q = 0.420$).
+  2. **Louvain Community Detection & Modularity (Q):** Tự động phân cụm chức năng theo mật độ liên kết nội bộ, đo lường điểm Modularity Q của toàn hệ thống (Q = 0.420).
   3. **God Node & Blast Radius Detection:** Phát hiện các thực thể có bậc kết nối cao vượt trội (như `Database`, `Reconciler`, `McpService`) để cảnh báo rủi ro khi refactor.
 
 #### Module 3.2: `Architecture Classifier & Fact Bundler (2-Stage Pipeline)`
@@ -311,8 +311,8 @@ sequenceDiagram
 
 ### 6.1 Các Điểm Mạnh Nổi Bật (Architectural Highlights)
 
-1. **Điểm Modularity Ấn Tượng ($Q = 0.420$):**
-   Hệ thống thể hiện tính phân rã mô-đun xuất sắc với 34 cộng đồng chức năng độc lập, mật độ liên kết đồ thị tối ưu ($\text{Density} = 0.00376$) và **0 vi phạm ranh giới tầng (Zero Architectural Violations)**.
+1. **Điểm Modularity Ấn Tượng (Q = 0.420):**
+   Hệ thống thể hiện tính phân rã mô-đun xuất sắc với 34 cộng đồng chức năng độc lập, mật độ liên kết đồ thị tối ưu (Density = 0.00376) và **0 vi phạm ranh giới tầng (Zero Architectural Violations)**.
 2. **Bảo Toàn Chân Lý Vật Lý (Physical Integrity First):**
    Mọi truy vấn mã nguồn đều được kiểm tra chéo với nội dung tệp tin thực tế trên ổ đĩa qua `TrustVerifier`, triệt tiêu hoàn toàn mã giả (hallucination) và đường dẫn ảo.
 3. **Zero-Daemon & Low-Footprint:**
@@ -352,9 +352,9 @@ sequenceDiagram
 
 #### 🟡 Priority P1 (Tối Ưu Hiệu Năng & Tránh Quét Ổ Đĩa Thừa)
 * **Vấn đề 1 (Source Anchor: `src/sot_graph/verifier.py:86-133`):**
-  Hàm `find_rehome()` thực hiện `os.walk()` toàn bộ thư mục dự án mỗi khi phát hiện một file bị thất lạc. Nếu có $K$ file bị đổi tên, hệ thống sẽ quét lại ổ đĩa $K$ lần ($O(K \times N)$ I/O cost).
+  Hàm `find_rehome()` thực hiện `os.walk()` toàn bộ thư mục dự án mỗi khi phát hiện một file bị thất lạc. Nếu có K file bị đổi tên, hệ thống sẽ quét lại ổ đĩa K lần (O(K × N) I/O cost).
 * **Giải pháp Kỹ thuật 1:**
-  Xây dựng một `BasenameIndex` (Map từ `filename` $\to$ `[paths]`) cache dùng một lần trong suốt vòng đời của lệnh `verify` hoặc `search`, giảm độ phức tạp xuống $O(1 \times N)$ disk scan.
+  Xây dựng một `BasenameIndex` (Map từ `filename` → `[paths]`) cache dùng một lần trong suốt vòng đời của lệnh `verify` hoặc `search`, giảm độ phức tạp xuống O(1 × N) disk scan.
 * **Vấn đề 2 (Source Anchor: `src/sot_graph/db.py:474-530` & `src/sot_graph/mcp_service.py:180-240`):**
   Thuật toán BFS duyệt đồ thị phụ thuộc (`explore_node`) hiện đang thực hiện 2 câu lệnh SQL riêng biệt cho từng node trong hàng đợi (`O(V)` queries).
 * **Giải pháp Kỹ thuật 2:**

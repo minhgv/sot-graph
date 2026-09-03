@@ -483,6 +483,58 @@ class Phase1SchemaV5AndScipTests(unittest.TestCase):
 
         mcp.close()
 
+    def test_scip_provider_parse_cache(self):
+        """_parse_index caches by (realpath, mtime_ns, size): repeated calls
+        within a provider run must not re-parse the index, and rewriting the
+        file must invalidate the cache."""
+        from unittest import mock
+
+        from sot_graph.providers.scip import ScipProvider
+
+        with tempfile.TemporaryDirectory() as tmp:
+            index_path = os.path.join(tmp, "index.json")
+            with open(index_path, "w", encoding="utf-8") as fh:
+                json.dump(
+                    {"metadata": {"version": 1}, "documents": [{"path": "a.py"}]},
+                    fh,
+                )
+
+            provider = ScipProvider(index_path=index_path)
+            import sot_graph.providers.scip as scip_mod
+
+            calls = {"n": 0}
+            real_json_parse = scip_mod.parse_scip_json
+
+            def wrapped(raw: str):
+                calls["n"] += 1
+                return real_json_parse(raw)
+
+            with mock.patch.object(scip_mod, "parse_scip_json", side_effect=wrapped):
+                meta1, docs1 = provider._parse_index(index_path)
+                meta2, docs2 = provider._parse_index(index_path)
+            self.assertEqual(calls["n"], 1, "second call must hit the cache")
+            self.assertEqual(docs1, docs2)
+
+            # Mutating the returned list must not poison the cache.
+            docs2.append({"path": "injected.py"})
+            meta3, docs3 = provider._parse_index(index_path)
+            self.assertEqual(len(docs3), 1)
+
+            # Rewrite the index (different size/mtime) — cache must miss.
+            time.sleep(0.01)
+            with open(index_path, "w", encoding="utf-8") as fh:
+                json.dump(
+                    {"metadata": {"version": 2},
+                     "documents": [{"path": "a.py"}, {"path": "b.py"}]},
+                    fh,
+                )
+            with mock.patch.object(scip_mod, "parse_scip_json", side_effect=wrapped):
+                meta4, docs4 = provider._parse_index(index_path)
+            self.assertEqual(calls["n"], 2, "changed file must re-parse")
+            self.assertEqual(len(docs4), 2)
+            self.assertEqual(meta4["version"], 2)
+            self.assertEqual(meta1["version"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

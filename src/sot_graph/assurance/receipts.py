@@ -141,19 +141,30 @@ def _ledger_cross_check(
         canonical_root = os.path.realpath(repo_root) if repo_root else ""
         if not canonical_root:
             raise ValueError("repo_root must not be empty")
-        runs_query = (
-            "SELECT id, provider_name, provider_version, capability, "
-            "snapshot_hash, status, project_root FROM provider_runs "
-            "WHERE project_root = ? "
-            "ORDER BY created_at DESC"
-        )
-        params = (canonical_root,)
-        all_runs = db.conn.execute(runs_query, params).fetchall()
+        # Exact-match snapshot scoping with NO fallback: when a snapshot
+        # namespace is supplied, only runs recorded under it are evaluated
+        # and a scope with zero runs reports exactly zero runs — it must
+        # never silently widen back to historical runs (fail-open). An
+        # empty scope stays visible in `runs` so callers can tell "no
+        # evidence under this snapshot" apart from "all runs healthy".
         if snapshot_hash:
-            scoped_runs = [r for r in all_runs if r[4] == snapshot_hash]
-            runs_to_eval = scoped_runs
+            runs_query = (
+                "SELECT id, provider_name, provider_version, capability, "
+                "snapshot_hash, status, project_root FROM provider_runs "
+                "WHERE project_root = ? AND snapshot_hash = ? "
+                "ORDER BY created_at DESC LIMIT ?"
+            )
+            params = (canonical_root, snapshot_hash, 200)
         else:
-            runs_to_eval = all_runs
+            runs_query = (
+                "SELECT id, provider_name, provider_version, capability, "
+                "snapshot_hash, status, project_root FROM provider_runs "
+                "WHERE project_root = ? "
+                "ORDER BY created_at DESC LIMIT ?"
+            )
+            params = (canonical_root, 200)
+        all_runs = db.conn.execute(runs_query, params).fetchall()
+        runs_to_eval = all_runs
         all_recent = runs_to_eval[:int(limit)]
         latest_status_by_cap: Dict[Tuple[str, str], str] = {}
         for r in reversed(runs_to_eval):
@@ -561,10 +572,10 @@ def diff_impact_receipt(
         "api_impacts": [_jsonable(a) for a in
                         (getattr(result, "api_impacts", None) or [])],
         "tests_to_run": sorted({
-            str(t.get("test_file") if isinstance(t, dict)
-               else getattr(t, "test_file", None))
+            str(t.get("path") if isinstance(t, dict)
+               else getattr(t, "path", None) or "")
             for t in test_impacts
-        } - {""}) if test_impacts else [],
+        } - {"", "None"}) if test_impacts else [],
 
         "invalidated_evidence": invalidated,
         "post_change_snapshot": (

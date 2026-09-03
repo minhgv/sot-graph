@@ -387,6 +387,77 @@ class TestFaultInjection(unittest.TestCase):
         lock_b = WriteLock(lock_path, timeout_ms=200)
         lock_b.acquire()
         lock_b.release()
+
+    def test_scenario_4b_lock_file_replaced_during_contention(self) -> None:
+        """A lock file deleted+recreated between open and flock must NOT be
+        treated as acquired: the fd guards an orphaned inode and accepting it
+        would allow two writers at once (e.g. git clean -x mid-reconcile)."""
+        from unittest import mock
+
+        from sot_graph import locking as locking_mod
+
+        lock_path = os.path.join(self.test_dir, ".sot", "replaced.lock")
+        os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+
+        real_try = locking_mod._try_acquire
+        calls = {"n": 0}
+
+        def racing_try_acquire(fd: int) -> bool:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                # External actor replaces the lock file between our open()
+                # and our flock(): our fd still names the orphaned inode.
+                orphan_ino = os.fstat(fd).st_ino
+                os.remove(lock_path)
+                with open(lock_path, "wb"):
+                    pass
+                assert os.stat(lock_path).st_ino != orphan_ino
+            return real_try(fd)
+
+        with mock.patch.object(
+            locking_mod, "_try_acquire", side_effect=racing_try_acquire
+        ):
+            lock = WriteLock(lock_path, timeout_ms=2000)
+            lock.acquire()
+        try:
+            self.assertGreaterEqual(
+                calls["n"], 2, "guard must reject the orphaned inode and retry"
+            )
+        finally:
+            lock.release()
+
+    def test_scenario_4c_lock_file_unlinked_during_contention(self) -> None:
+        """An fd whose link count dropped to zero mid-contention guards a
+        dying inode; the guard must reject it and re-contend on the live
+        path."""
+        from unittest import mock
+
+        from sot_graph import locking as locking_mod
+
+        lock_path = os.path.join(self.test_dir, ".sot", "unlinked.lock")
+        os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+
+        real_try = locking_mod._try_acquire
+        calls = {"n": 0}
+
+        def unlinking_try_acquire(fd: int) -> bool:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                os.remove(lock_path)  # external rm; no immediate recreate
+            return real_try(fd)
+
+        with mock.patch.object(
+            locking_mod, "_try_acquire", side_effect=unlinking_try_acquire
+        ):
+            lock = WriteLock(lock_path, timeout_ms=2000)
+            lock.acquire()
+        try:
+            self.assertGreaterEqual(
+                calls["n"], 2, "guard must reject the unlinked inode and retry"
+            )
+        finally:
+            lock.release()
+
     # -------------------------------------------------------------------------
     # Scenario 5: Concurrent Publication CAS Collision
     # -------------------------------------------------------------------------

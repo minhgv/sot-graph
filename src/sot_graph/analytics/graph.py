@@ -4,7 +4,7 @@ import collections
 import dataclasses
 import math
 import sqlite3
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from sot_graph.db import Database
@@ -434,42 +434,60 @@ class AnalyticsGraph:
         max_cycles: int = 100,
         cancel_check: Optional[Callable[[], bool]] = None,
     ) -> List[List[str]]:
-        """Detect simple directed cycles with cooperative cancellation."""
-        visited: Set[str] = set()
-        rec_stack: Set[str] = set()
+        """Detect simple directed cycles with cooperative cancellation.
+
+        Iterative three-colour DFS: deep import chains must not hit the
+        interpreter recursion limit (a minified dependency graph nests far
+        beyond it) — one long chain used to raise RecursionError and lose
+        the whole analysis.
+        """
+        # WHITE = unvisited (absent), GRAY = on the current path, BLACK = done.
+        colour: Dict[str, int] = {}
+        GRAY, BLACK = 1, 2
         path: List[str] = []
+        path_set: Set[str] = set()
         cycles: List[List[str]] = []
 
-        def dfs(node: str) -> None:
-            if cancel_check and cancel_check():
-                raise OperationCancelledError("Analytics operation cancelled by client")
-            if len(cycles) >= max_cycles:
-                return
-            visited.add(node)
-            rec_stack.add(node)
-            path.append(node)
-
-            for dst, _ in self._adj_out.get(node, []):
-                if cancel_check and cancel_check():
-                    raise OperationCancelledError("Analytics operation cancelled by client")
-                if len(cycles) >= max_cycles:
-                    break
-                if dst not in visited:
-                    dfs(dst)
-                elif dst in rec_stack:
-                    # Cycle found
-                    idx = path.index(dst)
-                    cycle = list(path[idx:]) + [dst]
-                    cycles.append(cycle)
-
-            path.pop()
-            rec_stack.remove(node)
-
-        for n in self.nodes:
+        for root in self.nodes:
             if len(cycles) >= max_cycles:
                 break
-            if n not in visited:
-                dfs(n)
+            if colour.get(root) is not None:
+                continue
+            stack: List[Tuple[str, Iterator[Tuple[str, Any]]]] = [
+                (root, iter(self._adj_out.get(root, [])))
+            ]
+            colour[root] = GRAY
+            path.append(root)
+            path_set.add(root)
+            while stack:
+                if cancel_check and cancel_check():
+                    raise OperationCancelledError(
+                        "Analytics operation cancelled by client"
+                    )
+                node, neighbours = stack[-1]
+                advanced = False
+                for dst, _ in neighbours:
+                    if len(cycles) >= max_cycles:
+                        break
+                    state = colour.get(dst)
+                    if state is None:
+                        colour[dst] = GRAY
+                        path.append(dst)
+                        path_set.add(dst)
+                        stack.append((dst, iter(self._adj_out.get(dst, []))))
+                        advanced = True
+                        break
+                    if state == GRAY:
+                        # Back edge: the cycle runs from dst's position on
+                        # the current path back around to dst.
+                        idx = path.index(dst)
+                        cycles.append(list(path[idx:]) + [dst])
+                    # BLACK neighbours are fully explored — no new cycle.
+                if not advanced:
+                    stack.pop()
+                    path.pop()
+                    path_set.remove(node)
+                    colour[node] = BLACK
 
         return cycles
 

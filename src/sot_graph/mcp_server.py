@@ -296,7 +296,9 @@ def create_server(service: McpService) -> Any:
             if name == "sot_search":
                 result = await service.asearch(args.get("query", ""), limit=args.get("limit", 6), scope=args.get("scope"), threshold=args.get("threshold", 0.5), assurance=args.get("assurance", True), provider_policy=args.get("provider_policy", "builtin_only"), budget=args.get("budget"))
             elif name == "sot_explore":
-                result = await service.aexplore(args.get("node_id", ""), depth=args.get("depth", 1), limit=args.get("limit", 100))
+                # Default depth 2 matches the CLI default and the documented
+                # adapter contracts (was 1, silently shallower than promised).
+                result = await service.aexplore(args.get("node_id", ""), depth=args.get("depth", 2), limit=args.get("limit", 100))
             elif name == "sot_usages":
                 result = await service.ausages(args.get("target", ""), limit=args.get("limit", 100), scope=args.get("scope"), assurance=args.get("assurance", True), provider_policy=args.get("provider_policy", "builtin_only"), budget=args.get("budget"))
             elif name == "sot_implementations":

@@ -9,11 +9,11 @@ import json
 import os
 from pathlib import Path
 import re
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Callable, Dict, List, Optional
 
 from sot_graph.analytics.architecture import ArchitectureProfile, FunctionalModule, is_test_or_mock_path
 from sot_graph.analytics.diagnostics import AnalysisResult, analyze_graph
-from sot_graph.analytics.graph import AnalyticsGraph, OperationCancelledError
+from sot_graph.analytics.graph import AnalyticsGraph
 from sot_graph.db import Database
 
 class ArchitectureBundler:

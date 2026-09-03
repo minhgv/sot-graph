@@ -8,9 +8,9 @@ This document details the benchmarking methodology, execution procedures, and ve
 
 `sot-graph` is designed to operate inside the fast inner loop of AI coding agents (per-turn file edits, multi-file refactoring, pre-commit checks). To ensure zero noticeable latency for agents:
 
-1. **Sub-millisecond Search**: Candidate retrieval and trust scoring must take $< 2\text{ ms}$.
-2. **Instant Reconcile**: Unchanged files are checked in $O(1)$ via filesystem metadata ($\mu\text{s}$ range); modified files are parsed concurrently and committed in single-writer batches ($< 30\text{ ms}$ for 100 files).
-3. **Ultra-Low Memory Footprint**: Core operations run under $25\text{ MB}$ RSS with zero external background daemons.
+1. **Sub-millisecond Search**: Candidate retrieval and trust scoring must take < 2 ms.
+2. **Instant Reconcile**: Unchanged files are checked in O(1) via filesystem metadata (μs range); modified files are parsed concurrently and committed in single-writer batches (< 30 ms for 100 files).
+3. **Ultra-Low Memory Footprint**: Core operations run under 25 MB RSS with zero external background daemons.
 
 ---
 
@@ -35,7 +35,7 @@ Evaluates parsing, SHA-256 dirty checking, node/edge generation, and SQLite sing
 | **Parallel (4 workers)** | 35.40 | 37.10 | 39.80 | 41.20 | ~2,700 files/s |
 | **Parallel (8 workers)** | 48.20 | 50.15 | 53.40 | 55.60 | ~2,000 files/s |
 
-> **Adaptive Worker Threshold Invariant**: For small-to-medium batches ($< 16$ files), `sot-graph` automatically switches to in-process sequential parsing to avoid OS process spawn / IPC overhead. For large batches ($> 100$ files), parallel worker pools scale horizontally.
+> **Adaptive Worker Threshold Invariant**: For small-to-medium batches (< 16 files), `sot-graph` automatically switches to in-process sequential parsing to avoid OS process spawn / IPC overhead. For large batches (> 100 files), parallel worker pools scale horizontally.
 
 ---
 

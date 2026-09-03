@@ -64,7 +64,7 @@ In complex, multi-language codebases, AI coding agents frequently struggle with 
 - Eradicated unqualified claims; enforced honest capability ceilings and fail-closed abstentions.
 
 ### 🛡️ P9: Hardening, Scale & Release Qualification
-- Zero-daemon, in-process architecture with sub-millisecond query latency ($< 1.5\text{ ms}$) and sub-30ms batch reconciliation.
+- Zero-daemon, in-process architecture with sub-millisecond query latency (< 1.5 ms) and sub-30ms batch reconciliation.
 - Comprehensive test suite with 100-cycle continuous mutation/reconcile integrity verification.
 - Validated Schema v8 database compatibility with zero data loss or migration drift.
 

@@ -194,7 +194,7 @@ def _rank_reasons(row: Dict[str, Any], grade_reason: str, evidence_count: int,
     return reasons
 
 
-def _p4_sort_key(row: Dict[str, Any]) -> Tuple[int, int, float, int]:
+def _p4_sort_key(row: Dict[str, Any]) -> Tuple[int, Any, Any, float]:
     return (
         _RANK_ORDER.get(row["verdict"], 9),
         row["_identity_grade"],
@@ -211,7 +211,8 @@ def cmd_search(args: argparse.Namespace, db: Database, root: str) -> int:
         if not vec_available():
             print("⚠ sqlite-vec not installed — install with `pip install 'sot-graph[vector]'`; "
                   "falling back to BM25.")
-        res = hybrid_search(db, args.query, limit=args.limit * 2)
+        res = hybrid_search(db, args.query, limit=args.limit * 2,
+                            scope=getattr(args, "scope", None))
         candidates = res["results"]
         mode = res["mode"]
     else:
@@ -232,6 +233,7 @@ def cmd_search(args: argparse.Namespace, db: Database, root: str) -> int:
             "verdict": verdict,
             "coverage": f"{int((cov or 0) * 100)}%",
             "label": cand["label"],
+            "fqn": cand.get("fqn"),
             "path": real_path or cand.get("path") or "",
             "kind": cand["kind"],
             "line": cand.get("line_start"),
@@ -338,7 +340,8 @@ def _print_federation_notes(fed: Optional[dict]) -> None:
 
 
 
-def cmd_providers_sync(args: argparse.Namespace, root: str) -> int:
+def cmd_providers_sync(args: argparse.Namespace, root: str,
+                       db_path: Optional[str] = None) -> int:
     """Explicit index sync with its own budget, lock, progress, and receipt.
 
     Wraps the provider's ``index_repository`` (P3.1): never triggered from a
@@ -371,7 +374,7 @@ def cmd_providers_sync(args: argparse.Namespace, root: str) -> int:
         with WriteLock(lock_path, timeout_ms=60_000):
             # The ledger connection is opened only for the sync itself, so
             # the provider records the index run it just executed.
-            db = Database(os.path.join(root, ".sot", "sot.db"))
+            db = Database(db_path or os.path.join(root, ".sot", "sot.db"))
             try:
                 provider = CodebaseMemoryProvider(config=pcfg, db=db)
                 record = provider.index(
@@ -621,7 +624,7 @@ def cmd_rename(args: argparse.Namespace, db: Database) -> int:
     print("=" * 80)
     # The definition site is the resolved symbol itself; 'defines' edges point
     # at the enclosing scope (file or class), which is context, not the site.
-    print(f"  Definitions (1):")
+    print("  Definitions (1):")
     print(f"    └── {label} ({path}:{line or 1})")
     for def_label, def_path, def_line in definers:
         print(f"    └── declared inside: {def_label} ({def_path}:{def_line or 1})")
@@ -668,7 +671,7 @@ def cmd_embed(args: argparse.Namespace, db: Database) -> int:
         return 2
     try:
         with db.write_lock():
-            count = index_nodes(db.conn)
+            count = index_nodes(db.conn, limit=getattr(args, "limit", 5000))
     except (LockBusy, RuntimeError) as exc:
         print(f"❌ embed failed: {exc}", file=sys.stderr)
         return 1
@@ -1081,7 +1084,8 @@ def _print_provider_rows(rows: list[dict], title: str) -> None:
         print(f"  {row['name']:<18} {row['mode']:<10} {icon:<14} {version:<16} {row['detail']}")
 
 
-def cmd_providers(args: argparse.Namespace, root: str) -> int:
+def cmd_providers(args: argparse.Namespace, root: str,
+                  db_path: Optional[str] = None) -> int:
     """Read-only provider registry commands: detect, list, doctor, resolve."""
     from dataclasses import asdict
 
@@ -1096,7 +1100,7 @@ def cmd_providers(args: argparse.Namespace, root: str) -> int:
     sub = args.providers_subcommand
 
     if sub == "sync":
-        return cmd_providers_sync(args, root)
+        return cmd_providers_sync(args, root, db_path=db_path)
 
     if sub == "lifecycle":
         from sot_graph.providers.lifecycle import lifecycle_manifest
@@ -1227,7 +1231,15 @@ def cmd_trace(args: argparse.Namespace, db: Database, root: str) -> int:
     res["stale_files"] = stale
 
     if args.json:
-        print(json.dumps(res, indent=2))
+        payload = json.dumps(res, indent=2)
+        if args.output:
+            out_path = os.path.abspath(os.path.join(root, args.output)) if not os.path.isabs(args.output) else args.output
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as fp:
+                fp.write(payload)
+            print(f"📊 Trace JSON written to: {out_path}")
+        else:
+            print(payload)
         return 0
 
     md = render_trace_markdown(res)
@@ -1466,7 +1478,15 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
         if fed is not None:
             _print_fed_warnings(fed)
         envelope = wrap_envelope(payload, db=db)
-        print(json.dumps(envelope, indent=2, default=str))
+        payload_str = json.dumps(envelope, indent=2, default=str)
+        if getattr(args, "output", None):
+            out_path = os.path.abspath(os.path.join(root, args.output)) if not os.path.isabs(args.output) else args.output
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as fp:
+                fp.write(payload_str)
+            print(f"📊 Diff impact JSON written to: {out_path}")
+        else:
+            print(payload_str)
         if fed is not None:
             _print_federation_notes(fed)
         return 0
@@ -1484,7 +1504,9 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
             return [_ns(v) for v in value]
         return value
 
-    engine = SimpleNamespace(
+    # Duck-typed stand-in carrying the receipt fields the markdown formatter
+    # reads off a DiffImpactResult.
+    engine: Any = SimpleNamespace(
         summary=receipt["summary"],
         target=target,
         changed_files=receipt["changed_files"],
@@ -1764,7 +1786,7 @@ def cmd_import_scip(args: argparse.Namespace, db: Database, root: str) -> int:
         envelope = wrap_envelope(summary, db=db, project_root=root)
         print(json.dumps(envelope, indent=2))
     else:
-        print(f"🧭 SCIP index imported successfully:")
+        print("🧭 SCIP index imported successfully:")
         print(f"   Provider: {summary['provider_name']} (v{summary['provider_version']})")
         print(f"   Run ID: {summary['run_id']}")
         print(f"   Documents: {summary['documents_count']}")
@@ -2096,7 +2118,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # diff-impact
     p_diff = subparsers.add_parser("diff-impact", help="Git diff blast radius, upstream caller traversal, and API impact analysis")
-    p_diff.add_argument("target", nargs="?", default="HEAD~1", help="Git revision target (e.g. 'HEAD~1', 'main...HEAD', commit hash; default: HEAD~1)")
+    p_diff.add_argument("target", nargs="?", default="HEAD", help="Git revision target (e.g. 'HEAD', 'main...HEAD', commit hash; default: HEAD — a single revision diffs <rev>~1..<rev>, so the default analyzes the LATEST commit)")
     p_diff.add_argument("--depth", type=int, default=2, help="Reverse call graph walk depth (default: 2)")
     p_diff.add_argument("--staged", action="store_true", help="Analyze staged changes (--cached)")
     p_diff.add_argument("--working-tree", action="store_true", help="Analyze unstaged working tree changes")
@@ -2125,7 +2147,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     for _stream in (sys.stdout, sys.stderr):
         try:
             if _stream and _stream.encoding and _stream.encoding.lower().replace("-", "") != "utf8":
-                _stream.reconfigure(encoding="utf-8", errors="replace")
+                _reconfigure = getattr(_stream, "reconfigure", None)
+                if callable(_reconfigure):
+                    _reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, OSError, ValueError):
             pass  # non-tty or exotic stream: keep the interpreter default
     parser = build_parser()
@@ -2141,8 +2165,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return cmd_setup(args, root)
 
     if args.command == "providers":
-        # Read-only: never touches the database or triggers auto-reconcile.
-        return cmd_providers(args, root)
+        # Registry reads never touch the database; the sync subcommand is
+        # the write path and receives the resolved --db target like every
+        # other database-touching command.
+        return cmd_providers(args, root, db_path=db_path)
 
     if args.command == "batch-reconcile" or (args.command == "reconcile" and getattr(args, "all_repos", False)):
         target_dir = getattr(args, "directory", None) or root

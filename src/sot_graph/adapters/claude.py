@@ -33,12 +33,12 @@ Before modifying, refactoring, or renaming core functions/classes:
 6. Inspect commit risk history via `sot log` or `sot_git_history`.
 ### 4. Context Isolation & Subgraph Packaging Protocol
 When delegating code context to subagents or prompt registers:
-1. Run `sot pack "<symbol>" --depth 2 -o .sot/bundle/context.yaml` to extract a token-efficient k-hop subgraph.
+1. Run `sot pack "<symbol>" --max-hops 2 -o .sot/bundle/context.yaml` to extract a token-efficient k-hop subgraph.
 2. Feed the compact YAML ContextBundle instead of full raw files to save 60-70% tokens.
 
 ### 5. Self-Healing & Drift Reconciliation
-- If you create, move, or delete files, run `sot reconcile` or `sot_reconcile` (or `sot batch-reconcile` for monorepos).
-- Run `sot verify --deep` or `sot_verify` to audit phantom anchors and dead paths.
+- If you create, move, or delete files, run `sot reconcile` (or `sot batch-reconcile` for monorepos).
+- Run `sot verify --deep` or `sot_verify_drift` to audit phantom anchors and dead paths.
 - After completing tricky bugs or complex architectural designs, record knowledge:
   `sot insert --title "..." --body "..." --keywords "..."`.
 
@@ -65,30 +65,30 @@ When requested to review or synthesize architecture documentation:
 | :--- | :--- | :--- |
 | **Search Codebase** | `sot search "<query>" [-n 5] [--hybrid]` | `sot_search` |
 | **Repository Map** | `sot map [--focus <areas>] [--tokens 1024]` | `sot_map` |
-| **Trace Call Graph** | `sot explore "<symbol>" [--depth 2]` | `sot_explore` |
+| **Trace Call Graph** | `sot explore "<symbol>" [--max-hops 2]` | `sot_explore` |
 | **Inspect Usages** | `sot usages "<symbol>"` | `sot_usages` |
 | **Implementations** | `sot implementations "<interface>"` | `sot_implementations` |
-| **Rename Impact** | `sot rename "<symbol>" --to <new_name>` | `sot_rename` |
-| **Pack Subgraph** | `sot pack "<symbol>" [--depth 2] [-o <file>]`| `sot_pack` |
-| **Synchronize DB** | `sot reconcile [--workers 4]` | `sot_reconcile` |
+| **Rename Impact** | `sot rename "<symbol>" --to <new_name>` | `CLI only` |
+| **Pack Subgraph** | `sot pack "<symbol>" [--max-hops 2] [-o <file>]`| `sot_pack` |
+| **Synchronize DB** | `sot reconcile [--workers 4]` | `CLI only` |
 | **Batch Reconcile** | `sot batch-reconcile <dir> [--workers 4]` | CLI |
-| **Audit Drift** | `sot verify [--deep]` | `sot_verify` |
-| **Database Doctor** | `sot doctor` | `sot_doctor` |
-| **Clean Stale Data**| `sot clean [--purge-missing] [--include-notes]` | `sot_clean` |
-| **Vacuum Database** | `sot vacuum [--analyze]` | `sot_vacuum` |
-| **Store Note** | `sot insert --title "..." --body "..."` | `sot_insert` |
-| **Cluster Graph** | `sot cluster [--scope <path>]` | `sot_cluster` |
-| **Architecture Report** | `sot report [-o report.md]` | `sot_report` |
-| **Interactive Viz** | `sot viz [-o graph.html]` | `sot_viz` |
-| **Export Graph** | `sot export -f <graphrag/obsidian/scip>` | `sot_export` |
+| **Audit Drift** | `sot verify [--deep]` | `sot_verify_drift` |
+| **Database Doctor** | `sot doctor` | `CLI only` |
+| **Clean Stale Data**| `sot clean [--all] [--include-notes]` | `CLI only` |
+| **Vacuum Database** | `sot vacuum [--analyze]` | `CLI only` |
+| **Store Note** | `sot insert --title "..." --body "..."` | `CLI only` |
+| **Cluster Graph** | `sot cluster [--scope <path>]` | `CLI only` |
+| **Architecture Report** | `sot report [-o report.md]` | `sot_architecture_report` |
+| **Interactive Viz** | `sot viz [-o graph.html]` | `CLI only` |
+| **Export Graph** | `sot export -f <graphrag/obsidian/scip>` | `CLI only` |
 | **Fact Bundler** | `sot bundle [-o .sot/bundle/] [--include-tests]` | `sot_bundle` |
-| **Full-Stack Trace** | `sot trace "<target>" [--depth 2] [-o <file>]` | `sot_trace` |
+| **Full-Stack Trace** | `sot trace "<target>" [--max-hops 2] [-o <file>]` | `sot_trace` |
 | **UI Decision Tree** | `sot ui-tree "<component>"` | `sot_ui_tree` |
 | **Backend Flow** | `sot be-flow "<service>"` | `sot_backend_flow` |
 | **Feature Inventory** | `sot solution inventory [module] [-o <file>]` | `sot_solution_inventory` |
 | **Micro-steps Decompose** | `sot solution steps "<method>" [--format table/json]` | `sot_solution_steps` |
 | **Solution Bundle** | `sot solution bundle [module] [-o <file>]` | `sot_solution_bundle` |
-| **Diff Impact** | `sot diff-impact [target] [--staged] [--depth 2]` | `sot_diff_impact` |
+| **Diff Impact** | `sot diff-impact [target] [--staged] [--max-hops 2]` | `sot_diff_impact` |
 | **Commit History** | `sot log [-n 10] [--author <name>] [--since <date>]` | `sot_git_history` |
 """
 

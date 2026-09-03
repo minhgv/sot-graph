@@ -112,6 +112,22 @@ class WriteLock:
         self._owner_pid: int | None = None
         self._owner_thread: int | None = None
 
+    def _fd_guards_live_path(self, fd: int) -> bool:
+        """True when ``fd`` still names the file currently at ``self.path``.
+
+        A lock file deleted or recreated between ``open`` and ``flock``
+        leaves the fd guarding an orphaned inode: acquiring it "succeeds"
+        while another writer may already hold the replacement file.
+        """
+        try:
+            fd_stat = os.fstat(fd)
+            if fd_stat.st_nlink < 1:
+                return False
+            return os.stat(self.path).st_ino == fd_stat.st_ino
+        except OSError:
+            # Path vanished between open and verify — contend again.
+            return False
+
     def acquire(self) -> None:
         """Acquire the lock, nesting when this thread already owns it."""
         directory = os.path.dirname(self.path)
@@ -138,7 +154,7 @@ class WriteLock:
                 else:
                     fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
                     try:
-                        if _try_acquire(fd):
+                        if _try_acquire(fd) and self._fd_guards_live_path(fd):
                             _HELD_LOCKS[key] = _HeldLock(fd, pid, thread_id)
                             self._registry_key = key
                             self._owner_pid = pid
@@ -146,6 +162,12 @@ class WriteLock:
                             self._acquisitions = 1
                             self._fd = fd
                             return
+                        # The file we opened was deleted or replaced while we
+                        # contended (git clean -x, rm -rf .sot): flocking the
+                        # orphaned inode would fork the lock into two
+                        # independent files — two writers at once. Release and
+                        # contend again on the live path.
+                        _release(fd)
                     except BaseException:
                         try:
                             os.close(fd)

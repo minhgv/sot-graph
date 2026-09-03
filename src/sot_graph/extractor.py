@@ -7,9 +7,8 @@ import hashlib
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
-from sot_graph.db import Database
 from sot_graph.modutil import dotted_module, normalize_import, resolve_relative
 from sot_graph.parser_outcome import ParserOutcome, build_extractor_metadata, coerce_outcome
 
@@ -211,7 +210,7 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
         try:
             from sot_graph._vendor.graphify import extract as gx
         except ImportError:
-            from graphify import extract as gx
+            from graphify import extract as gx  # pyright: ignore[reportMissingImports]
         extractor_fn = getattr(gx, fn_name, None)
         if not extractor_fn:
             raise AttributeError(f"No extractor function {fn_name}")
@@ -243,7 +242,10 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
     if module and fn_name in ("extract_js", "extract_go", "extract_rust"):
         from sot_graph.ts_extract import module_form_of_import as _mfi
         ts_lang = {"extract_go": "go", "extract_rust": "rust"}.get(fn_name, "typescript")
-        _dir_module = rel_posix.rsplit("/", 1)[0].replace("/", ".") if "/" in rel_posix else ""
+        # Derive the directory module exactly as project module names are
+        # computed (dotted_module strips layout roots like src/lib) — raw
+        # path-segment dotting can never match "src/pkg/..." vs "pkg...."
+        _dir_module = dotted_module(rel_posix).rsplit(".", 1)[0] if "/" in rel_posix else ""
         for _e in raw_edges:
             if _e.get("relation") == "calls" and _e.get("import_raw"):
                 _fixed = _mfi(str(_e["import_raw"]), ts_lang, _dir_module)
@@ -323,7 +325,8 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
 
         src_id = symbol_to_node_id.get(src_raw, file_node_id)
         loc = str(re_edge.get("source_location", ""))
-        line_no = int(re.search(r"L(\d+)", loc).group(1)) if re.search(r"L(\d+)", loc) else None
+        _loc_match = re.search(r"L(\d+)", loc)
+        line_no = int(_loc_match.group(1)) if _loc_match else None
         receiver = re_edge.get("receiver")
 
         # P3.3b receiver-typed qualification runs BEFORE the bare-name
@@ -339,6 +342,22 @@ def parse_file_graph(path: str, root_dir: str) -> Dict[str, Any]:
                 edges.append({
                     "src": src_id,
                     "dst": typed_id,
+                    "relation": rel,
+                    "line": line_no,
+                })
+                continue
+
+        # Explicit same-object calls (`self.m()` / `this.m()` / `cls.m()`)
+        # target the class-scoped method even when the receiver's type could
+        # not be inferred; a same-named module-level symbol must never win
+        # the bare-name match first.
+        if rel == "calls" and "." in src_raw and receiver in ("self", "cls", "this"):
+            parent = src_raw.rsplit(".", 1)[0]
+            qualified_id = symbol_to_node_id.get(f"{parent}.{dst_raw}")
+            if qualified_id:
+                edges.append({
+                    "src": src_id,
+                    "dst": qualified_id,
                     "relation": rel,
                     "line": line_no,
                 })

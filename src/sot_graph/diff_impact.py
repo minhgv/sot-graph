@@ -375,7 +375,11 @@ class GitDeltaExtractor:
                         current_file_new = b_path[2:] if b_path.startswith("b/") else b_path
                 continue
 
-            if line.startswith("Binary files ") or "differ" in line:
+            if line.startswith("Binary files "):
+                # Only the literal 'Binary files … differ' header marks a
+                # binary file — an 'in line' check false-positives on ANY
+                # content line mentioning "differ" (logs, docs) and then
+                # skips every remaining hunk of that file.
                 current_is_binary = True
                 continue
 
@@ -1003,8 +1007,8 @@ class DiffImpactEngine:
             rows = self.conn.execute(
                 "SELECT id, fe_caller_symbol, http_method, normalized_uri, be_controller_symbol, fe_file, be_file "
                 "FROM api_cross_bindings "
-                "WHERE fe_caller_symbol = ? OR be_controller_symbol = ? OR be_controller_symbol LIKE ?",
-                (sym, sym, f"%{sym}%"),
+                "WHERE fe_caller_symbol = ? OR be_controller_symbol = ?",
+                (sym, sym),
             ).fetchall()
             for r in rows:
                 if r[0] not in seen_api_ids:
@@ -1027,8 +1031,8 @@ class DiffImpactEngine:
             rows = self.conn.execute(
                 "SELECT id, fe_caller_symbol, http_method, normalized_uri, be_controller_symbol, fe_file, be_file "
                 "FROM api_cross_bindings "
-                "WHERE fe_caller_symbol = ? OR be_controller_symbol = ? OR be_controller_symbol LIKE ?",
-                (sym, sym, f"%{sym}%"),
+                "WHERE fe_caller_symbol = ? OR be_controller_symbol = ?",
+                (sym, sym),
             ).fetchall()
             for r in rows:
                 if r[0] not in seen_api_ids:
@@ -1133,9 +1137,12 @@ class DiffImpactEngine:
                 rows = self.conn.execute(
                     "SELECT n.id, n.path, n.symbol, n.kind FROM graph_edges e "
                     "JOIN graph_nodes n ON e.src = n.id "
-                    "WHERE e.dst = ? AND (n.path LIKE '%test%' OR n.symbol LIKE 'test_%' OR n.symbol LIKE '%Test')",
+                    "WHERE e.dst = ?",
                     (d.id,),
                 ).fetchall()
+                rows = [r for r in rows
+                        if self._is_test_path(r[1])
+                        or (r[2] or "").lower().startswith("test")]
                 for r in rows:
                     key = f"db_edge:{r[0]}"
                     if key not in seen_test_keys:

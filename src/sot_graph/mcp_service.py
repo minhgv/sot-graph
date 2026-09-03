@@ -543,8 +543,11 @@ class McpService:
                       WHERE graph_fts MATCH ?"""
             params: List[Any] = [expr]
             if scope:
-                sql += " AND (k.path LIKE ? OR k.body LIKE ?)"
-                params.extend([f"%{scope}%", f"%{scope}%"])
+                # Escape LIKE metacharacters so scope "_" matches a literal
+                # underscore, mirroring db.search_fts escaping semantics.
+                escaped = str(scope).replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+                sql += " AND (k.path LIKE ? ESCAPE '\\' OR k.body LIKE ? ESCAPE '\\')"
+                params.extend([f"%{escaped}%", f"%{escaped}%"])
             sql += " ORDER BY rank_score ASC LIMIT ?"
             params.append(limit * 3)
             rows = conn.execute(sql, params).fetchall()
@@ -600,7 +603,7 @@ class McpService:
             })
         return self._run(op)
 
-    def explore(self, node_id: str, *, depth: int = 1, limit: int = 100) -> Dict[str, Any]:
+    def explore(self, node_id: str, *, depth: int = 2, limit: int = 100) -> Dict[str, Any]:
         if not isinstance(node_id, str) or not node_id.strip():
             raise McpServiceError("invalid_argument", "node_id must not be empty")
         if len(node_id) > 512:
@@ -715,18 +718,27 @@ class McpService:
             row = self._resolve_target_row(conn, target)
             view = cast(Database, _ConnView(conn))
             data = Database.usages(view, row["id"], row["symbol"])
-            callers = [{
+            callers_all = [{
                 "caller_id": caller["caller_id"],
                 "label": caller["label"],
                 "kind": caller["kind"],
                 "path": self._relative_path(caller["path"]),
                 "sites": caller["sites"],
-            } for caller in data["callers"][:limit]]
-            risk = [{
+            } for caller in data["callers"]]
+            risk_all = [{
                 "label": item["label"], "path": self._relative_path(item["path"]),
                 "dst_symbol": item["dst_symbol"], "relation": item["relation"],
                 "line": item["line"], "state": item["state"],
-            } for item in data["risk"][:limit]]
+            } for item in data["risk"]]
+            scope_prefix = ""
+            if scope:
+                scope_prefix = scope.replace("\\", "/").rstrip("/") + "/"
+                callers_all = [c for c in callers_all
+                               if c["path"] == scope or c["path"].startswith(scope_prefix)]
+                risk_all = [r for r in risk_all
+                            if r["path"] == scope or r["path"].startswith(scope_prefix)]
+            callers = callers_all[:limit]
+            risk = risk_all[:limit]
             view = cast(Database, _ConnView(conn))
             snapshot, stale = assured_query_context(
                 view, self.project_root,
@@ -742,6 +754,9 @@ class McpService:
                 "unresolved_count": data.get("unresolved_count", len(risk)),
                 "callers": callers,
                 "risk": risk,
+                "scope": scope or None,
+                "scope_filtered_out": (len(data["callers"]) + len(data["risk"]))
+                                      - (len(callers_all) + len(risk_all)),
                 "next_steps": data.get("next_steps", []),
                 "truncated": len(data["callers"]) > limit or len(data["risk"]) > limit,
                 "policy": _honest_policy_meta(provider_policy),

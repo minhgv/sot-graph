@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS pending_edges (
     PRIMARY KEY (path, src, dst_symbol, relation)
 );
 CREATE INDEX IF NOT EXISTS idx_pending_dst ON pending_edges(dst_symbol);
+CREATE INDEX IF NOT EXISTS idx_pending_src ON pending_edges(src);
 CREATE VIRTUAL TABLE IF NOT EXISTS graph_fts USING fts5(
     label, fqn, body, keywords, content='graph_nodes', content_rowid='rowid',
     tokenize="unicode61 remove_diacritics 0 tokenchars '_-.:$@'"
@@ -214,6 +215,7 @@ CREATE TABLE IF NOT EXISTS provider_evidence (
 CREATE INDEX IF NOT EXISTS idx_p_evidence_run ON provider_evidence(run_id);
 CREATE INDEX IF NOT EXISTS idx_p_evidence_prov ON provider_evidence(provider_name);
 CREATE INDEX IF NOT EXISTS idx_p_evidence_path ON provider_evidence(path);
+CREATE INDEX IF NOT EXISTS idx_p_evidence_file_path ON provider_evidence(file_path);
 CREATE INDEX IF NOT EXISTS idx_p_evidence_src ON provider_evidence(src_symbol);
 CREATE INDEX IF NOT EXISTS idx_p_evidence_dst ON provider_evidence(dst_symbol);
 CREATE INDEX IF NOT EXISTS idx_p_evidence_sym ON provider_evidence(symbol);
@@ -489,6 +491,7 @@ class Database:
                             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_run ON provider_evidence(run_id);")
                             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_prov ON provider_evidence(provider_name);")
                             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_path ON provider_evidence(path);")
+                            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_file_path ON provider_evidence(file_path);")
                             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_src ON provider_evidence(src_symbol);")
                             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_dst ON provider_evidence(dst_symbol);")
                             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_p_evidence_sym ON provider_evidence(symbol);")
@@ -673,18 +676,27 @@ class Database:
         except Exception:
             real_path = path
         real_fwd = real_path.replace(os.sep, "/")
+
+        def _like_literal(value: str) -> str:
+            # LIKE fallback must match a literal path: unescaped %/_ turn a
+            # queried name into a wildcard pattern that can bind a DIFFERENT
+            # file's journal row (util_.py ~ utils.py) and drive false
+            # unchanged/STALE verdicts.
+            return value.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+
         row = self.conn.execute(
             "SELECT sha256, size, mtime_ms, generation, reconciled_at "
             "FROM file_journal WHERE path = ? OR path = ? OR path = ? OR path = ? "
-            "OR path LIKE ? OR path LIKE ? OR path LIKE ? LIMIT 1",
+            "OR path LIKE ? ESCAPE '\\' OR path LIKE ? ESCAPE '\\' "
+            "OR path LIKE ? ESCAPE '\\' LIMIT 1",
             (
                 path,
                 norm_path,
                 real_path,
                 real_fwd,
-                f"%/{clean_fwd}",
-                f"%\\{clean_back}",
-                f"%/{norm_path.lstrip('/')}",
+                f"%/{_like_literal(clean_fwd)}",
+                f"%\\{_like_literal(clean_back)}",
+                f"%/{_like_literal(norm_path.lstrip('/'))}",
             ),
         ).fetchone()
         if row is None:
@@ -769,21 +781,29 @@ class Database:
         if not candidates:
             return 0
         now = int(_time.time())
-        marks: List[str] = []
-        params: List[Any] = []
-        for p in candidates:
-            p_fwd = p.replace("\\", "/")
-            p_back = p.replace("/", "\\")
-            marks.append("(path = ? OR path = ? OR file_path = ? OR file_path = ?)")
-            params.extend([p_fwd, p_back, p_fwd, p_back])
-        where = " OR ".join(marks)
+        # Chunk the OR groups: one unbounded statement exceeds SQLite's
+        # bound-parameter cap (~999 legacy / 32766 modern) on large diffs
+        # and aborts the whole invalidation with OperationalError.
+        CHUNK = 200  # paths per statement (x4 params each, +2 fixed = 802 < 999)
+        total = 0
         with self.conn:
-            cur = self.conn.execute(
-                "UPDATE provider_evidence SET invalidated_at = ?, invalidation_reason = ? "
-                f"WHERE invalidated_at IS NULL AND ({where})",
-                [now, reason, *params],
-            )
-        return cur.rowcount or 0
+            for start in range(0, len(candidates), CHUNK):
+                batch = candidates[start:start + CHUNK]
+                marks: List[str] = []
+                params: List[Any] = []
+                for p in batch:
+                    p_fwd = p.replace("\\", "/")
+                    p_back = p.replace("/", "\\")
+                    marks.append("(path = ? OR path = ? OR file_path = ? OR file_path = ?)")
+                    params.extend([p_fwd, p_back, p_fwd, p_back])
+                where = " OR ".join(marks)
+                cur = self.conn.execute(
+                    "UPDATE provider_evidence SET invalidated_at = ?, invalidation_reason = ? "
+                    f"WHERE invalidated_at IS NULL AND ({where})",
+                    [now, reason, *params],
+                )
+                total += cur.rowcount or 0
+        return total
 
     def all_journal_paths(self) -> List[str]:
         return [r[0] for r in self.conn.execute("SELECT path FROM file_journal ORDER BY path")]
@@ -1135,13 +1155,51 @@ class Database:
                 f"WHERE path IN ({path_marks})",
                 old_form_values,
             ).fetchall()
-            all_node_ids = {
-                str(row[0])
-                for row in self.conn.execute("SELECT id FROM graph_nodes").fetchall()
-            }
+
+            # Pre-filter in SQL: remap_id only rewrites ids whose text STARTS
+            # with an old form (optionally under the file:/sym: namespace),
+            # so a prefix-LIKE superset selects every row the Python pass
+            # below could touch — without materializing whole tables per
+            # renamed file.
+            def _prefix_pattern(prefix: str, form: str) -> str:
+                escaped = (
+                    (prefix + form)
+                    .replace("\\", "\\\\")
+                    .replace("%", "\\%")
+                    .replace("_", "\\_")
+                )
+                return escaped + "%"
+
+            edge_conditions: List[str] = [f"path IN ({path_marks})"]
+            edge_params: List[Any] = list(old_form_values)
+            pending_conditions: List[str] = [f"path IN ({path_marks})"]
+            pending_params: List[Any] = list(old_form_values)
+            for _prefix in ("", "file:", "sym:"):
+                for _form in old_form_values:
+                    _pattern = _prefix_pattern(_prefix, _form)
+                    edge_conditions.append(
+                        "(src LIKE ? ESCAPE '\\' OR dst LIKE ? ESCAPE '\\')"
+                    )
+                    edge_params.extend([_pattern, _pattern])
+                    pending_conditions.append("src LIKE ? ESCAPE '\\'")
+                    pending_params.append(_pattern)
+            # remap_id also rewrites hashed namespace ids (file:<sha12> /
+            # sym:<sha12>) that never contain the path text — include their
+            # prefixes so cross-file edges to the renamed file's symbols are
+            # not missed by the path pre-filter.
+            for _token, _replacement in namespace_rules:
+                _ns_pattern = _prefix_pattern("", _token)
+                edge_conditions.append(
+                    "(src LIKE ? ESCAPE '\\' OR dst LIKE ? ESCAPE '\\')"
+                )
+                edge_params.extend([_ns_pattern, _ns_pattern])
+                pending_conditions.append("src LIKE ? ESCAPE '\\'")
+                pending_params.append(_ns_pattern)
 
             edge_rows = self.conn.execute(
-                "SELECT path, src, dst, relation, line FROM graph_edges"
+                "SELECT path, src, dst, relation, line FROM graph_edges "
+                f"WHERE {' OR '.join(edge_conditions)}",
+                edge_params,
             ).fetchall()
             affected_edges = [
                 row
@@ -1153,7 +1211,8 @@ class Database:
             pending_rows = self.conn.execute(
                 "SELECT path, src, dst_symbol, relation, line, language, "
                 "call_kind, receiver, import_source, resolution_state "
-                "FROM pending_edges"
+                f"FROM pending_edges WHERE {' OR '.join(pending_conditions)}",
+                pending_params,
             ).fetchall()
             affected_pending = [
                 row
@@ -1180,8 +1239,27 @@ class Database:
 
             old_node_ids = {str(row[0]) for row in node_rows}
             mapped_ids = set(id_map.values())
+
+            # Membership tests against graph_nodes run as targeted chunked
+            # IN probes instead of materializing every node id in the DB.
+            def _existing_node_ids(candidates: Set[str]) -> Set[str]:
+                found: Set[str] = set()
+                ordered = sorted(candidates)
+                for i in range(0, len(ordered), 250):
+                    chunk = ordered[i:i + 250]
+                    id_marks = ",".join("?" for _ in chunk)
+                    found.update(
+                        str(row[0])
+                        for row in self.conn.execute(
+                            f"SELECT id FROM graph_nodes WHERE id IN ({id_marks})",
+                            chunk,
+                        )
+                    )
+                return found
+
+            existing_mapped = _existing_node_ids(mapped_ids)
             for mapped_id in mapped_ids:
-                if mapped_id in all_node_ids and mapped_id not in old_node_ids:
+                if mapped_id in existing_mapped and mapped_id not in old_node_ids:
                     raise ValueError(
                         f"cannot rehome {old_raw!r}: destination node ID "
                         f"{mapped_id!r} already exists"
@@ -1240,10 +1318,11 @@ class Database:
 
             # Temporarily free old primary keys, then publish the final IDs
             # after path/label/body updates.  References are reinserted below.
+            node_backed_old_ids = _existing_node_ids(set(id_map))
             temp_ids: Dict[str, str] = {
                 old_id: f"__sot_rehome__{uuid.uuid4().hex}"
                 for old_id in id_map
-                if old_id in all_node_ids
+                if old_id in node_backed_old_ids
             }
             for old_id, temp_id in temp_ids.items():
                 self.conn.execute(
@@ -1480,6 +1559,9 @@ class Database:
     def _resolve_pending_edges_pass(
         self,
         row_filter=None,
+        *,
+        filter_symbols: Optional[List[str]] = None,
+        filter_path: Optional[str] = None,
     ) -> Dict[str, int]:
         """Binding-aware pending-edge resolution.
 
@@ -1600,10 +1682,32 @@ class Database:
                 for mod_name in path_module_names(imp_path):
                     reexport_map[(mod_name, dst_symbol)] = (imp_dst, dst_path)
 
-        rows = self.conn.execute(
-            "SELECT rowid, path, src, dst_symbol, relation, line, import_source, receiver, call_kind "
-            "FROM pending_edges"
-        ).fetchall()
+        if filter_symbols or filter_path:
+            # SQL pushdown of the per-file scope (dst_symbol IN wanted OR
+            # path = current file): fetching only candidate rows instead of
+            # materializing the whole pending table on every file commit.
+            conditions: List[str] = []
+            fetch_params: List[Any] = []
+            if filter_path:
+                conditions.append("path = ?")
+                fetch_params.append(filter_path)
+            unique_symbols = list(dict.fromkeys(filter_symbols or ()))
+            for i in range(0, len(unique_symbols), 250):
+                chunk = unique_symbols[i:i + 250]
+                conditions.append(
+                    f"dst_symbol IN ({','.join('?' for _ in chunk)})"
+                )
+                fetch_params.extend(chunk)
+            rows = self.conn.execute(
+                "SELECT rowid, path, src, dst_symbol, relation, line, import_source, receiver, call_kind "
+                "FROM pending_edges WHERE " + " OR ".join(conditions),
+                fetch_params,
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT rowid, path, src, dst_symbol, relation, line, import_source, receiver, call_kind "
+                "FROM pending_edges"
+            ).fetchall()
 
         promoted = external = ambiguous = unresolved = 0
         edge_rows: List[Tuple[str, str, str, str, Optional[int]]] = []
@@ -1743,14 +1847,10 @@ class Database:
         """Legacy v1 API: resolve only rows matching the new symbols or path."""
         if not new_symbols and not current_file_path:
             return 0
-        wanted = set(new_symbols)
-
-        def row_filter(path: str, dst_symbol: str) -> bool:
-            if wanted and dst_symbol in wanted:
-                return True
-            return bool(current_file_path) and path == current_file_path
-
-        return self._resolve_pending_edges_pass(row_filter=row_filter)["promoted"]
+        return self._resolve_pending_edges_pass(
+            filter_symbols=list(new_symbols),
+            filter_path=current_file_path,
+        )["promoted"]
 
     def _path_inside(self, path: str, root_dir: str) -> bool:
         try:

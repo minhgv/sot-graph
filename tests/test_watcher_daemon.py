@@ -89,7 +89,10 @@ class TestWatcherDaemon(unittest.TestCase):
         )
         check_output.assert_not_called()
 
-    def test_process_identity_refuses_windows_without_proc_or_ps(self):
+    def test_process_identity_windows_queries_cim_and_degrades_to_none(self):
+        # Windows now derives identity from CIM cmdlets so daemon start is
+        # verifiable; when no query tool exists it must still return None
+        # (unverifiable — never manufactured).
         with (
             patch("sot_graph.watcher.sys.platform", "win32"),
             patch.object(Path, "is_dir", return_value=False),
@@ -101,7 +104,7 @@ class TestWatcherDaemon(unittest.TestCase):
             identity = _process_identity(os.getpid())
 
         self.assertIsNone(identity)
-        check_output.assert_not_called()
+        self.assertGreaterEqual(check_output.call_count, 1)
 
     def test_start_daemon_does_not_publish_unverifiable_windows_identity(self):
         class DummyProc:
@@ -129,7 +132,9 @@ class TestWatcherDaemon(unittest.TestCase):
         self.assertIn("identity could not be verified", message)
         self.assertTrue(proc.terminated)
         popen.assert_called_once()
-        check_output.assert_not_called()
+        # CIM query was attempted (win32 path) and its failure made the
+        # launch unverifiable → aborted without publishing a PID file.
+        self.assertGreaterEqual(check_output.call_count, 1)
         self.assertFalse((self.root / ".sot" / "watch.pid").exists())
 
         status = status_daemon(str(self.root))

@@ -15,9 +15,10 @@ import sqlite3
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from contextlib import AbstractContextManager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, cast
 
 from sot_graph.db import Database
 from sot_graph.extractor import EXT_DISPATCH, parse_file_graph
@@ -447,8 +448,9 @@ class Reconciler:
             if fresh:
                 expected = {record.path: record.base_generation for record in fresh}
                 batch = getattr(self.db, "commit_file_batch", None)
+                outcome: Dict[str, Any]
                 if callable(batch):
-                    outcome = batch(fresh, expected_generations=expected)
+                    outcome = cast(Dict[str, Any], batch(fresh, expected_generations=expected))
                 else:
                     # Kept solely for databases created by v1 callers during a
                     # rolling upgrade; no CAS data is available there.
@@ -466,13 +468,13 @@ class Reconciler:
                 conflicts.extend(outcome.get("conflicts", []))
         return conflicts
 
-    def _publication_gate(self):
+    def _publication_gate(self) -> AbstractContextManager[Any]:
         """Serialize mutations behind the stable `.sot/write.lock`."""
         from contextlib import contextmanager
 
         lock_factory = getattr(self.db, "write_lock", None)
         if callable(lock_factory):
-            return lock_factory()
+            return cast(AbstractContextManager[Any], lock_factory())
 
         @contextmanager
         def _unlocked():
@@ -503,6 +505,15 @@ class Reconciler:
             with self._publication_gate():
                 self._delete_path_variants(absolute)
             return "deleted"
+        if not self._supported(absolute):
+            # Watcher-fed events can name unsupported/binary files (logos,
+            # data blobs). Indexing them would publish file nodes that the
+            # next full reconcile's deletion sweep removes again —
+            # add/delete churn plus binary bytes in FTS. Delete any legacy
+            # rows (mirrors scan()'s supported-only semantics) and stop.
+            with self._publication_gate():
+                self._delete_path_variants(absolute)
+            return "excluded"
         job = ParseJob(
             absolute,
             self.root_dir,
@@ -731,6 +742,14 @@ class Reconciler:
                 janitor = getattr(self.db, "cleanup_orphan_edges", None)
                 if callable(janitor):
                     janitor()
+                # The optional vector index is not maintained transactionally
+                # with graph mutations — drop embeddings of nodes this pass
+                # deleted so they stop answering vector queries.
+                try:
+                    from sot_graph.vector import prune_orphans
+                    prune_orphans(self.db.conn)
+                except Exception:
+                    pass
         except KeyboardInterrupt:
             interrupted = True
             if executor is not None:

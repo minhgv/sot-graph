@@ -69,20 +69,27 @@ def pick_backend(requested: str) -> str:
     return "watchfiles" if _WATCHFILES is not None else "poll"
 
 
-def _reconcile_quietly(reconciler, paths: Set[str]) -> int:
-    """Reconcile changed paths; back off gracefully when the lock is busy."""
+def _reconcile_quietly(reconciler, paths: Set[str]) -> Tuple[int, Set[str]]:
+    """Reconcile changed paths; return (published, deferred).
+
+    LockBusy paths are DEFERRED, never dropped: they must be re-enqueued
+    into the next debounce batch, otherwise a long write-lock holder (CLI
+    migration, provider sync) silently voids every event raised while it
+    runs and the DB stays stale until the file changes again.
+    """
     published = 0
+    deferred: Set[str] = set()
     for path in sorted(paths):
         try:
             outcome = reconciler.reconcile_path(path)
         except LockBusy:
-            time.sleep(0.2)
+            deferred.add(path)
             continue
         except Exception:
             continue
-        if outcome not in ("error",):
+        if outcome not in ("error", "excluded"):
             published += 1
-    return published
+    return published, deferred
 
 
 def _run_watchfiles(
@@ -93,6 +100,7 @@ def _run_watchfiles(
     stop_event: Optional[threading.Event] = None,
 ) -> None:
     assert _WATCHFILES is not None
+    pending: Set[str] = set()  # LockBusy carry-over into the next batch
     for changes in _WATCHFILES.watch(
         root, debounce=int(debounce_ms), recursive=True, step=50
     ):
@@ -102,10 +110,12 @@ def _run_watchfiles(
             path for _kind, path in changes
             if not reconciler.ignore_matcher.is_ignored(path)
         }
+        paths |= pending
+        pending = set()
         if not paths:
             continue
         log(f"change: {len(paths)} file(s) in {Path(root).name}")
-        _reconcile_quietly(reconciler, paths)
+        _published, pending = _reconcile_quietly(reconciler, paths)
 
 
 def _run_polling(
@@ -160,7 +170,13 @@ def _run_polling(
                 changed |= delta
                 quiet_until = time.monotonic() + debounce_ms / 1000.0
         log(f"change: {len(changed)} file(s) in {Path(root).name}")
-        _reconcile_quietly(reconciler, changed)
+        _published, deferred = _reconcile_quietly(reconciler, changed)
+        # Polling re-detects disk state every interval, but a path locked
+        # NOW would wait a full extra cycle: retry it shortly instead.
+        retry_at = time.monotonic() + 0.2
+        while deferred and time.monotonic() < retry_at:
+            time.sleep(0.05)
+            _published, deferred = _reconcile_quietly(reconciler, deferred)
 
 
 def run_watch(
@@ -335,15 +351,30 @@ def _process_identity(pid: int) -> Optional[Dict[str, str]]:
     """Read a process start marker and command without invoking a shell.
 
     Linux and macOS expose enough process metadata through ``/proc`` or the
-    native ``ps`` command to detect PID reuse.  Windows has neither a
-    guaranteed ``/proc`` mount nor a portable ``ps`` implementation, so do
-    not manufacture an identity from an implementation-specific command.
-    ``start_daemon`` treats the missing identity as an unverified launch.
+    native ``ps`` command to detect PID reuse. Windows has neither, but the
+    CIM cmdlets provide the same signals — querying them keeps daemon start
+    verifiable on Windows instead of deterministically failing.
     """
     if pid <= 0:
         return None
     if sys.platform == "win32":
-        return None
+        try:
+            def cim(field: str) -> Optional[str]:
+                out = subprocess.check_output(
+                    ["powershell", "-NoProfile", "-Command",
+                     f"(Get-CimInstance Win32_Process -Filter "
+                     f"'ProcessId={pid}').{field}"],
+                    stderr=subprocess.DEVNULL, timeout=10,
+                )
+                text = out.decode("utf-8", "replace").strip() if isinstance(out, bytes) else str(out).strip()
+                return text or None
+            command = cim("CommandLine")
+            start = cim("CreationDate")
+            if command and start:
+                return {"command": command, "start": start}
+            return None
+        except Exception:
+            return None
     try:
         command: Optional[str] = None
         start: Optional[str] = None

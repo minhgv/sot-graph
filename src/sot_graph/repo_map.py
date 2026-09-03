@@ -131,7 +131,9 @@ def _render(symbols: List[Dict[str, Any]]) -> str:
 
 
 def _estimate_tokens(text: str) -> int:
-    return max(1, len(text) // _CHARS_PER_TOKEN)
+    # Same estimator as build_repo_map, kept for direct callers; the old
+    # body divided by an undefined `_CHARS_PER_TOKEN` constant (NameError).
+    return estimate_tokens(text)
 
 
 def build_repo_map(

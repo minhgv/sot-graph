@@ -141,6 +141,21 @@ class TrustVerifier:
                 parse_outcome = ParserOutcome.COMPLETE.value
                 exact_span_found = False
                 exact_symbol_found = False
+
+                def _decl_name(node: ast.AST) -> Optional[str]:
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                        return node.name
+                    if isinstance(node, ast.Assign):
+                        for target in node.targets:
+                            if isinstance(target, ast.Name):
+                                return target.id
+                    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                        return node.target.id
+                    return None
+
+                name_hits = sum(
+                    1 for n in ast.walk(tree) if _decl_name(n) == symbol_needle
+                )
                 for node in ast.walk(tree):
                     name = None
                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -158,7 +173,13 @@ class TrustVerifier:
                         node_start = getattr(node, "lineno", 0)
                         node_end = getattr(node, "end_lineno", node_start)
                         if cand_line and cand_line > 0:
-                            if (node_start - 2) <= cand_line <= (node_end + 2):
+                            in_span = node_start <= cand_line <= node_end
+                            # ±2 tolerance only while the name is unique in
+                            # this file; with duplicated names (two classes
+                            # declaring the same method, adjacent accessors)
+                            # the slack confirms the wrong declaration.
+                            if in_span or (name_hits <= 1
+                                           and (node_start - 2) <= cand_line <= (node_end + 2)):
                                 exact_span_found = True
                                 break
 
@@ -396,26 +417,38 @@ class TrustVerifier:
                             try:
                                 from sot_graph.reconciler import Reconciler
                                 rec = Reconciler(db, root)
-                                rec.reconcile(paths=[requested], workers=1)
-                                freshness = FreshnessStatus.FRESH
-                                is_stale = False
-                                # Post-reconcile check: verify if the candidate node still physically exists in DB
-                                cand_id = candidate.get("id")
-                                if cand_id and hasattr(db, "get_node"):
-                                    post_node = db.get_node(cand_id)
-                                    if post_node is None:
-                                        # Node was purged during reconciliation -> mark REMOVED
-                                        return TrustEvidence(
-                                            freshness=FreshnessStatus.FRESH,
-                                            relevance=RelevanceType.NAME_ONLY,
-                                            resolution=ResolutionStatus.UNRESOLVED,
-                                            completeness=CompletenessStatus.NOT_APPLICABLE,
-                                            confidence=0.0,
-                                            provenance="jit_reconcile:purged",
-                                            file_path=requested,
-                                            file_hash=file_hash,
-                                            details={"removed": True, "stale": False},
-                                        )
+                                summary = rec.reconcile(paths=[requested], workers=1)
+                                # Trust FRESH only when the reconcile actually
+                                # published this path (or found it clean): a
+                                # conflict/failed commit must NOT be laundered
+                                # into a FRESH verdict on unindexed content.
+                                post = db.get_file_journal(requested) if hasattr(db, "get_file_journal") else None
+                                reconciled_clean = bool(
+                                    summary is None
+                                    or (getattr(summary, "failed", 0) or 0) == 0
+                                ) and post is not None and post.get("sha256") == file_hash
+                                if reconciled_clean:
+                                    freshness = FreshnessStatus.FRESH
+                                    is_stale = False
+                                    # Post-reconcile check: verify if the candidate node still physically exists in DB
+                                    cand_id = candidate.get("id")
+                                    if cand_id and hasattr(db, "get_node"):
+                                        post_node = db.get_node(cand_id)
+                                        if post_node is None:
+                                            # Node was purged during reconciliation -> mark REMOVED
+                                            return TrustEvidence(
+                                                freshness=FreshnessStatus.FRESH,
+                                                relevance=RelevanceType.NAME_ONLY,
+                                                resolution=ResolutionStatus.UNRESOLVED,
+                                                completeness=CompletenessStatus.NOT_APPLICABLE,
+                                                confidence=0.0,
+                                                provenance="jit_reconcile:purged",
+                                                file_path=requested,
+                                                file_hash=file_hash,
+                                                details={"removed": True, "stale": False},
+                                            )
+                                else:
+                                    freshness = FreshnessStatus.STALE
                             except Exception:
                                 freshness = FreshnessStatus.STALE
                         else:

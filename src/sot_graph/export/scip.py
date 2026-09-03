@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict
 
 ROLE_DEFINITION = 0x1
 ROLE_IMPORT = 0x2

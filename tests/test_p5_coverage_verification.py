@@ -106,7 +106,7 @@ class TestCoverageStates:
             report = repo_coverage(db, str(covered_repo))
             states = {f.path: f.state for f in report.files}
             assert states["src/app.py"] == CoverageState.STALE
-            assert "parser-failed" in report.gaps  # stale honestly reported
+            assert "stale-content" in report.gaps  # stale honestly reported
             comp = completeness(report, "symbols")
             assert comp is not None and comp < 1.0
         finally:

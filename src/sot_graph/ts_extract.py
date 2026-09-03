@@ -597,7 +597,10 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
                             "source_location": f"L{line(node)}",
                         })
 
-    def walk(node: Any, containers: Tuple[str, ...], current_def: Optional[str]) -> None:
+    def visit(
+        node: Any, containers: Tuple[str, ...], current_def: Optional[str]
+    ) -> List[Tuple[Any, Tuple[str, ...], Optional[str]]]:
+        out: List[Tuple[Any, Tuple[str, ...], Optional[str]]] = []
         node_type = node.type
 
         # P3.3b receiver typing + constructor edges (AST-anchored).
@@ -664,10 +667,10 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
                             "source_location": f"L{line(child)}",
                         })
                     for sub in val_node.children:
-                        walk(sub, containers, raw_id)
+                        out.append((sub, containers, raw_id))
                 elif val_node:
-                    walk(val_node, containers, current_def)
-            return
+                    out.append((val_node, containers, current_def))
+            return out
         if language == "elixir" and node_type == "call":
             # In Elixir, defmodule, def, defp, defmacro, defprotocol are call nodes
             first_child = node.child_by_field_name("name") or (node.children[0] if node.children else None)
@@ -696,8 +699,8 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
                             "source_location": f"L{line(node)}",
                         })
                     for child in node.children:
-                        walk(child, containers + (mod_name,), current_def)
-                    return
+                        out.append((child, containers + (mod_name,), current_def))
+                    return out
             elif f_text in ("def", "defp", "defmacro", "defprotocol", "defimpl"):
                 args_node = node.child_by_field_name("arguments") or (node.children[1] if len(node.children) > 1 else None)
                 fn_name = None
@@ -730,8 +733,8 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
                     # Walk only inside do_block body to avoid caller matching its own signature
                     do_block = node.child_by_field_name("do_block") or next((c for c in node.children if c.type == "do_block"), None)
                     if do_block:
-                        walk(do_block, containers, raw_id)
-                    return
+                        out.append((do_block, containers, raw_id))
+                    return out
         if node_type in defs_cfg:
             field, kind = defs_cfg[node_type]
             name = name_of(node, field)
@@ -815,15 +818,15 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
                                     m_name = name_of(member, "name")
                                     if m_name:
                                         active_method = f"{name}.{m_name}"
-                                        walk(member, next_containers, current_def)
+                                    out.append((member, next_containers, current_def))
                                 elif member.type == "function_body":
-                                    walk(member, next_containers, active_method)
+                                    out.append((member, next_containers, active_method))
                                 else:
-                                    walk(member, next_containers, current_def)
-                            return
+                                    out.append((member, next_containers, current_def))
+                            return out
                 for child in node.children:
-                    walk(child, next_containers, raw_id if kind != "class" else current_def)
-                return
+                    out.append((child, next_containers, raw_id if kind != "class" else current_def))
+                return out
         # Check calls against configured call patterns
         for call_spec in calls_cfg_list:
             if node_type == call_spec["type"]:
@@ -854,25 +857,59 @@ def extract_ts(path: Path, language: str) -> Dict[str, Any]:
                 break
 
         for child in node.children:
-            walk(child, containers, current_def)
+            out.append((child, containers, current_def))
+        return out
 
-    walk(tree.root_node, (), None)
+    # Iterative pre-order traversal: minified bundles nest far beyond the
+    # interpreter recursion limit, and one RecursionError used to cost the
+    # whole file its symbols. Reversed pushes on a LIFO stack preserve the
+    # original visit order.
+    stack: List[Tuple[Any, Tuple[str, ...], Optional[str]]] = [(tree.root_node, (), None)]
+    while stack:
+        _node, _containers, _current_def = stack.pop()
+        _pending = visit(_node, _containers, _current_def)
+        stack.extend(reversed(_pending))
 
     decoded = source.decode("utf-8", "replace")
-    for i, source_line in enumerate(decoded.splitlines(), 1):
-        for pattern in cfg.get("imports", []):
-            match = re.search(pattern, source_line)
-            if match:
-                raw_target = match.group(1).strip()
-                target_clean = raw_target.split("/")[-1].split(".")[0] if ("/" in raw_target or "." in raw_target) else raw_target
-                edges.append({
-                    "source": path.name,
-                    "target": target_clean or raw_target,
-                    "relation": "imports",
-                    "source_location": f"L{i}",
-                    "import_source": raw_target,
-                })
-                break
+
+    def _import_edge(raw_target: str, lineno: int) -> None:
+        target_clean = raw_target.split("/")[-1].split(".")[0] if ("/" in raw_target or "." in raw_target) else raw_target
+        edges.append({
+            "source": path.name,
+            "target": target_clean or raw_target,
+            "relation": "imports",
+            "source_location": f"L{lineno}",
+            "import_source": raw_target,
+        })
+
+    if language == "go":
+        # gofmt groups imports in a block — the per-line regex never sees
+        # those path lines, so handle grouped (and blank/dot-alias) imports
+        # with a dedicated scan keeping true line numbers.
+        go_member = re.compile(r'^\s*(?:[\w.]+\s+)?"([^"]+)"')
+        in_block = False
+        for i, source_line in enumerate(decoded.splitlines(), 1):
+            stripped = source_line.strip()
+            if in_block:
+                if stripped == ")":
+                    in_block = False
+                else:
+                    m = go_member.match(source_line)
+                    if m:
+                        _import_edge(m.group(1).strip(), i)
+            elif re.match(r"^import\s*\(", stripped):
+                in_block = True
+            else:
+                m = re.search(r'\bimport\s+(?:[\w.]+\s+)?"([^"]+)"', source_line)
+                if m:
+                    _import_edge(m.group(1).strip(), i)
+    else:
+        for i, source_line in enumerate(decoded.splitlines(), 1):
+            for pattern in cfg.get("imports", []):
+                match = re.search(pattern, source_line)
+                if match:
+                    _import_edge(match.group(1).strip(), i)
+                    break
     # Attach import provenance to call edges so the DB-side resolver can
     # disambiguate same-named symbols by the calling file's imports
     # (mirrors the Python extractor's ``import_source`` behavior).

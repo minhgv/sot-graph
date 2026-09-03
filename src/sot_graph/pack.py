@@ -337,6 +337,9 @@ def build_bundle(
                 })
 
     # Hard byte cap: keep target + inbound contracts; drop from the tail.
+    # Load trusted instructions first so the cap accounts for them too.
+    trusted = _load_trusted_instructions(root, max_bytes)
+
     def _approx_bytes() -> int:
         draft = {
             "schema_version": BUNDLE_SCHEMA_VERSION,
@@ -344,6 +347,7 @@ def build_bundle(
             "base_generation": base_generation,
             "generated_at": int(time.time()),
             "content_is_untrusted": True,
+            "trusted_instructions": trusted,
             "target": target_block,
             "inbound_callers": inbound,
             "outbound_callees": outbound,
@@ -394,7 +398,6 @@ def build_bundle(
             "warnings": warnings,
         },
     }
-    trusted = _load_trusted_instructions(root, max_bytes)
     if trusted is not None:
         bundle["trusted_instructions"] = trusted
 

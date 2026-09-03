@@ -316,11 +316,11 @@ Before implementing any code changes, new features, or refactoring:
 
 A fundamental operational question: **"When integrating sot-graph into a codebase, what is the token overhead?"**
 
-> **Core Finding:** `sot-graph` itself consumes **0 LLM Tokens** ($0.00 USD) for indexing, storage, and retrieval, while enabling AI Agents to **SAVE between 65% and 90% of token ingestion into the Context Window** across the software lifecycle.
+> **Core Finding:** `sot-graph` itself consumes **0 LLM Tokens** (0.00 USD) for indexing, storage, and retrieval, while enabling AI Agents to **SAVE between 65% and 90% of token ingestion into the Context Window** across the software lifecycle.
 
 ---
 
-### 1. Intrinsic Operational Cost: 0 LLM Tokens ($0.00 USD)
+### 1. Intrinsic Operational Cost: 0 LLM Tokens (0.00 USD)
 
 Unlike cloud RAG or vector database solutions (which consume continuous API credits for LLM summarization and embedding vectors):
 

@@ -98,7 +98,11 @@ class IgnoreRule:
         # Normalize relative path to use forward slashes
         norm_path = rel_path.replace("\\", "/")
         if self.base_dir:
-            if not norm_path.startswith(self.base_dir):
+            # Segment-wise anchoring: a rule scoped to "sub/dir" must not
+            # leak into sibling directories sharing the prefix
+            # ("sub/diraneous/..." startswith "sub/dir" is NOT a match).
+            if not (norm_path == self.base_dir
+                    or norm_path.startswith(self.base_dir + "/")):
                 return False
             # Strip base_dir prefix
             norm_path = norm_path[len(self.base_dir):].lstrip("/")
@@ -186,6 +190,26 @@ class GitIgnoreMatcher:
             fpath = os.path.join(self.root_dir, fname)
             if os.path.isfile(fpath):
                 self.load_file(fpath, base_dir="")
+        self._load_nested_ignore_files()
+
+    def _load_nested_ignore_files(self) -> None:
+        """Load subdirectory .gitignore/.sotignore files (git semantics).
+
+        Rules from a nested file apply only beneath their directory.
+        Hardcoded-ignored directories are pruned from the walk — git never
+        reads ignore files inside excluded trees either.
+        """
+        for dirpath, dirnames, filenames in os.walk(self.root_dir, followlinks=False):
+            dirnames[:] = [d for d in sorted(dirnames)
+                           if d not in self.ignored_dirs
+                           and not d.startswith(".graphify")
+                           and not d.endswith("_vault")]
+            if dirpath == self.root_dir:
+                continue  # root files already loaded above
+            for fname in (".gitignore", ".sotignore"):
+                if fname in filenames:
+                    base = os.path.relpath(dirpath, self.root_dir).replace(os.sep, "/")
+                    self.load_file(os.path.join(dirpath, fname), base_dir=base)
 
     def add_pattern(self, pattern: str, base_dir: str = "") -> None:
         raw = pattern.strip()
@@ -224,6 +248,13 @@ class GitIgnoreMatcher:
         except OSError:
             pass
 
+    def _negation_overrides(self, norm_rel: str, is_dir: bool) -> bool:
+        """True when a negation rule (!pattern) re-includes this path."""
+        for rule in reversed(self.rules):
+            if rule.is_negated and rule.match(norm_rel, is_dir):
+                return True
+        return False
+
     def is_ignored(self, abs_or_rel_path: str, is_dir: bool = False) -> bool:
         """
         Check if a path is ignored according to default dirs, heuristics, or gitignore rules.
@@ -241,16 +272,21 @@ class GitIgnoreMatcher:
             return False
 
         parts = norm_rel.split("/")
-        
-        # 1. Fast check against hardcoded ignored directory names in any path segment
+
+        # 1. Fast check against hardcoded ignored directory names in any path
+        # segment. An explicit negation rule (!pattern) is the user's escape
+        # hatch to re-include a subtree (e.g. `!node_modules/pkg/`), so it is
+        # consulted before the fast path can ignore.
         for i, segment in enumerate(parts):
             seg_is_dir = is_dir if i == len(parts) - 1 else True
             if seg_is_dir:
                 if segment in self.ignored_dirs:
-                    return True
+                    if not self._negation_overrides(norm_rel, is_dir):
+                        return True
                 # Heuristic: graphify patterns or temp artifacts
                 if segment.startswith(".graphify") or segment.endswith("_vault"):
-                    return True
+                    if not self._negation_overrides(norm_rel, is_dir):
+                        return True
 
         # 2. Virtual environment heuristic for directory path
         if is_dir and is_virtualenv_dir(os.path.join(self.root_dir, norm_rel), parts[-1]):

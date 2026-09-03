@@ -1,0 +1,1688 @@
+<!DOCTYPE html>
+<html lang="vi" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cẩm Nang Toàn Diện SOT-Graph: MCP Tools & CLI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg-primary: #0b0f19;
+      --bg-secondary: #111827;
+      --bg-card: #1f2937;
+      --bg-card-hover: #263345;
+      --border-color: #374151;
+      --border-subtle: #242e3f;
+      --text-primary: #f3f4f6;
+      --text-secondary: #9ca3af;
+      --text-muted: #6b7280;
+      --accent-emerald: #10b981;
+      --accent-cyan: #06b6d4;
+      --accent-indigo: #6366f1;
+      --accent-amber: #f59e0b;
+      --accent-rose: #f43f5e;
+      --code-bg: #030712;
+      --sidebar-width: 290px;
+    }
+
+    html.light {
+      --bg-primary: #f8fafc;
+      --bg-secondary: #ffffff;
+      --bg-card: #f1f5f9;
+      --bg-card-hover: #e2e8f0;
+      --border-color: #cbd5e1;
+      --border-subtle: #e2e8f0;
+      --text-primary: #0f172a;
+      --text-secondary: #475569;
+      --text-muted: #94a3b8;
+      --accent-emerald: #059669;
+      --accent-cyan: #0891b2;
+      --accent-indigo: #4f46e5;
+      --accent-amber: #d97706;
+      --accent-rose: #e11d48;
+      --code-bg: #1e293b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.65;
+      display: flex;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Sidebar Navigation */
+    #sidebar {
+      width: var(--sidebar-width);
+      background-color: var(--bg-secondary);
+      border-right: 1px solid var(--border-color);
+      height: 100vh;
+      position: sticky;
+      top: 0;
+      display: flex;
+      flex-direction: column;
+      z-index: 50;
+      flex-shrink: 0;
+    }
+
+    .sidebar-header {
+      padding: 20px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .brand-title {
+      font-size: 1.25rem;
+      font-weight: 800;
+      letter-spacing: -0.025em;
+      background: linear-gradient(135deg, var(--accent-emerald), var(--accent-cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-subtitle {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+    }
+
+    .nav-search {
+      margin: 14px 16px 8px;
+    }
+
+    .nav-search input {
+      width: 100%;
+      padding: 9px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      background-color: var(--bg-primary);
+      color: var(--text-primary);
+      font-size: 0.85rem;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+
+    .nav-search input:focus {
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.2);
+    }
+
+    .nav-links {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 14px 24px;
+      list-style: none;
+    }
+
+    .nav-group-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      letter-spacing: 0.06em;
+      margin: 18px 8px 6px;
+    }
+
+    .nav-item a {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 10px;
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 0.86rem;
+      border-radius: 6px;
+      transition: all 0.15s ease;
+    }
+
+    .nav-item a:hover {
+      background-color: var(--bg-card);
+      color: var(--text-primary);
+    }
+
+    .nav-item.active a {
+      background-color: rgba(16, 185, 129, 0.12);
+      color: var(--accent-emerald);
+      font-weight: 600;
+    }
+
+    .sidebar-footer {
+      padding: 14px 20px;
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.8rem;
+    }
+
+    .theme-toggle-btn {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .theme-toggle-btn:hover {
+      background: var(--bg-card-hover);
+    }
+
+    /* Main Content Area */
+    #content {
+      flex: 1;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 48px 120px;
+    }
+
+    /* Hero Section */
+    .hero-banner {
+      padding: 36px 32px;
+      background: linear-gradient(145deg, rgba(17, 24, 39, 0.85), rgba(31, 41, 55, 0.6));
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      margin-bottom: 40px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    }
+
+    .hero-banner::before {
+      content: "";
+      position: absolute;
+      top: -120px;
+      right: -120px;
+      width: 320px;
+      height: 320px;
+      background: radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, rgba(6, 182, 212, 0) 70%);
+      pointer-events: none;
+    }
+
+    .hero-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--accent-emerald);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 4px 12px;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 16px;
+    }
+
+    .hero-title {
+      font-size: 2.2rem;
+      font-weight: 800;
+      line-height: 1.25;
+      margin-bottom: 12px;
+      letter-spacing: -0.02em;
+    }
+
+    .hero-desc {
+      color: var(--text-secondary);
+      font-size: 1.05rem;
+      max-width: 800px;
+    }
+
+    .hero-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-top: 28px;
+    }
+
+    .stat-card {
+      background: rgba(3, 7, 18, 0.45);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 14px 18px;
+    }
+
+    .stat-value {
+      font-size: 1.45rem;
+      font-weight: 800;
+      color: var(--accent-cyan);
+      font-family: 'Fira Code', monospace;
+    }
+
+    .stat-label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* Headings & Text */
+    h2 {
+      font-size: 1.65rem;
+      font-weight: 700;
+      margin: 48px 0 20px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      letter-spacing: -0.02em;
+    }
+
+    h3 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin: 32px 0 14px;
+      color: var(--accent-cyan);
+    }
+
+    h4 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin: 20px 0 10px;
+    }
+
+    p {
+      margin-bottom: 14px;
+      color: var(--text-secondary);
+    }
+
+    /* Cards & Tool Layout */
+    .tool-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      margin-bottom: 24px;
+      overflow: hidden;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .tool-card:hover {
+      border-color: var(--accent-cyan);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    }
+
+    .tool-header {
+      padding: 16px 20px;
+      background: rgba(0, 0, 0, 0.2);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .tool-name {
+      font-family: 'Fira Code', monospace;
+      font-size: 1.08rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tool-category-badge {
+      font-size: 0.72rem;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-weight: 600;
+      text-transform: uppercase;
+      background: rgba(99, 102, 241, 0.18);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, 0.3);
+    }
+
+    .tool-body {
+      padding: 20px;
+    }
+
+    .tool-desc {
+      font-size: 0.95rem;
+      margin-bottom: 16px;
+      color: var(--text-primary);
+    }
+
+    .param-title {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: var(--text-muted);
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+
+    .param-list {
+      list-style: none;
+      margin-bottom: 16px;
+    }
+
+    .param-item {
+      font-size: 0.88rem;
+      padding: 4px 0;
+      display: flex;
+      gap: 8px;
+    }
+
+    .param-name {
+      font-family: 'Fira Code', monospace;
+      color: var(--accent-cyan);
+      font-weight: 500;
+    }
+
+    .param-type {
+      color: var(--text-muted);
+      font-size: 0.8rem;
+    }
+
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      font-family: 'Fira Code', monospace;
+    }
+
+    .badge-strong {
+      background: rgba(16, 185, 129, 0.2);
+      color: #6ee7b7;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+    }
+
+    .badge-weak {
+      background: rgba(245, 158, 11, 0.2);
+      color: #fde68a;
+      border: 1px solid rgba(245, 158, 11, 0.4);
+    }
+
+    .badge-rebuilt {
+      background: rgba(6, 182, 212, 0.2);
+      color: #bae6fd;
+      border: 1px solid rgba(6, 182, 212, 0.4);
+    }
+
+    .badge-removed {
+      background: rgba(244, 63, 94, 0.2);
+      color: #fecdd3;
+      border: 1px solid rgba(244, 63, 94, 0.4);
+    }
+
+    .badge-nopath {
+      background: rgba(107, 114, 128, 0.2);
+      color: #d1d5db;
+      border: 1px solid rgba(107, 114, 128, 0.4);
+    }
+
+    /* Tables */
+    .table-container {
+      overflow-x: auto;
+      margin: 20px 0;
+      border-radius: 10px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-card);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.9rem;
+    }
+
+    th {
+      background: rgba(0, 0, 0, 0.25);
+      padding: 12px 16px;
+      font-weight: 700;
+      color: var(--text-primary);
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    /* Code & Terminal Blocks */
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.88rem;
+      position: relative;
+      margin: 12px 0 18px;
+      color: #e5e7eb;
+    }
+
+    code {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.88em;
+      background: rgba(255, 255, 255, 0.08);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #38bdf8;
+    }
+
+    pre code {
+      background: transparent;
+      padding: 0;
+      color: inherit;
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .copy-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+      color: var(--text-primary);
+    }
+
+    /* Mermaid Diagrams */
+    .mermaid-wrapper {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 24px;
+      margin: 24px 0;
+      text-align: center;
+      overflow-x: auto;
+    }
+
+    .diagram-caption {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-top: 14px;
+      font-weight: 500;
+    }
+
+    /* Filter Bar for Tools */
+    .tool-filter-bar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    .filter-btn {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .filter-btn.active, .filter-btn:hover {
+      background: var(--accent-emerald);
+      color: #042f2e;
+      border-color: var(--accent-emerald);
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      body {
+        flex-direction: column;
+      }
+      #sidebar {
+        width: 100%;
+        height: auto;
+        position: relative;
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+      }
+      #content {
+        padding: 24px 20px 80px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Navigation Sidebar -->
+  <aside id="sidebar">
+    <div class="sidebar-header">
+      <div class="brand-title">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m10 15 5-3-5-3v6Z"/></svg>
+        SOT-GRAPH
+      </div>
+      <div class="brand-subtitle">Knowledge Layer v0.3.0</div>
+    </div>
+
+    <div class="nav-search">
+      <input type="text" id="sidebar-search" placeholder="Tìm nhanh công cụ, lệnh..." onkeyup="filterSidebar()">
+    </div>
+
+    <ul class="nav-links" id="sidebar-menu">
+      <li class="nav-group-title">Tổng quan</li>
+      <li class="nav-item"><a href="#tong-quan">1. Tổng Quan Kiến Trúc</a></li>
+      <li class="nav-item"><a href="#trust-model">2. Mô Hình Bằng Chứng (Trust)</a></li>
+      
+      <li class="nav-group-title">MCP Tools (21 Tools)</li>
+      <li class="nav-item"><a href="#mcp-nhom-1">Nhóm 1: Tìm Kiếm & Bản Đồ</a></li>
+      <li class="nav-item"><a href="#mcp-nhom-2">Nhóm 2: Khảo Sát AST & Quan Hệ</a></li>
+      <li class="nav-item"><a href="#mcp-nhom-3">Nhóm 3: Kiến Trúc & Bundler</a></li>
+      <li class="nav-item"><a href="#mcp-nhom-4">Nhóm 4: Solution & Manpower</a></li>
+      <li class="nav-item"><a href="#mcp-nhom-5">Nhóm 5: Git Diff & Assurance</a></li>
+      <li class="nav-item"><a href="#mcp-nhom-6">Nhóm 6: Provider Sync</a></li>
+      <li class="nav-item"><a href="#mcp-resources">Tài Nguyên (Resources)</a></li>
+
+      <li class="nav-group-title">Lệnh CLI</li>
+      <li class="nav-item"><a href="#cli-vong-doi">Đồng Bộ & Giám Sát CSDL</a></li>
+      <li class="nav-item"><a href="#cli-truy-van">Truy Vấn, Map & Pack</a></li>
+      <li class="nav-item"><a href="#cli-kien-truc">Báo Cáo & Trực Quan Hóa</a></li>
+      <li class="nav-item"><a href="#cli-solution">Solution Engine & Trace</a></li>
+      <li class="nav-item"><a href="#cli-git">Git Diff & Tác Động</a></li>
+      <li class="nav-item"><a href="#cli-providers">Providers & SCIP</a></li>
+      <li class="nav-item"><a href="#cli-bao-tri">Bảo Trì & Cấu Hình Harness</a></li>
+
+      <li class="nav-group-title">Thực chiến</li>
+      <li class="nav-item"><a href="#so-sanh">So Sánh MCP vs CLI</a></li>
+      <li class="nav-item"><a href="#kich-ban">4 Kịch Bản Thực Chiến</a></li>
+    </ul>
+
+    <div class="sidebar-footer">
+      <span>Giao diện</span>
+      <button class="theme-toggle-btn" onclick="toggleTheme()">☀️ / 🌙</button>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main id="content">
+
+    <!-- Hero Section -->
+    <section class="hero-banner">
+      <div class="hero-tag">Verified Knowledge Graph</div>
+      <h1 class="hero-title">SOT-Graph: Cẩm Nang Toàn Diện MCP Tools & CLI</h1>
+      <p class="hero-desc">
+        Hạ tầng tri thức duy nhất (Single Source of Truth) kết nối trực tiếp với cây cú pháp trừu tượng (AST) của mã nguồn đa ngôn ngữ. Ngăn chặn triệt để hiện tượng AI ảo tưởng (hallucination) và bảo vệ an toàn tuyệt đối khi lập trình, tái cấu trúc mã nguồn.
+      </p>
+
+      <div class="hero-stats">
+        <div class="stat-card">
+          <div class="stat-value">21+</div>
+          <div class="stat-label">MCP Tools Chuyên Dụng</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">&lt; 0.1s</div>
+          <div class="stat-label">Thời Gian Truy Xuất Graph</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">100%</div>
+          <div class="stat-label">Xác Thực Vật Lý [STRONG]</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">0 Daemon</div>
+          <div class="stat-label">Zero-Daemon SQLite Cục Bộ</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 1: TỔNG QUAN -->
+    <section id="tong-quan">
+      <h2>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+        1. Tổng Quan về SOT-Graph
+      </h2>
+      <p>
+        Trong quy trình phát triển phần mềm hiện đại với các AI Coding Agents (như Claude Code, OpenCode, Antigravity, Pi/OMP), hai trở ngại lớn nhất là <strong>sự cạn kiệt cửa sổ ngữ cảnh (Context Exhaustion)</strong> và <strong>ảo tưởng mã nguồn (Hallucination)</strong>. SOT-Graph ra đời như một giải pháp nền tảng cung cấp lớp tri thức xác thực tuyệt đối.
+      </p>
+
+      <div class="mermaid-wrapper">
+        <pre class="mermaid">
+flowchart TD
+    subgraph S["Mã Nguồn Đa Ngôn Ngữ"]
+        SRC["Source Code: PHP, TS, Python, Dart..."]
+        GIT["Git Repository & Diff History"]
+    end
+
+    subgraph ENG["SOT-Graph Engine Core"]
+        EXT["AST Extractor (Tree-sitter / Regex)"]
+        REC["Reconciler (JIT & File Watcher)"]
+        VRF["Trust Verifier (Hash & Coverage)"]
+        ASSUR["Assurance Engine (P7 Receipts)"]
+    end
+
+    subgraph STORE["Zero-Daemon Storage"]
+        DB[(".sot/sot.db (SQLite WAL Mode)<br/>Nodes, Edges, FTS5, Journal")]
+    end
+
+    subgraph INTERFACE["Giao Diện Truy Xuất"]
+        MCP["MCP Server (stdio / 2025-06-18)<br/>21+ Tools & Resource Links"]
+        CLI["CLI Command Dispatcher<br/>sot search, map, trace, diff..."]
+    end
+
+    subgraph CONSUMER["Tác Tử & Kỹ Sư"]
+        AI["AI Coding Agents (Claude, OpenCode, Antigravity)"]
+        DEV["Lập Trình Viên & CI/CD Pipeline"]
+    end
+
+    SRC --> EXT
+    GIT --> ASSUR
+    EXT --> REC
+    REC --> DB
+    DB --> VRF
+    VRF --> INTERFACE
+    DB --> INTERFACE
+    INTERFACE --> MCP
+    INTERFACE --> CLI
+    MCP --> AI
+    CLI --> DEV
+        </pre>
+        <div class="diagram-caption">Sơ đồ 1: Luồng kiến trúc tổng thể và chu trình dữ liệu trong SOT-Graph</div>
+      </div>
+
+      <h4>Các Trụ Cột Kỹ Thuật Đột Phá:</h4>
+      <ul>
+        <li><strong>Zero-Daemon SQLite Storage:</strong> Dữ liệu lưu trong <code>.sot/sot.db</code> chạy chế độ WAL (Write-Ahead Logging), đa tiến trình đọc ghi an toàn mà không cần dựng daemon nền.</li>
+        <li><strong>Zero-Token Ingestion Protocol:</strong> Thay vì đọc hàng chục file mã nguồn (>100 dòng), Agent chỉ tra cứu graph để lấy hợp đồng chữ ký và callers/callees.</li>
+        <li><strong>Self-Healing & JIT Micro-Reconciliation:</strong> Khi một file bị sửa đổi, hệ thống tự động băm lại SHA-256 và cập nhật đồ thị tức thời ngay trước khi trả kết quả truy vấn.</li>
+        <li><strong>Giao thức Bảo đảm P7:</strong> Cơ chế kiểm soát chặt chẽ với biên lai trước khi sửa (Scope Receipt) và biên lai tác động sau khi sửa (Diff Impact Receipt).</li>
+      </ul>
+    </section>
+
+    <!-- SECTION 2: TRUST MODEL -->
+    <section id="trust-model">
+      <h2>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        2. Mô Hình Bằng Chứng & Hệ Nhãn Niềm Tin (Trust Model)
+      </h2>
+      <p>
+        Mọi kết quả trả về từ SOT-Graph đều được phân loại trạng thái vật lý trên đĩa cứng ngay tại thời điểm gọi qua hệ thống nhãn niềm tin (Trust Verdicts):
+      </p>
+
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Nhãn Niềm Tin</th>
+              <th>Ý Nghĩa Chi Tiết</th>
+              <th>Hành Động Của AI Coding Agent</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="badge badge-strong">[STRONG]</span></td>
+              <td><strong>Xác thực 100% trên đĩa:</strong> Tệp tồn tại, symbol tồn tại đúng vị trí khai báo, hash nội dung trùng khớp.</td>
+              <td>Hoàn toàn tin cậy để tái sử dụng, phân tích hoặc gọi trực tiếp mà không cần đọc lại file.</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-weak">[WEAK]</span></td>
+              <td><strong>Khớp ngữ nghĩa / một phần:</strong> Tìm thấy tên symbol nhưng chỉ khớp trong chú thích (comment) hoặc token coverage thấp.</td>
+              <td>Bắt buộc phải đọc trực tiếp đoạn mã theo tọa độ dòng (<code>file:start-end</code>) để xác minh lại.</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-rebuilt">[REBUILT]</span></td>
+              <td><strong>Tệp đã đổi vị trí:</strong> Tệp đã bị đổi tên hoặc di chuyển thư mục nhưng bộ Reconciler đã tự tìm lại được.</td>
+              <td>Cập nhật lại đường dẫn import sang path mới mà công cụ cung cấp.</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-removed">[REMOVED]</span></td>
+              <td><strong>Tệp/Symbol đã bị xóa:</strong> Từng tồn tại trong quá khứ nhưng hiện tại không còn trên đĩa.</td>
+              <td><strong>TUYỆT ĐỐI KHÔNG</strong> tham chiếu, gọi hàm hoặc sinh mã nguồn dùng symbol này.</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-nopath">[NOPATH]</span></td>
+              <td><strong>Node ảo / Inline node:</strong> Node định danh cấu trúc, biến môi trường hoặc dynamic hook không có file riêng.</td>
+              <td>Kiểm tra ngữ cảnh cấu hình runtime.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mermaid-wrapper">
+        <pre class="mermaid">
+flowchart TD
+    START(["Bắt đầu truy vấn Symbol"]) --> Q["Khớp tên Symbol / FQN / Pattern"]
+    Q --> CHK_EXIST{"File có tồn tại<br/>trên đĩa cứng không?"}
+    
+    CHK_EXIST -- "Không" --> R_REMOVED["[REMOVED]<br/>Node đã bị xóa trên đĩa"]
+    CHK_EXIST -- "Có" --> CHK_PATH{"Đường dẫn có khớp<br/>với CSDL không?"}
+    
+    CHK_PATH -- "Không khớp" --> CHK_REHOME{"Tìm thấy file mới<br/>qua Rehoming?"}
+    CHK_REHOME -- "Có" --> R_REBUILT["[REBUILT]<br/>Tệp đã chuyển vị trí"]
+    CHK_REHOME -- "Không" --> R_WEAK_N["[WEAK]<br/>Không xác định vị trí mới"]
+
+    CHK_PATH -- "Khớp" --> CHK_AST{"Symbol có khai báo AST<br/>hợp lệ tại file không?"}
+    CHK_AST -- "Không" --> R_WEAK_AST["[WEAK]<br/>Chỉ khớp text / comment"]
+    CHK_AST -- "Có" --> CHK_COV{"Token Coverage<br/>>= Ngưỡng Threshold (0.5)?"}
+    
+    CHK_COV -- "Đạt" --> R_STRONG["[STRONG]<br/>Xác thực 100% vật lý"]
+    CHK_COV -- "Không đạt" --> R_WEAK["[WEAK]<br/>Độ bao phủ thấp"]
+
+    classDef strong fill:#064e3b,stroke:#059669,stroke-width:2px,color:#6ee7b7;
+    classDef weak fill:#78350f,stroke:#d97706,stroke-width:2px,color:#fde68a;
+    classDef rebuilt fill:#0c4a6e,stroke:#0284c7,stroke-width:2px,color:#bae6fd;
+    classDef removed fill:#4c0519,stroke:#e11d48,stroke-width:2px,color:#fecdd3;
+
+    class R_STRONG strong;
+    class R_WEAK,R_WEAK_AST,R_WEAK_N weak;
+    class R_REBUILT rebuilt;
+    class R_REMOVED removed;
+        </pre>
+        <div class="diagram-caption">Sơ đồ 2: Cây quyết định đánh giá và phân loại nhãn niềm tin (Trust Verdict State Machine)</div>
+      </div>
+    </section>
+
+    <!-- SECTION 3: MCP TOOLS -->
+    <section id="mcp-tools">
+      <h2>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+        3. Chi Tiết 21+ MCP Tools (Dành Cho AI Coding Agents)
+      </h2>
+      <p>
+        Giao diện MCP (Model Context Protocol) cho phép các tác tử AI gọi hàm trực tiếp theo chuẩn MCP 2025-06-18. Các công cụ hỗ trợ trả về <code>ResourceLink</code> (<code>sot://node/{id}</code>) giúp lấy chi tiết mã nguồn theo nhu cầu (lazy-fetch) mà không gây bùng nổ token.
+      </p>
+
+      <!-- Nhóm 1 -->
+      <h3 id="mcp-nhom-1">Nhóm 1: Định Vị & Tìm Kiếm Tri Thức</h3>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_search
+          </div>
+          <span class="tool-category-badge">Định vị / Tra cứu</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Tìm kiếm các symbols, classes, methods trong đồ thị tri thức kèm theo hệ nhãn niềm tin. Trả về điểm xếp hạng BM25/AST và danh sách URI để fetch chi tiết.</p>
+          <div class="param-title">Tham số đầu vào:</div>
+          <ul class="param-list">
+            <li class="param-item"><span class="param-name">query</span> <span class="param-type">(string, bắt buộc)</span>: Tên hàm, class, route hoặc từ khóa nghiệp vụ.</li>
+            <li class="param-item"><span class="param-name">limit</span> <span class="param-type">(integer, mặc định: 6)</span>: Số lượng kết quả tối đa.</li>
+            <li class="param-item"><span class="param-name">scope</span> <span class="param-type">(string, tùy chọn)</span>: Giới hạn tìm kiếm trong thư mục hoặc file cụ thể.</li>
+            <li class="param-item"><span class="param-name">threshold</span> <span class="param-type">(number, mặc định: 0.5)</span>: Ngưỡng coverage để xác nhận [STRONG].</li>
+          </ul>
+          <pre><code>// Ví dụ gọi MCP Tool
+sot-graph_sot_search({
+  query: "ContractCrosscheck",
+  scope: "Modules/Api",
+  limit: 5
+})</code></pre>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_map
+          </div>
+          <span class="tool-category-badge">Bản đồ kiến trúc</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Sinh bản đồ mã nguồn thu gọn có kiểm soát ngân sách token (token-budgeted map), xếp hạng các node theo thuật toán <strong>Personalized PageRank (PPR)</strong>.</p>
+          <div class="param-title">Tham số đầu vào:</div>
+          <ul class="param-list">
+            <li class="param-item"><span class="param-name">focus</span> <span class="param-type">(string, tùy chọn)</span>: Chuỗi các symbols trọng tâm cách nhau bởi dấu phẩy để định hướng PageRank.</li>
+            <li class="param-item"><span class="param-name">max_tokens</span> <span class="param-type">(integer, mặc định: 1024)</span>: Giới hạn số lượng token cho bản đồ trả về.</li>
+          </ul>
+          <pre><code>// Ví dụ gọi MCP Tool
+sot-graph_sot_map({
+  focus: "ContractService,PartnerController",
+  max_tokens: 1500
+})</code></pre>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_notes
+          </div>
+          <span class="tool-category-badge">Tri thức lưu trữ</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Đọc danh sách các ghi chú tri thức (kiến trúc, lỗi đã fix, quy tắc dự án) được lưu trữ từ các phiên làm việc trước đó.</p>
+          <div class="param-title">Tham số đầu vào:</div>
+          <ul class="param-list">
+            <li class="param-item"><span class="param-name">query</span> <span class="param-type">(string, tùy chọn)</span>: Từ khóa lọc nội dung ghi chú.</li>
+            <li class="param-item"><span class="param-name">limit</span> <span class="param-type">(integer, mặc định: 50)</span>: Số lượng ghi chú tối đa.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Nhóm 2 -->
+      <h3 id="mcp-nhom-2">Nhóm 2: Khảo Sát AST & Mối Quan Hệ Mã Nguồn</h3>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_explore
+          </div>
+          <span class="tool-category-badge">Duyệt đồ thị</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Duyệt đồ thị quan hệ AST có giới hạn bước nhảy (bounded traversal). Cho biết hàm/class này gọi những ai và được ai gọi tới.</p>
+          <div class="param-title">Tham số đầu vào:</div>
+          <ul class="param-list">
+            <li class="param-item"><span class="param-name">node_id</span> <span class="param-type">(string, bắt buộc)</span>: ID của node hoặc tên FQN của symbol.</li>
+            <li class="param-item"><span class="param-name">depth</span> <span class="param-type">(integer, mặc định: 1)</span>: Độ sâu duyệt quan hệ (hops).</li>
+            <li class="param-item"><span class="param-name">limit</span> <span class="param-type">(integer, mặc định: 100)</span>: Giới hạn số cạnh trả về.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_usages
+          </div>
+          <span class="tool-category-badge">Find All References</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Tìm kiếm toàn bộ vị trí tham chiếu của một symbol trên toàn bộ codebase, gom nhóm theo từng caller, đồng thời cảnh báo rủi ro trùng tên (bare-name risk).</p>
+          <div class="param-title">Tham số đầu vào:</div>
+          <ul class="param-list">
+            <li class="param-item"><span class="param-name">target</span> <span class="param-type">(string, bắt buộc)</span>: Tên symbol hoặc method cần tra cứu.</li>
+            <li class="param-item"><span class="param-name">scope</span> <span class="param-type">(string, tùy chọn)</span>: Giới hạn trong thư mục con.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_implementations
+          </div>
+          <span class="tool-category-badge">Kế thừa / Đa hình</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Xem toàn bộ cấu trúc kế thừa và hiện thực hóa (extends / implements) của một interface hoặc base class, tìm ra tất cả các concrete classes cụ thể.</p>
+          <div class="param-title">Tham số đầu vào:</div>
+          <ul class="param-list">
+            <li class="param-item"><span class="param-name">target</span> <span class="param-type">(string, bắt buộc)</span>: Tên interface hoặc class cơ sở.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_pack
+          </div>
+          <span class="tool-category-badge">Context Packaging</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Đóng gói một k-hop ContextBundle (định dạng YAML) xung quanh một symbol mục tiêu: gồm hợp đồng caller/callee 1-hop và chữ ký hàm 2-hop, nén ngữ cảnh tối ưu cho subagent.</p>
+          <div class="param-title">Tham số đầu vào:</div>
+          <ul class="param-list">
+            <li class="param-item"><span class="param-name">target</span> <span class="param-type">(string, bắt buộc)</span>: Tên symbol mục tiêu.</li>
+            <li class="param-item"><span class="param-name">max_hops</span> <span class="param-type">(integer, mặc định: 2)</span>: Độ sâu liên kết.</li>
+            <li class="param-item"><span class="param-name">max_bytes</span> <span class="param-type">(integer, mặc định: 65536)</span>: Giới hạn dung lượng byte.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Nhóm 3 -->
+      <h3 id="mcp-nhom-3">Nhóm 3: Phân Tích Kiến Trúc & Fact Bundler</h3>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_architecture_report
+          </div>
+          <span class="tool-category-badge">Kiến trúc C4</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Phân tích toàn diện kiến trúc dự án: phát hiện mô hình phân tầng, các God Nodes, các chu trình phụ thuộc vòng (circular dependencies) và xuất báo cáo markdown.</p>
+          <div class="param-title">Tham số đầu vào:</div>
+          <ul class="param-list">
+            <li class="param-item"><span class="param-name">scope</span> <span class="param-type">(string, tùy chọn)</span>: Phạm vi đường dẫn phân tích.</li>
+            <li class="param-item"><span class="param-name">sigma</span> <span class="param-type">(number, mặc định: 1.5)</span>: Ngưỡng độ lệch chuẩn để gắn nhãn God Node.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_communities
+          </div>
+          <span class="tool-category-badge">Phân cụm Louvain</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Sử dụng thuật toán phân cụm Louvain để phát hiện các phân vùng kiến trúc tự nhiên (architectural communities) và tính điểm kết dính (cohesion score).</p>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_bundle
+          </div>
+          <span class="tool-category-badge">Fact Bundler</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Trích xuất tự động bộ 5 file Fact Bundle mật độ cao vào thư mục <code>.sot/bundle/</code>: danh mục module, endpoints routing, workflows/states, violations và chỉ số hệ thống.</p>
+        </div>
+      </div>
+
+      <!-- Nhóm 4 -->
+      <h3 id="mcp-nhom-4">Nhóm 4: Reverse Engineering & Động Cơ Solution (ITPRO / Manpower)</h3>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_trace
+          </div>
+          <span class="tool-category-badge">Full-Stack Trace</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Truy vết đường đi thực thi từ sự kiện giao diện Frontend (UI clicks), qua REST API, Controller, Service đến Database. Tự động sinh sơ đồ Mermaid Flowchart và Sequence Diagram.</p>
+          <div class="param-title">Tham số đầu vào:</div>
+          <ul class="param-list">
+            <li class="param-item"><span class="param-name">target</span> <span class="param-type">(string, bắt buộc)</span>: Mã ticket (VD: `CRMCM-107`), tên chức năng hoặc route API.</li>
+            <li class="param-item"><span class="param-name">depth</span> <span class="param-type">(integer, 1-5, mặc định: 2)</span>: Độ sâu liên kết qua các tầng.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_ui_tree
+          </div>
+          <span class="tool-category-badge">Frontend UI AST</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Bóc tách cây quyết định UI: trích xuất các trường dữ liệu (Form inputs), quy tắc validation, nút bấm (Button Triggers) và sự kiện chuyển đổi Modal/Màn hình (hỗ trợ Flutter, React, Vue, Blade).</p>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_backend_flow
+          </div>
+          <span class="tool-category-badge">Backend Steps</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Bóc tách các vi bước xử lý backend, các nguồn dữ liệu đa dạng (Multi-Datasources), ranh giới transaction và các nhánh xử lý ngoại lệ (Exception Handling).</p>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_solution_inventory
+          </div>
+          <span class="tool-category-badge">Stage 1 Discovery</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Quét toàn bộ module để phát hiện danh sách tính năng theo từng vai trò người dùng (Admin, Merchant, EndUser) và phân loại vào 10 danh mục tính năng (CRUD, Export, Payment...).</p>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_solution_steps
+          </div>
+          <span class="tool-category-badge">Stage 2 Manpower</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Bóc tách một phương thức xử lý thành bảng 4 cột có code AST thật: <code>Bước | Thao tác | Đối tượng | Chi tiết kỹ thuật</code> phục vụ tính toán nhân công Manpower (NVJ1/2/3).</p>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_solution_bundle
+          </div>
+          <span class="tool-category-badge">Downstream SSOT</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Tổng hợp toàn bộ bối cảnh giải pháp vào <code>ContextBundle.md</code> để các subagent viết tài liệu (DBDesign, HDSD, KBKT, Manpower) tiêu thụ mà không đọc lại source code.</p>
+        </div>
+      </div>
+
+      <div class="mermaid-wrapper">
+        <pre class="mermaid">
+flowchart TD
+    subgraph S1["Giai đoạn 1: Feature Discovery"]
+        INV["sot solution inventory [module]"] --> INV_MD["Feature_Inventory.md<br/>(Theo User Role & 10 Loại tính năng)"]
+    end
+
+    subgraph S2["Giai đoạn 2: Micro-Steps Decomposition"]
+        STEPS["sot solution steps [method]"] --> STEPS_TBL["Bảng 4 cột chuẩn Manpower<br/>(Bước | Thao tác | Đối tượng | Code AST)"]
+    end
+
+    subgraph S3["Giai đoạn 3: Context Bundling"]
+        BUN["sot solution bundle [module]"] --> BUNDLE_MD["ContextBundle.md<br/>(Forms UI, Replayed Schema, APIs)"]
+    end
+
+    subgraph DOWNSTREAM["Hạ Tầng Tác Tử Không Đọc Source Code"]
+        SOL["itpro-tlgp (Tài liệu Giải pháp)"]
+        DB_D["itpro-dbdesign (Thiết kế CSDL)"]
+        HDSD["itpro-hdsd (Hướng dẫn Sử dụng)"]
+        KBKT["itpro-kbkt (Kịch bản Kiểm thử)"]
+        MAN["itpro-manpower (Điền Excel Nhân công)"]
+    end
+
+    INV_MD --> SOL
+    STEPS_TBL --> MAN
+    BUNDLE_MD --> SOL
+    SOL --> DB_D
+    SOL --> HDSD
+    SOL --> KBKT
+    SOL --> MAN
+        </pre>
+        <div class="diagram-caption">Sơ đồ 3: Quy trình tự động hóa lập tài liệu giải pháp và tính điểm nhân công</div>
+      </div>
+
+      <!-- Nhóm 5 -->
+      <h3 id="mcp-nhom-5">Nhóm 5: Git Diff Impact, Assurance Receipts & Lịch Sử Commit</h3>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_diff_impact
+          </div>
+          <span class="tool-category-badge">Git Diff Blast Radius</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Tính toán bán kính ảnh hưởng từ git diff: ánh xạ trực tiếp dòng thay đổi vào AST nodes, tìm kiếm toàn bộ callers bị ảnh hưởng gián tiếp và danh sách test cases cần chạy.</p>
+          <div class="param-title">Tham số đầu vào:</div>
+          <ul class="param-list">
+            <li class="param-item"><span class="param-name">target</span> <span class="param-type">(string, mặc định: 'HEAD~1')</span>: Git revision so sánh.</li>
+            <li class="param-item"><span class="param-name">staged</span> <span class="param-type">(boolean)</span>: Phân tích thay đổi đã staged.</li>
+            <li class="param-item"><span class="param-name">working_tree</span> <span class="param-type">(boolean)</span>: Phân tích thay đổi chưa staged.</li>
+            <li class="param-item"><span class="param-name">auto_reconcile</span> <span class="param-type">(boolean)</span>: Đồng bộ đồ thị trước khi chạy.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_scope_receipt
+          </div>
+          <span class="tool-category-badge">Giao thức P7.1</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc"><strong>Biên lai PRE-change:</strong> Chốt phạm vi an toàn trước khi sửa đổi symbol. Ghi nhận snapshot commit hiện tại, inward callers và bộ test suite tương ứng.</p>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_diff_impact_receipt
+          </div>
+          <span class="tool-category-badge">Giao thức P7.2</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc"><strong>Biên lai POST-change:</strong> Đóng gói kết quả phân tích git diff sau khi sửa code, đối soát bằng chứng và đưa ra quyết định đóng (closure decision) rõ ràng.</p>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_git_history
+          </div>
+          <span class="tool-category-badge">Chấm điểm rủi ro</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Quét lịch sử git commit kèm chấm điểm rủi ro tự động (Low, Medium, High, Critical) dựa trên số dòng thay đổi và mức độ đụng chạm vào các God Node.</p>
+        </div>
+      </div>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_verify_drift
+          </div>
+          <span class="tool-category-badge">Kiểm tra lệch đĩa</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Kiểm tra độ lệch giữa CSDL SQLite và thực tế đĩa cứng: phát hiện file bị xóa hoặc sửa đổi nhưng chưa được cập nhật vào đồ thị (an toàn cho CI).</p>
+        </div>
+      </div>
+
+      <div class="mermaid-wrapper">
+        <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    actor Agent as AI Coding Agent
+    participant SOT as SOT-Graph (MCP)
+    participant FS as Codebase Filesystem
+    participant Git as Git Repo
+
+    Note over Agent,SOT: Bước 1: Khảo sát & Nhận diện mục tiêu
+    Agent->>SOT: sot_search("PaymentService")
+    SOT-->>Agent: Node info [STRONG] + sot://node/123
+
+    Note over Agent,SOT: Bước 2: Lập Biên lai PRE-change (P7.1)
+    Agent->>SOT: sot_scope_receipt(target="PaymentService", kind="public-api")
+    SOT-->>Agent: Scope Receipt (Inward Callers, Affected Tests, Git SHA)
+
+    Note over Agent,FS: Bước 3: Sửa mã nguồn có giới hạn
+    Agent->>FS: Targeted Edit (range: file:start-end)
+
+    Note over Agent,Git: Bước 4: Đánh giá Tác động POST-change (P7.2)
+    Agent->>SOT: sot_diff_impact_receipt(working_tree=true)
+    SOT->>Git: git diff (unified hunks)
+    SOT->>SOT: AST Intersection & Reverse Call Graph
+    SOT-->>Agent: Diff Impact Receipt (Closure Decision: APPROVED)
+    Agent->>SOT: sot reconcile
+        </pre>
+        <div class="diagram-caption">Sơ đồ 4: Chu trình refactor 4 bước an toàn với giao thức bảo đảm P7</div>
+      </div>
+
+      <!-- Nhóm 6 -->
+      <h3 id="mcp-nhom-6">Nhóm 6: Đồng Bộ External Provider</h3>
+
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-name">
+            <span class="badge badge-strong">MCP</span>
+            sot-graph_sot_providers_sync
+          </div>
+          <span class="tool-category-badge">Đồng bộ External</span>
+        </div>
+        <div class="tool-body">
+          <p class="tool-desc">Kích hoạt đồng bộ hóa chỉ mục từ provider bên ngoài (VD: `codebase-memory`), được bảo vệ an toàn bởi project write lock và lưu lại biên lai ledger run.</p>
+        </div>
+      </div>
+
+      <h3 id="mcp-resources">Tài Nguyên Trực Tiếp (MCP Resources & Subscriptions)</h3>
+      <p>Bên cạnh các Tools, SOT-Graph cung cấp các điểm cuối tài nguyên MCP chuẩn hóa:</p>
+      <ul>
+        <li><code>sot://stats</code>: Trả về thống kê tổng quát về đồ thị (số node, số cạnh, tệp tin, kích thước CSDL).</li>
+        <li><code>sot://notes</code>: Danh sách toàn bộ các ghi chú tri thức đã lưu.</li>
+        <li><code>sot://node/{node_id}</code>: Resource template đọc nội dung chi tiết mã nguồn và chữ ký của một node bất kỳ.</li>
+        <li><code>notifications/resources/updated</code>: Bắn thông báo thời gian thực đến client khi đồ thị có phiên bản thay đổi (generation update).</li>
+      </ul>
+    </section>
+
+    <!-- SECTION 4: CLI COMMANDS -->
+    <section id="cli-commands">
+      <h2>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        4. Chi Tiết Hệ Thống Câu Lệnh CLI
+      </h2>
+      <p>
+        Bộ công cụ dòng lệnh (CLI) của SOT-Graph được thực thi qua lệnh <code>sot</code>. Đây là công cụ chủ lực cho lập trình viên trên Terminal, kịch bản tự động hóa (Bash scripts) và CI/CD Pipelines.
+      </p>
+
+      <h3 id="cli-vong-doi">Nhóm Lệnh Vòng Đời & Đồng Bộ CSDL</h3>
+      
+      <h4><code>sot reconcile</code></h4>
+      <p>Đồng bộ hóa đồ thị với tệp trên đĩa một cách lũy kế (idempotent), tự động bỏ qua file không đổi nhờ bảng journal.</p>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button><code># Đồng bộ toàn bộ codebase
+sot reconcile
+
+# Đồng bộ chỉ một file hoặc một module cụ thể
+sot reconcile Modules/Api/Services/ContractService.php
+
+# Ép quét lại toàn bộ (bỏ qua journal hash)
+sot reconcile --force
+
+# Chỉ định 4 luồng worker song song và kích thước batch
+sot reconcile --workers 4 --batch-size 128
+
+# Xuất biên lai xác thực (Assurance Receipt) dạng JSON
+sot reconcile --receipt --json</code></pre>
+
+      <h4><code>sot watch</code></h4>
+      <p>Theo dõi sự thay đổi file trên đĩa cứng theo thời gian thực và tự động reconcile ngay lập tức.</p>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button><code># Chạy watcher tương tác trực tiếp
+sot watch --debounce-ms 200
+
+# Khởi chạy chạy nền dưới dạng Daemon
+sot watch -d
+
+# Kiểm tra trạng thái Daemon
+sot watch --status
+
+# Dừng Watcher Daemon
+sot watch --stop
+
+# Cài đặt thành service chạy cùng hệ điều hành (systemd / LaunchAgent)
+sot watch --service install</code></pre>
+
+      <h4><code>sot verify</code> & <code>sot doctor</code></h4>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button><code># Kiểm tra độ lệch (drift) giữa đĩa và CSDL
+sot verify
+sot verify --deep   # Băm sâu SHA-256 toàn bộ file
+
+# Kiểm tra sức khỏe toàn diện của CSDL SQLite
+sot doctor
+sot doctor --receipt --json</code></pre>
+
+      <h3 id="cli-truy-van">Nhóm Lệnh Truy Vấn, Map & Pack</h3>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button><code># Tìm kiếm symbol kèm nhãn niềm tin
+sot search "ContractCrosscheck" -n 5 --scope "Modules/Api"
+
+# Tìm kiếm Hybrid (kết hợp văn bản và vector similarity)
+sot search "tính toán công nợ" --hybrid
+
+# Lập bản đồ repo theo ngân sách token (Personalized PageRank)
+sot map --tokens 1024 --focus "ContractService,PartnerController"
+
+# Khảo sát quan hệ AST xung quanh một symbol
+sot explore "App\\Services\\PaymentService" --depth 2
+
+# Tìm toàn bộ nơi gọi hàm (Find All References)
+sot usages "approveContract"
+
+# Xem các lớp con hiện thực hóa interface
+sot implementations "PaymentGatewayInterface"
+
+# Đóng gói k-hop ContextBundle YAML làm context cho AI Agent
+sot pack "OrderService" --max-hops 2 --tokens 1500 -o order_bundle.yaml
+
+# Lưu ghi chú tri thức hoặc quyết định kỹ thuật quan trọng
+sot insert --title "Lưu ý kết nối Oracle DB" \
+           --body "Không dùng raw SQL thiếu schema prefix. Dùng DB::connection('oracle')->..." \
+           --keywords "oracle,db,connection"</code></pre>
+
+      <h3 id="cli-kien-truc">Nhóm Lệnh Báo Cáo Kiến Trúc & Trực Quan Hóa</h3>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button><code># Sinh báo cáo kiến trúc Markdown hoàn chỉnh (God Nodes, vi phạm tầng)
+sot report -o Docs/ARCHITECTURE_REPORT.md
+
+# Phân cụm kiến trúc bằng thuật toán Louvain
+sot cluster --min-size 3 --json
+
+# Mở trình trực quan hóa đồ thị tương tác HTML trên trình duyệt
+sot viz -o graph.html --open
+
+# Trích xuất 5 file Fact Bundle mật độ cao
+sot bundle -o .sot/bundle/
+
+# Xuất đồ thị sang Obsidian vault, Microsoft GraphRAG, hoặc SCIP
+sot export -f obsidian -o ~/Documents/ObsidianVault/CodebaseGraph/
+sot export -f graphrag -o graphrag_dump.json
+sot export -f scip     -o index.scip</code></pre>
+
+      <h3 id="cli-solution">Nhóm Lệnh Solution Engine & Trace Full-Stack</h3>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button><code># Trace luồng Full-Stack từ UI -> Route -> Service -> DB (sinh Mermaid)
+sot trace "CRMCM-107" --depth 3 -o Docs/CRMCM-107_Trace.md
+
+# Bóc tách cây giao diện Frontend UI
+sot ui-tree "lib/screens/contract/contract_detail_screen.dart"
+
+# Bóc tách vi bước xử lý Backend
+sot be-flow "ContractService"
+
+# Giai đoạn 1: Khám phá danh mục tính năng theo User Role
+sot solution inventory "Contract" -o Feature_Inventory.md
+
+# Giai đoạn 2: Bóc tách vi bước tính Manpower (bảng 4 cột chuẩn NVJ1/2/3)
+sot solution steps "ContractService::createContract" --format table
+
+# Tổng hợp bối cảnh giải pháp hoàn chỉnh cho downstream subagents
+sot solution bundle "Contract" -o .sot/bundle/ContextBundle.md</code></pre>
+
+      <h3 id="cli-git">Nhóm Lệnh Phân Tích Tác Động Thay Đổi (Git Diff)</h3>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button><code># Phân tích bán kính tác động của git diff (HEAD~1)
+sot diff-impact
+
+# Phân tích thay đổi đang staged hoặc unstaged
+sot diff-impact --staged
+sot diff-impact --working-tree --depth 3 -o Diff_Impact_Report.md
+
+# Lập biên lai phạm vi trước khi sửa code (P7.1 Scope Receipt)
+sot scope-receipt "ContractService::approveContract" --change-kind "public-api" --auth --json
+
+# Kiểm toán lịch sử commit Git và chấm điểm rủi ro
+sot log -n 15 --author "giapminh" -o Commit_Risk_Report.md</code></pre>
+
+      <h3 id="cli-providers">Nhóm Lệnh Multi-Provider & SCIP</h3>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button><code># Phát hiện các công cụ provider bên ngoài trên hệ thống
+sot providers detect
+
+# Đánh giá sức khỏe và năng lực của các provider
+sot providers doctor
+
+# Kích hoạt đồng bộ hóa chỉ mục từ provider bên ngoài
+sot providers sync codebase-memory
+
+# Nạp chỉ mục SCIP từ compiler vào CSDL SOT
+sot import-scip index.scip --provider scip-typescript</code></pre>
+
+      <h3 id="cli-bao-tri">Nhóm Lệnh Bảo Trì & Thiết Lập Harness</h3>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button><code># Xem trước các bản ghi rác sẽ bị xóa (dry-run)
+sot clean --dry-run
+
+# Dọn dẹp bản ghi tệp không còn tồn tại
+sot clean
+
+# Thu gọn kích thước file SQLite và tối ưu hóa index
+sot vacuum --analyze
+
+# Cấu hình tự động kết nối AI Coding Harnesses (Pi, OpenCode, Claude...)
+sot setup --harness all
+
+# Cài đặt hook Git tự động reconcile sau mỗi lần git pull/merge
+sot setup --hooks
+
+# Khởi chạy MCP stdio server
+sot mcp</code></pre>
+    </section>
+
+    <!-- SECTION 5: SO SÁNH -->
+    <section id="so-sanh">
+      <h2>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18"/><path d="M3 12h18"/></svg>
+        5. Bảng Đối Chiếu So Sánh: MCP Tools vs. CLI Commands
+      </h2>
+
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Nhu Cầu Kỹ Thuật</th>
+              <th>Gọi Qua MCP Tool (AI Agent)</th>
+              <th>Chạy Qua CLI (Terminal / Scripts)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Tìm kiếm hàm/class có nhãn niềm tin</strong></td>
+              <td><code>sot_search(query="...")</code></td>
+              <td><code>sot search "..."</code></td>
+            </tr>
+            <tr>
+              <td><strong>Lấy bản đồ repo theo token budget</strong></td>
+              <td><code>sot_map(max_tokens=1024)</code></td>
+              <td><code>sot map --tokens 1024</code></td>
+            </tr>
+            <tr>
+              <td><strong>Tra cứu nơi gọi hàm (References)</strong></td>
+              <td><code>sot_usages(target="...")</code></td>
+              <td><code>sot usages "..."</code></td>
+            </tr>
+            <tr>
+              <td><strong>Xem cây kế thừa interface/class</strong></td>
+              <td><code>sot_implementations(target="...")</code></td>
+              <td><code>sot implementations "..."</code></td>
+            </tr>
+            <tr>
+              <td><strong>Đóng gói ContextBundle YAML</strong></td>
+              <td><code>sot_pack(target="...")</code></td>
+              <td><code>sot pack "..." -o bundle.yaml</code></td>
+            </tr>
+            <tr>
+              <td><strong>Truy vết Full-Stack (sinh Mermaid)</strong></td>
+              <td><code>sot_trace(target="...")</code></td>
+              <td><code>sot trace "..." -o trace.md</code></td>
+            </tr>
+            <tr>
+              <td><strong>Bóc tách cây giao diện Frontend</strong></td>
+              <td><code>sot_ui_tree(component="...")</code></td>
+              <td><code>sot ui-tree "..."</code></td>
+            </tr>
+            <tr>
+              <td><strong>Bóc tách vi bước xử lý Backend</strong></td>
+              <td><code>sot_backend_flow(service="...")</code></td>
+              <td><code>sot be-flow "..."</code></td>
+            </tr>
+            <tr>
+              <td><strong>Discovery tính năng theo Role (Stage 1)</strong></td>
+              <td><code>sot_solution_inventory(module="...")</code></td>
+              <td><code>sot solution inventory "..."</code></td>
+            </tr>
+            <tr>
+              <td><strong>Bóc tách bảng vi bước Manpower (Stage 2)</strong></td>
+              <td><code>sot_solution_steps(method="...")</code></td>
+              <td><code>sot solution steps "..."</code></td>
+            </tr>
+            <tr>
+              <td><strong>Trích xuất bộ 5 Fact Bundle files</strong></td>
+              <td><code>sot_bundle(output_dir="...")</code></td>
+              <td><code>sot bundle -o ...</code></td>
+            </tr>
+            <tr>
+              <td><strong>Bán kính ảnh hưởng Git Diff</strong></td>
+              <td><code>sot_diff_impact(target="HEAD~1")</code></td>
+              <td><code>sot diff-impact HEAD~1</code></td>
+            </tr>
+            <tr>
+              <td><strong>Biên lai PRE-change Scope Receipt</strong></td>
+              <td><code>sot_scope_receipt(target="...")</code></td>
+              <td><code>sot scope-receipt "..."</code></td>
+            </tr>
+            <tr>
+              <td><strong>Biên lai POST-change Diff Impact</strong></td>
+              <td><code>sot_diff_impact_receipt()</code></td>
+              <td><em>(MCP Protocol chuyên dụng)</em></td>
+            </tr>
+            <tr>
+              <td><strong>Kiểm tra lệch CSDL và đĩa (Drift)</strong></td>
+              <td><code>sot_verify_drift(deep=false)</code></td>
+              <td><code>sot verify [--deep]</code></td>
+            </tr>
+            <tr>
+              <td><strong>Đồng bộ CSDL đồ thị</strong></td>
+              <td><em>(Tự động chạy JIT trong MCP read)</em></td>
+              <td><code>sot reconcile [--force]</code></td>
+            </tr>
+            <tr>
+              <td><strong>Watcher chạy nền thời gian thực</strong></td>
+              <td><em>(Lắng nghe qua Subscriptions)</em></td>
+              <td><code>sot watch -d</code></td>
+            </tr>
+            <tr>
+              <td><strong>Dọn rác, thu gọn CSDL (Vacuum)</strong></td>
+              <td><em>(Read-only, không mở qua MCP)</em></td>
+              <td><code>sot clean</code>, <code>sot vacuum</code></td>
+            </tr>
+            <tr>
+              <td><strong>Trực quan hóa đồ thị HTML</strong></td>
+              <td><em>(Không phù hợp context text)</em></td>
+              <td><code>sot viz --open</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 6: 4 WORKFLOWS -->
+    <section id="kich-ban">
+      <h2>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        6. 4 Kịch Bản Vận Hành Thực Chiến (Workflows)
+      </h2>
+
+      <h4>Quy trình 1: Onboarding nhanh vào codebase lạ (Zero Token Waste)</h4>
+      <ol style="padding-left: 20px; color: var(--text-secondary); margin-bottom: 20px;">
+        <li>Chạy <code>sot reconcile --workers 4</code> để trích xuất đồ thị CSDL chỉ trong vài giây.</li>
+        <li>Agent gọi <code>sot_map(max_tokens=1024)</code> để nắm ngay các Class/Service nắm giữ nhiều liên kết nhất.</li>
+        <li>Kỹ sư chạy <code>sot viz --open</code> mở đồ thị tương tác để xem sự phân bố cụm modules trên trình duyệt.</li>
+        <li>Chạy <code>sot report</code> để kiểm tra danh sách God Nodes và vi phạm kiến trúc cần chú ý.</li>
+      </ol>
+
+      <h4>Quy trình 2: Refactor mã nguồn an toàn theo chuẩn 4 bước</h4>
+      <ol style="padding-left: 20px; color: var(--text-secondary); margin-bottom: 20px;">
+        <li><strong>Định vị:</strong> Agent gọi <code>sot_search("processPayment")</code> nhận nhãn <span class="badge badge-strong">[STRONG]</span>.</li>
+        <li><strong>Biên lai Trước (P7.1):</strong> Gọi <code>sot_scope_receipt("processPayment")</code> để khóa chặt danh sách callers và candidate tests.</li>
+        <li><strong>Chỉnh sửa:</strong> Dùng edit tool sửa chính xác trong phạm vi dòng (<code>file:start-end</code>).</li>
+        <li><strong>Biên lai Sau (P7.2):</strong> Gọi <code>sot_diff_impact_receipt()</code> để xác nhận zero regression và cập nhật đồ thị bằng <code>sot reconcile</code>.</li>
+      </ol>
+
+      <h4>Quy trình 3: Tự động hóa Tài Liệu Giải Pháp (TLGP) & Manpower</h4>
+      <ol style="padding-left: 20px; color: var(--text-secondary); margin-bottom: 20px;">
+        <li>Chạy <code>sot solution inventory</code> để phát hiện và phân loại toàn bộ tính năng theo User Role.</li>
+        <li>Chạy <code>sot solution steps</code> để sinh bảng 4 cột có code AST thật phục vụ điền file Excel nhân công.</li>
+        <li>Chạy <code>sot solution bundle</code> để sinh <code>ContextBundle.md</code> làm dữ liệu duy nhất cho toàn bộ các subagent hạ tầng.</li>
+      </ol>
+
+      <h4>Quy trình 4: Tự động hóa Git Hooks & CI/CD</h4>
+      <ol style="padding-left: 20px; color: var(--text-secondary); margin-bottom: 20px;">
+        <li>Chạy <code>sot setup --hooks</code> để cài đặt git post-merge và post-checkout hook.</li>
+        <li>Mỗi lần lập trình viên <code>git pull</code> hoặc đổi nhánh, đồ thị tự động được cập nhật trong nền.</li>
+        <li>Trong CI/CD pipeline, chạy <code>sot verify --deep</code> để đảm bảo mã nguồn và đồ thị luôn đồng nhất.</li>
+      </ol>
+    </section>
+
+  </main>
+
+  <script>
+    // Initialize Mermaid
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      themeVariables: {
+        darkMode: true,
+        background: '#1f2937',
+        primaryColor: '#10b981',
+        primaryTextColor: '#f3f4f6',
+        primaryBorderColor: '#374151',
+        lineColor: '#38bdf8',
+        secondaryColor: '#1e293b',
+        tertiaryColor: '#111827'
+      }
+    });
+
+    // Theme Toggle Functionality
+    function toggleTheme() {
+      const html = document.documentElement;
+      if (html.classList.contains('dark')) {
+        html.classList.remove('dark');
+        html.classList.add('light');
+        localStorage.setItem('sot_theme', 'light');
+      } else {
+        html.classList.remove('light');
+        html.classList.add('dark');
+        localStorage.setItem('sot_theme', 'dark');
+      }
+    }
+
+    // Restore saved theme
+    (function() {
+      const savedTheme = localStorage.getItem('sot_theme');
+      if (savedTheme === 'light') {
+        document.documentElement.classList.remove('dark');
+        document.documentElement.classList.add('light');
+      }
+    })();
+
+    // Copy Code snippet button
+    function copyCode(button) {
+      const pre = button.parentElement;
+      const code = pre.querySelector('code');
+      const text = code.innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        const originalText = button.innerText;
+        button.innerText = 'Đã chép!';
+        button.style.background = 'rgba(16, 185, 129, 0.3)';
+        button.style.color = '#6ee7b7';
+        setTimeout(() => {
+          button.innerText = originalText;
+          button.style.background = '';
+          button.style.color = '';
+        }, 1800);
+      });
+    }
+
+    // Sidebar search filter
+    function filterSidebar() {
+      const input = document.getElementById('sidebar-search');
+      const filter = input.value.toLowerCase();
+      const items = document.querySelectorAll('#sidebar-menu .nav-item');
+      
+      items.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        if (text.includes(filter)) {
+          item.style.display = '';
+        } else {
+          item.style.display = 'none';
+        }
+      });
+    }
+
+    // Active link highlighting on scroll
+    window.addEventListener('scroll', () => {
+      const sections = document.querySelectorAll('section[id]');
+      const scrollPos = window.scrollY + 100;
+
+      sections.forEach(section => {
+        const top = section.offsetTop;
+        const height = section.offsetHeight;
+        const id = section.getAttribute('id');
+        if (scrollPos >= top && scrollPos < top + height) {
+          document.querySelectorAll('.nav-item').forEach(item => {
+            item.classList.remove('active');
+            const link = item.querySelector(`a[href="#${id}"]`);
+            if (link) {
+              item.classList.add('active');
+            }
+          });
+        }
+      });
+    });
+  </script>
+</body>
+</html>

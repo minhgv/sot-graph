@@ -40,13 +40,10 @@ SCIP_DEFAULT_ARTIFACTS = (
 )
 
 SCIP_KIND_MAP: Dict[int, str] = {
-    0: "unknown", 1: "file", 2: "module", 3: "namespace", 4: "package",
-    5: "class", 6: "method", 7: "property", 8: "field", 9: "constructor",
-    10: "enum", 11: "interface", 12: "function", 13: "variable", 14: "constant",
-    15: "string", 16: "number", 17: "boolean", 18: "array", 19: "object",
-    20: "key", 21: "null", 22: "enum_member", 23: "struct", 24: "event",
-    25: "operator", 26: "type_parameter", 27: "type_alias", 28: "macro",
-    29: "trait",
+    # Current SCIP `Kind` enum (scip.proto) — non-sequential by design;
+    # the old sequential 0..29 table matched neither this enum nor the
+    # deprecated SymbolKind one, mislabelling nearly every numeric kind.
+    0: "unspecifiedkind", 1: "array", 2: "assertion", 3: "associatedtype", 4: "attribute", 5: "axiom", 6: "boolean", 7: "class", 8: "constant", 9: "constructor", 10: "datafamily", 11: "enum", 12: "enummember", 13: "event", 14: "fact", 15: "field", 16: "file", 17: "function", 18: "getter", 19: "grammar", 20: "instance", 21: "interface", 22: "key", 23: "lang", 24: "lemma", 25: "macro", 26: "method", 27: "methodreceiver", 28: "message", 29: "module", 30: "namespace", 31: "null", 32: "number", 33: "object", 34: "operator", 35: "package", 36: "packageobject", 37: "parameter", 38: "parameterlabel", 39: "pattern", 40: "predicate", 41: "property", 42: "protocol", 43: "quasiquoter", 44: "selfparameter", 45: "setter", 46: "signature", 47: "subscript", 48: "string", 49: "struct", 50: "tactic", 51: "theorem", 52: "thisparameter", 53: "trait", 54: "type", 55: "typealias", 56: "typeclass", 57: "typefamily", 58: "typeparameter", 59: "union", 60: "value", 61: "variable", 62: "contract", 63: "error", 64: "library", 65: "modifier", 66: "abstractmethod", 67: "methodspecification", 68: "protocolmethod", 69: "purevirtualmethod", 70: "traitmethod", 71: "typeclassmethod", 72: "accessor", 73: "delegate", 74: "methodalias", 75: "singletonclass", 76: "singletonmethod", 77: "staticdatamember", 78: "staticevent", 79: "staticfield", 80: "staticmethod", 81: "staticproperty", 82: "staticvariable", 84: "extension", 85: "mixin", 86: "concept", 87: "next",
 }
 
 
@@ -68,6 +65,12 @@ class ScipProvider:
     def __init__(self, index_path: Optional[str] = None, db: Optional[Any] = None):
         self.index_path = index_path
         self.db = db
+        # Single-entry parse cache keyed by (realpath, mtime_ns, size): one
+        # provider run probes and then queries the same multi-hundred-MB
+        # index several times — only the first call should pay for parsing.
+        self._parse_cache: Optional[
+            Tuple[str, int, int, Dict[str, Any], List[Dict[str, Any]]]
+        ] = None
 
     def _persist_outcome(
         self,
@@ -167,6 +170,18 @@ class ScipProvider:
                     return real_p
         return None
     def _parse_index(self, file_path: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        cache_key: Optional[Tuple[str, int, int]] = None
+        try:
+            real = os.path.realpath(file_path)
+            st = os.stat(real)
+            cache_key = (real, st.st_mtime_ns, st.st_size)
+        except OSError:
+            cache_key = None
+        if cache_key is not None and self._parse_cache is not None:
+            c_real, c_mtime, c_size, c_meta, c_docs = self._parse_cache
+            if (c_real, c_mtime, c_size) == cache_key:
+                # List copy keeps callers from mutating the cached documents.
+                return dict(c_meta), list(c_docs)
         with open(file_path, "rb") as f:
             data = f.read()
         if not data:
@@ -179,6 +194,11 @@ class ScipProvider:
             parsed = parse_scip_protobuf(data)
         metadata = parsed.get("metadata", {})
         documents = parsed.get("documents", [])
+        if cache_key is not None:
+            self._parse_cache = (
+                cache_key[0], cache_key[1], cache_key[2],
+                dict(metadata), list(documents),
+            )
         return metadata, documents
 
     def probe(self, repo_root: str) -> ProviderStatus:
