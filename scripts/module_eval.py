@@ -19,7 +19,8 @@ pytest (scope-mapped test files).  Probes are small, deterministic,
 self-contained detectors for audited defects: probe FAILING means the bug
 is still present.  Exit codes: 0 = all selected gates pass (probes
 informational), 1 = gate failure, 2 = --strict-probes and a probe detects
-a bug.
+a bug or a probe/gate crashed (fail-closed: an unrunnable check can never
+prove absence of its bug).
 """
 from __future__ import annotations
 
@@ -552,8 +553,10 @@ class ScopeResult:
 
     @property
     def gates_pass(self) -> bool:
+        # None = gate intentionally skipped (--skip); a dict without an
+        # explicit pass=True is a crash artifact and must fail closed.
         for g in (self.ruff, self.pyright, self.pytest):
-            if g and not g.get("pass", True):
+            if g is not None and not g.get("pass", False):
                 return False
         return True
 
@@ -594,6 +597,9 @@ def run_static_gates(selected: List[str], skip: set) -> Dict[str, ScopeResult]:
                      "--output-format", "json"])
         if proc.returncode not in (0, 1):
             print(f"   ruff crashed: {proc.stderr[:200]}")
+            for res in results.values():
+                res.ruff = {"pass": False,
+                            "detail": f"ruff crashed (rc={proc.returncode})"}
         else:
             diags = json.loads(proc.stdout or "[]")
             by_scope: Dict[str, List[Dict[str, Any]]] = {}
@@ -641,6 +647,9 @@ def run_static_gates(selected: List[str], skip: set) -> Dict[str, ScopeResult]:
         except (json.JSONDecodeError, KeyError) as exc:
             print(f"   pyright output unusable ({exc}); stderr tail:")
             print("   " + proc.stderr[-300:].replace("\n", "\n   "))
+            for res in results.values():
+                res.pyright = {"pass": False,
+                               "detail": f"pyright output unusable ({exc})"}
 
     return results
 
@@ -723,7 +732,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--json", default="evaluation/module_scope/report.json")
     ap.add_argument("--markdown", default="evaluation/module_scope/report.md")
     ap.add_argument("--strict-probes", action="store_true",
-                    help="exit 2 when any probe still detects its bug")
+                    help="exit 2 when any probe still detects its bug or any probe crashed")
     args = ap.parse_args(argv)
 
     selected = args.scope or sorted(SCOPES)
@@ -756,11 +765,14 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     gate_fail = [r.name for r in results.values() if not r.gates_pass]
     bugs = sum(r.bugs_present for r in results.values())
+    probe_errors = sum(
+        1 for r in results.values()
+        for p in r.probes if p["status"] == "PROBE_ERROR")
     print(f"\nGates: {'ALL PASS' if not gate_fail else 'FAIL: ' + ', '.join(gate_fail)}"
-          f" | Probes: {bugs} bug(s) present")
+          f" | Probes: {bugs} bug(s) present, {probe_errors} probe error(s)")
     if gate_fail:
         return 1
-    if args.strict_probes and bugs:
+    if args.strict_probes and (bugs or probe_errors):
         return 2
     return 0
 

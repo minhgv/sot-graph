@@ -8,8 +8,8 @@ This document details the benchmarking methodology, execution procedures, and ve
 
 `sot-graph` is designed to operate inside the fast inner loop of AI coding agents (per-turn file edits, multi-file refactoring, pre-commit checks). To ensure zero noticeable latency for agents:
 
-1. **Sub-millisecond Search**: Candidate retrieval and trust scoring must take < 2 ms.
-2. **Instant Reconcile**: Unchanged files are checked in O(1) via filesystem metadata (μs range); modified files are parsed concurrently and committed in single-writer batches (< 30 ms for 100 files).
+1. **Fast Search**: FTS5 candidate retrieval itself stays in the low-millisecond range on small graphs (see §2); full end-to-end search — including per-hit physical Trust Verification (file read + SHA-256) and JIT reconcile — measured p50 ≈ 49 ms / p95 ≈ 50 ms on a 5,000-file graph (`benchmarks/performance_baseline.json`, `bounded_query_mixed`).
+2. **Instant Reconcile**: Unchanged files are checked in O(1) via filesystem metadata (μs range); modified files are parsed concurrently and committed in single-writer batches (150 files / 2 workers: p50 ≈ 207 ms, p95 ≈ 236 ms on `performance_baseline.json`; the per-file marginal cost on 100-file batches is the ~4,300 files/s figure in §1).
 3. **Ultra-Low Memory Footprint**: Core operations run under 25 MB RSS with zero external background daemons.
 
 ---
@@ -49,6 +49,8 @@ Evaluates cold and warm query latency for FTS5 full-text indexing, BM25 rank sco
 | **Multi-token Fuzzy Query** (`sot search "reconcile file"`) | 0.95 | 1.22 | 1.48 | < 20 MB |
 | **Scoped Path Query** (`--scope src/sot_graph`) | 0.78 | 1.08 | 1.25 | < 18 MB |
 | **Call Graph Traversal** (`sot explore "Reconciler" --depth 2`) | 1.10 | 1.45 | 1.80 | < 22 MB |
+
+> **Scope of these numbers**: retrieval-only (FTS5 + BM25 ranking) on the 100-file corpus — per-hit trust verification and JIT reconcile are excluded. End-to-end verified search on 5,000 files is p50 ≈ 49 ms (`benchmarks/performance_baseline.json`).
 
 ---
 

@@ -7,7 +7,7 @@
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](pyproject.toml)
 [![SQLite: WAL + FTS5](https://img.shields.io/badge/SQLite-FTS5%20%2B%20WAL-orange.svg)](src/sot_graph/db.py)
 [![Schema: v8 Multi-Provider](https://img.shields.io/badge/Schema-v8%20Multi--Provider-purple.svg)](src/sot_graph/db.py)
-[![Tests: 963 passed](https://img.shields.io/badge/Tests-963%2F963%20Passed-brightgreen.svg)](tests/)
+[![Tests: 963 collected](https://img.shields.io/badge/Tests-963%20collected-brightgreen.svg)](tests/)
 [![Quality Gates: Passing](https://img.shields.io/badge/Quality%20Gates-Passing%20(87%25%20Core%20%7C%2091%25%20Receipts)-success.svg)](scripts/quality_gates.sh)
 [![Architecture: Zero-Daemon](https://img.shields.io/badge/Architecture-Zero--Daemon-purple.svg)](#database-architecture--durability)
 [![Tree-Sitter: 10 Grammars](https://img.shields.io/badge/Tree--Sitter-10%20Grammars-success.svg)](src/sot_graph/ts_extract.py)
@@ -131,6 +131,15 @@ sot doctor
 
 # Emit machine-readable audit receipt
 sot doctor --receipt
+
+# CI-safe drift check: compare database projection against the filesystem
+sot verify --deep
+
+# Safe reset of disposable graph records (user notes preserved by default)
+sot clean --all --yes
+
+# Compact the SQLite database file and re-run ANALYZE
+sot vacuum --analyze
 ```
 
 ### 2. Pure-Read Code Search & Trust Verdicts
@@ -140,6 +149,10 @@ sot search "Database.commit_file_batch"
 
 # Search scoped to specific path or module
 sot search "Reconciler" --scope "src/sot_graph" -n 10
+
+# Build/refresh the optional vector index, then combine FTS + vector recall
+sot embed
+sot search "retry backoff policy" --hybrid
 ```
 
 ### 3. Dependency Impact & Blast Radius
@@ -218,6 +231,9 @@ sot report -o ARCHITECTURE_REPORT.md
 
 # Run Louvain community detection to evaluate modularity (Q) and cohesion
 sot cluster
+
+# Persist a durable knowledge/decision note (survives clean --all, queryable via sot_notes)
+sot insert --title "ADR: retry policy" --body "..." --keywords "adr,retry"
 ```
 
 ### 8. Interactive Visualizer & Knowledge Graph Export
@@ -309,6 +325,13 @@ sot mcp
 
 ## Installation
 
+### From PyPI
+```bash
+pip install sot-graph            # zero-dependency core
+pip install "sot-graph[all]"     # with MCP, analytics, watch, vector, tree-sitter extras
+```
+*(Available once the first `v*` tag is pushed — see [docs/RELEASE.md](docs/RELEASE.md).)*
+
 ### From Source / Git
 ```bash
 git clone https://github.com/minhgv/sot-graph.git
@@ -321,17 +344,19 @@ pip install -e ".[all,dev]"
 - `sot-graph[analytics]`: Graph community detection and modularity analysis (`networkx>=3.0`, `scipy>=1.10`).
 - `sot-graph[tokens]`: Fast Rust BPE tokenizer for prompt budgeting (`tiktoken>=0.7`).
 - `sot-graph[watch]`: Real-time filesystem watcher daemon (`watchfiles>=0.21`).
+- `sot-graph[vector]`: Hybrid FTS5 + vector retrieval (`sot search --hybrid`) (`sqlite-vec>=0.1.6`).
 - `sot-graph[scip]`: Compiler-backed SCIP index importer (`protobuf>=4.21`).
+- `sot-graph[tree-sitter]`: Polyglot Tree-sitter grammars (Go, Rust, Java, Kotlin, Swift, PHP, TS/JS, C/C++, Dart, Lua, Scala, SQL, Zig, ...).
 - `sot-graph[all]`: All optional dependencies and polyglot Tree-sitter parsers.
 
 ---
 
 ## Verification & Test Suite
 
-The test suite includes **963 tests** covering unit functionality, multi-OS file locking, stateful Hypothesis property testing, fault injection (WAL crash simulation, disk-full ENOSPC simulation, mid-batch connection drops), cross-language AST extractions, and multi-provider trust chain boundary enforcement:
+The test suite includes **963 collected tests** covering unit functionality, multi-OS file locking, stateful Hypothesis property testing, fault injection (WAL crash simulation, disk-full ENOSPC simulation, mid-batch connection drops), cross-language AST extractions, and multi-provider trust chain boundary enforcement:
 
 ```bash
-# Run full test suite with pytest (963 tests)
+# Run full test suite with pytest (963 collected; 2 win32-only tests skip on macOS/Linux)
 pytest tests/ -v --strict-markers
 
 # Run end-to-end quality gates script (Ruff + Pyright + Bandit + Pip-Audit + Coverage)
