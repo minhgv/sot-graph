@@ -31,7 +31,7 @@ def base_add(a: int, b: int) -> int:
 
 def calculate_fee(amount: int) -> int:
     return base_add(amount, 10)
-""", encoding="utf-8")
+""", encoding="utf-8", newline="")
 
     # 2. Service layer
     svc_file = root / "src" / "order_service.py"
@@ -42,7 +42,7 @@ class OrderService:
     def process_order(self, total: int) -> int:
         fee = calculate_fee(total)
         return total + fee
-""", encoding="utf-8")
+""", encoding="utf-8", newline="")
 
     # 3. Controller / API layer
     api_file = root / "src" / "order_controller.py"
@@ -53,7 +53,7 @@ class OrderController:
     def handle_checkout(self, amount: int) -> int:
         svc = OrderService()
         return svc.process_order(amount)
-""", encoding="utf-8")
+""", encoding="utf-8", newline="")
 
     # 4. Independent unrelated module
     user_file = root / "src" / "user_service.py"
@@ -61,7 +61,7 @@ class OrderController:
 class UserService:
     def get_user(self, user_id: str) -> str:
         return f"user:{user_id}"
-""", encoding="utf-8")
+""", encoding="utf-8", newline="")
 
     # 5. Unit test files
     test_dir = root / "tests"
@@ -72,7 +72,7 @@ from src.math_lib import calculate_fee
 
 def test_calculate_fee():
     assert calculate_fee(100) == 110
-""", encoding="utf-8")
+""", encoding="utf-8", newline="")
 
     (test_dir / "test_order.py").write_text("""
 from src.order_service import OrderService
@@ -80,7 +80,7 @@ from src.order_service import OrderService
 def test_order_service():
     svc = OrderService()
     assert svc.process_order(100) == 120
-""", encoding="utf-8")
+""", encoding="utf-8", newline="")
 
     (test_dir / "test_user.py").write_text("""
 from src.user_service import UserService
@@ -88,7 +88,7 @@ from src.user_service import UserService
 def test_user():
     svc = UserService()
     assert svc.get_user("42") == "user:42"
-""", encoding="utf-8")
+""", encoding="utf-8", newline="")
 
     # Initialize git repo and commit
     subprocess.run(["git", "init"], cwd=str(root), check=True, capture_output=True)
@@ -118,7 +118,7 @@ def base_add(a: int, b: int) -> int:
 
 def calculate_fee(amount: int) -> int:
     return base_add(amount, 20)
-""", encoding="utf-8")
+""", encoding="utf-8", newline="")
 
             # Reconcile working tree changes
             reconciler.reconcile()
@@ -162,7 +162,7 @@ def base_add(a: int, b: int) -> int:
 
 def calculate_fee(amount: int) -> int:
     return base_add(amount, 20)
-""", encoding="utf-8")
+""", encoding="utf-8", newline="")
             reconciler.reconcile()
             receipt = diff_impact_receipt(db, repo_root=str(root), working_tree=True)
 

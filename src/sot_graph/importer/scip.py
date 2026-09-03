@@ -833,7 +833,18 @@ class ScipImporter:
             text = doc_texts.get(rel)
             if isinstance(text, str):
                 doc_sha = hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
-                if doc_sha != journal["sha256"] and rel not in stale_files:
+                norm_crlf_sha = hashlib.sha256(
+                    text.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8", "replace")
+                ).hexdigest()
+                norm_lf_sha = hashlib.sha256(
+                    text.replace("\r\n", "\n").encode("utf-8", "replace")
+                ).hexdigest()
+                if (
+                    doc_sha != journal["sha256"]
+                    and norm_crlf_sha != journal["sha256"]
+                    and norm_lf_sha != journal["sha256"]
+                    and rel not in stale_files
+                ):
                     stale_files.append(rel)
         try:
             for drifted in self.db.stale_journal_files(doc_paths, proj_root):

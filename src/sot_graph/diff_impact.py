@@ -489,17 +489,20 @@ class ASTCoordinateMapper:
                 continue
 
             norm_path = self._normalize_path(file_path)
-            like_path = f"%/{norm_path}" if not norm_path.startswith("/") else f"%{norm_path}"
+            norm_fwd = norm_path
+            norm_back = norm_path.replace("/", "\\")
+            like_fwd = "%/" + norm_fwd.lstrip("/")
+            like_back = "%\\" + norm_back.lstrip("\\")
 
             # Query all candidate nodes for this file that have line coordinates
             try:
                 rows = self.conn.execute(
                     "SELECT id, path, kind, symbol, fqn, label, line_start, line_end "
                     "FROM graph_nodes "
-                    "WHERE (path = ? OR path LIKE ?) "
+                    "WHERE (path = ? OR path = ? OR path LIKE ? OR path LIKE ?) "
                     "AND line_start IS NOT NULL AND line_end IS NOT NULL "
                     "ORDER BY (line_end - line_start) ASC",
-                    (norm_path, like_path),
+                    (norm_fwd, norm_back, like_fwd, like_back),
                 ).fetchall()
             except Exception:
                 return []
@@ -705,16 +708,19 @@ class CommitHistoryEngine:
         symbols: List[str] = []
         seen = set()
         for f in files:
-            norm = f.replace("\\", "/") if os.sep == "\\" else f
+            norm = f.replace("\\", "/")
             if norm.startswith("./"):
                 norm = norm[2:]
-            like = f"%/{norm}" if not norm.startswith("/") else f"%{norm}"
+            norm_fwd = norm
+            norm_back = norm.replace("/", "\\")
+            like_fwd = "%/" + norm_fwd.lstrip("/")
+            like_back = "%\\" + norm_back.lstrip("\\")
             try:
                 rows = conn.execute(
                     "SELECT symbol FROM graph_nodes "
-                    "WHERE (path = ? OR path LIKE ?) AND symbol != '' AND kind != 'file' "
+                    "WHERE (path = ? OR path = ? OR path LIKE ? OR path LIKE ?) AND symbol != '' AND kind != 'file' "
                     "LIMIT 5",
-                    (norm, like),
+                    (norm_fwd, norm_back, like_fwd, like_back),
                 ).fetchall()
                 for r in rows:
                     sym = r[0]
@@ -1042,15 +1048,19 @@ class DiffImpactEngine:
 
         # 3. Match by Changed File Paths
         for f in changed_files:
-            norm_f = f.replace("\\", "/") if os.sep == "\\" else f
+            norm_f = f.replace("\\", "/")
             if norm_f.startswith("./"):
                 norm_f = norm_f[2:]
-            like_f = f"%/{norm_f}" if not norm_f.startswith("/") else f"%{norm_f}"
+            norm_fwd = norm_f
+            norm_back = norm_f.replace("/", "\\")
+            like_fwd = "%/" + norm_fwd.lstrip("/")
+            like_back = "%\\" + norm_back.lstrip("\\")
             rows = self.conn.execute(
                 "SELECT id, fe_caller_symbol, http_method, normalized_uri, be_controller_symbol, fe_file, be_file "
                 "FROM api_cross_bindings "
-                "WHERE fe_file = ? OR fe_file LIKE ? OR be_file = ? OR be_file LIKE ?",
-                (norm_f, like_f, norm_f, like_f),
+                "WHERE fe_file = ? OR fe_file = ? OR fe_file LIKE ? OR fe_file LIKE ? "
+                "OR be_file = ? OR be_file = ? OR be_file LIKE ? OR be_file LIKE ?",
+                (norm_fwd, norm_back, like_fwd, like_back, norm_fwd, norm_back, like_fwd, like_back),
             ).fetchall()
             for r in rows:
                 if r[0] not in seen_api_ids:
@@ -1147,7 +1157,7 @@ class DiffImpactEngine:
 
     def _is_test_path(self, path: str) -> bool:
         """Check if a file path belongs to test directories or test naming conventions."""
-        norm = path.replace("\\", "/") if os.sep == "\\" else path
+        norm = path.replace("\\", "/")
         return any(pat.search(norm) for pat in self.TEST_PATTERNS)
     def _compute_summary(
         self,

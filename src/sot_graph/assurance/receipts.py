@@ -480,9 +480,11 @@ def diff_impact_receipt(
     invalidated: List[Dict[str, Any]] = []
     try:
         for path in changed_files[:200]:
+            norm_fwd = path.replace("\\", "/")
+            norm_back = path.replace("/", "\\")
             rows = db.conn.execute(
                 "SELECT id, provider_name, snapshot_hash FROM provider_evidence "
-                "WHERE path = ? LIMIT 50", (path,),
+                "WHERE path = ? OR path = ? LIMIT 50", (norm_fwd, norm_back),
             ).fetchall()
             invalidated.extend(
                 {"id": r[0], "provider": r[1], "snapshot": r[2], "path": path}

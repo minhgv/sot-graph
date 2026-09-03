@@ -50,7 +50,7 @@ def workspace(tmp_path: Path) -> Path:
     ws.mkdir()
     (ws / "core").mkdir()
     (ws / "core" / "service.py").write_text(
-        "def compute():\n    return helper()\n", encoding="utf-8"
+        "def compute():\n    return helper()\n", encoding="utf-8", newline=""
     )
     db = Database(str(ws / ".sot" / "sot.db"))
     try:
@@ -157,7 +157,7 @@ class TestSnapshotBinding:
             # index snapshot from BEFORE an edit: text disagrees with journal
             old_text = "def compute():\n    return helper()\n"
             (workspace / "core" / "service.py").write_text(
-                "def compute():\n    return helper() + 1\n", encoding="utf-8"
+                "def compute():\n    return helper() + 1\n", encoding="utf-8", newline=""
             )
             db2 = Database(str(workspace / ".sot" / "sot.db"))
             try:

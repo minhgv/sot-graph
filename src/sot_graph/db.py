@@ -742,7 +742,7 @@ class Database:
             except OSError:
                 stale.append(str(raw))  # deleted since reconcile
                 continue
-            if int(stat.st_size) != prior.get("size") or int(stat.st_mtime * 1000) != prior.get("mtime_ms"):
+            if int(stat.st_size) != prior.get("size"):
                 stale.append(str(raw))
                 continue
             try:
