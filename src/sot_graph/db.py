@@ -1878,6 +1878,16 @@ class Database:
 
         Returns the number of edges promoted to ``graph_edges``.
         """
+        # The emptiness check must be on the whole table, not on
+        # resolution_state: the pass also prunes EXTERNAL rows, so an
+        # empty table is the only provably no-op case. Skipping it avoids
+        # rebuilding the full symbol index and class hierarchy
+        # (O(nodes+edges)) on every watcher batch with no pending rows.
+        has_pending = self.conn.execute(
+            "SELECT 1 FROM pending_edges LIMIT 1"
+        ).fetchone()
+        if has_pending is None:
+            return 0
         return self._resolve_pending_edges_pass()["promoted"]
 
     def resolve_pending_edges(self, new_symbols: List[str], current_file_path: Optional[str] = None) -> int:
@@ -2988,3 +2998,65 @@ class Database:
             self.conn.execute("DELETE FROM provider_evidence WHERE run_id = ?", (run_id,))
             self.conn.execute("DELETE FROM provider_runs WHERE id = ?", (run_id,))
         return int(ev_count)
+
+    def purge_history(
+        self, *, keep_runs: int = 10, keep_snapshots: int = 20
+    ) -> Dict[str, int]:
+        """Prune append-only ledger history that ``clean --all`` keeps.
+
+        Per ``provider_name`` only the newest ``keep_runs`` runs survive
+        (ordered by ``created_at DESC, id DESC``); the older runs lose
+        their evidence rows first, then the runs themselves. Snapshots
+        survive when they are EITHER among the newest ``keep_snapshots``
+        per ``repo_root`` (``captured_at DESC, id DESC``) OR referenced
+        by any ``provider_runs.snapshot_id`` — an active ledger reference
+        always wins over retention. All deletions land in one
+        transaction; returns deleted row counts per table.
+        """
+        with self.conn:
+            deleted_runs = 0
+            deleted_evidence = 0
+            for (provider_name,) in self.conn.execute(
+                "SELECT DISTINCT provider_name FROM provider_runs"
+            ).fetchall():
+                doomed = self.conn.execute(
+                    "SELECT id FROM provider_runs WHERE provider_name = ? "
+                    "ORDER BY created_at DESC, id DESC LIMIT -1 OFFSET ?",
+                    (provider_name, keep_runs),
+                ).fetchall()
+                if not doomed:
+                    continue
+                run_ids = [row[0] for row in doomed]
+                placeholders = ",".join("?" * len(run_ids))
+                deleted_evidence += self.conn.execute(
+                    f"DELETE FROM provider_evidence "
+                    f"WHERE run_id IN ({placeholders})",
+                    run_ids,
+                ).rowcount
+                deleted_runs += self.conn.execute(
+                    f"DELETE FROM provider_runs WHERE id IN ({placeholders})",
+                    run_ids,
+                ).rowcount
+            # A snapshot is outside the newest keep_snapshots of its
+            # repo_root exactly when at least keep_snapshots rows in the
+            # same repo_root are strictly newer by (captured_at DESC,
+            # id DESC) — no window functions needed.
+            deleted_snapshots = self.conn.execute(
+                "DELETE FROM snapshots WHERE "
+                "id NOT IN ("
+                "  SELECT snapshot_id FROM provider_runs"
+                "  WHERE snapshot_id IS NOT NULL) "
+                "AND ("
+                "  SELECT COUNT(*) FROM snapshots newer"
+                "  WHERE newer.repo_root = snapshots.repo_root"
+                "  AND (newer.captured_at > snapshots.captured_at"
+                "       OR (newer.captured_at = snapshots.captured_at"
+                "           AND newer.id > snapshots.id))"
+                ") >= ?",
+                (keep_snapshots,),
+            ).rowcount
+        return {
+            "provider_runs": int(deleted_runs),
+            "provider_evidence": int(deleted_evidence),
+            "snapshots": int(deleted_snapshots),
+        }

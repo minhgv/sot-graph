@@ -29,7 +29,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, cast
 
 from sot_graph.locking import LockBusy, WriteLock
 
@@ -76,7 +76,16 @@ def _reconcile_quietly(reconciler, paths: Set[str]) -> Tuple[int, Set[str]]:
     into the next debounce batch, otherwise a long write-lock holder (CLI
     migration, provider sync) silently voids every event raised while it
     runs and the DB stays stale until the file changes again.
+
+    When the reconciler exposes ``reconcile_paths`` the whole debounce
+    batch is handed over so the global janitors (pending-edge resolution
+    + orphan cleanup) run once per batch instead of once per file;
+    reconcilers without that method (test fakes, older versions) keep
+    the per-file loop below.
     """
+    batch = getattr(reconciler, "reconcile_paths", None)
+    if callable(batch):
+        return cast(Tuple[int, Set[str]], batch(paths))
     published = 0
     deferred: Set[str] = set()
     for path in sorted(paths):

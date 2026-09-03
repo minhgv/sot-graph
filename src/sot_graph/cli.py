@@ -9,7 +9,7 @@ import json
 import os
 import sys
 import time
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
 import sqlite3
 
@@ -370,6 +370,7 @@ def cmd_providers_sync(args: argparse.Namespace, root: str,
     timeout = float(getattr(args, "timeout", 0) or 0) or None
     progress = bool(getattr(args, "progress", False))
     lock_path = os.path.join(root, ".sot", "write.lock")
+    pruned: Optional[Dict[str, int]] = None
     try:
         with WriteLock(lock_path, timeout_ms=60_000):
             # The ledger connection is opened only for the sync itself, so
@@ -381,6 +382,14 @@ def cmd_providers_sync(args: argparse.Namespace, root: str,
                     IndexRequest(repo_root=root, timeout_seconds=timeout),
                     progress=progress,
                 )
+                # A successful sync just appended run + evidence rows, so
+                # prune older ledger history now while the write lock is
+                # held. Feature-detected so stub Databases without
+                # retention support keep working.
+                if record.status == "ok":
+                    purge_history = getattr(db, "purge_history", None)
+                    if callable(purge_history):
+                        pruned = cast(Dict[str, int], purge_history())
             finally:
                 db.close()
     except LockBusy:
@@ -402,6 +411,12 @@ def cmd_providers_sync(args: argparse.Namespace, root: str,
         print(f"   detail       : {record.detail}")
         if record.next_action:
             print(f"   next_action  : {record.next_action}")
+        if pruned and any(pruned.values()):
+            print(
+                f"   history      : pruned {pruned['provider_runs']} run(s), "
+                f"{pruned['provider_evidence']} evidence row(s), "
+                f"{pruned['snapshots']} snapshot(s)"
+            )
     return 0 if record.status == "ok" else 1
 
 

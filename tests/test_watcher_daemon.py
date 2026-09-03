@@ -9,8 +9,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from sot_graph.db import Database
+from sot_graph.locking import LockBusy
+from sot_graph.reconciler import Reconciler
 from sot_graph.watcher import (
     _process_identity,
+    _reconcile_quietly,
     discover_sot_projects,
     is_pid_alive,
     pick_backend,
@@ -183,6 +187,100 @@ class TestWatcherDaemon(unittest.TestCase):
 
             pid_path = self.root / ".sot" / "watch.pid"
             self.assertFalse(pid_path.exists())
+
+
+class TestBatchJanitor(unittest.TestCase):
+    """The watcher batch must run global janitors once, not once per file.
+
+    A git checkout touching N files used to run resolve_all_pending_edges
+    + cleanup_orphan_edges N times (one full-graph pass per file commit);
+    reconcile_paths batches them into a single pass while per-file
+    commits stay individual.
+    """
+
+    def setUp(self):
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp_dir.name).resolve()
+        (self.root / ".sot").mkdir()
+        self.db = Database(str(self.root / ".sot" / "sot.db"))
+        self.resolver_calls = []
+        original_resolver = self.db.resolve_all_pending_edges
+
+        def counting_resolver():
+            self.resolver_calls.append(1)
+            return original_resolver()
+
+        self.db.resolve_all_pending_edges = counting_resolver
+        self.reconciler = Reconciler(self.db, str(self.root))
+
+    def tearDown(self):
+        self.db.close()
+        self.tmp_dir.cleanup()
+
+    def _write_py(self, name, body):
+        path = self.root / name
+        path.write_text(body, encoding="utf-8")
+        return str(path)
+
+    def test_batch_runs_janitor_once_for_many_files(self):
+        paths = [
+            self._write_py(f"mod{i}.py", f"def fn{i}(x):\n    return x + {i}\n")
+            for i in range(4)
+        ]
+        published, deferred = _reconcile_quietly(self.reconciler, set(paths))
+        self.assertEqual(published, 4)
+        self.assertEqual(deferred, set())
+        self.assertEqual(self.resolver_calls, [1])
+        # Per-file commits stay individual: every file is journaled.
+        for path in paths:
+            self.assertIsNotNone(self.db.get_file_journal(path))
+
+    def test_batch_skips_janitor_when_nothing_published(self):
+        logo = self.root / "logo.png"
+        logo.write_bytes(b"\x89PNG\r\n\x1a\nnot-really-an-image")
+        published, deferred = _reconcile_quietly(self.reconciler, {str(logo)})
+        self.assertEqual(published, 0)
+        self.assertEqual(deferred, set())
+        self.assertEqual(self.resolver_calls, [])
+
+    def test_batch_defers_lockbusy_paths(self):
+        ok_path = self._write_py("ok.py", "def ok():\n    return 1\n")
+        busy_path = self._write_py("busy.py", "def busy():\n    return 2\n")
+        original = self.reconciler.reconcile_path
+
+        def flaky(path, **kwargs):
+            if path == busy_path:
+                raise LockBusy("locked by another writer")
+            return original(path, **kwargs)
+
+        self.reconciler.reconcile_path = flaky
+        published, deferred = _reconcile_quietly(
+            self.reconciler, {ok_path, busy_path}
+        )
+        self.assertEqual(published, 1)
+        self.assertEqual(deferred, {busy_path})
+        # The published file still got exactly one janitor pass.
+        self.assertEqual(self.resolver_calls, [1])
+
+    def test_fallback_per_file_loop_for_legacy_reconcilers(self):
+        class LegacyFake:
+            def __init__(self):
+                self.calls = []
+
+            def reconcile_path(self, path):
+                self.calls.append(path)
+                if path.endswith("b.py"):
+                    raise LockBusy("busy")
+                return "indexed"
+
+        fake = LegacyFake()
+        published, deferred = _reconcile_quietly(
+            fake, {"a.py", "b.py", "c.py"}
+        )
+        self.assertEqual(published, 2)
+        self.assertEqual(deferred, {"b.py"})
+        # Deterministic sorted order, one call per file.
+        self.assertEqual(fake.calls, ["a.py", "b.py", "c.py"])
 
 
 if __name__ == "__main__":

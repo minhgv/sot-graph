@@ -57,7 +57,8 @@ SCOPES: Dict[str, Dict[str, List[str]]] = {
             "test_proc_streaming_cap.py", "test_proc_windows_job.py", "test_vector.py",
             "test_p9_chaos_migration.py", "test_v2_upgrade.py",
             "test_maintenance.py", "test_optimizations.py",
-            "test_core_safety_fixes.py",
+            "test_core_safety_fixes.py", "test_query_plan_regression.py",
+            "test_history_retention.py",
         ],
     },
     "extraction": {

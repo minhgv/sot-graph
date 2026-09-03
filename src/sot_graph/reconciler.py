@@ -18,7 +18,7 @@ from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from contextlib import AbstractContextManager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, cast
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, cast
 
 from sot_graph.db import Database
 from sot_graph.extractor import EXT_DISPATCH, parse_file_graph
@@ -482,8 +482,14 @@ class Reconciler:
 
         return _unlocked()
 
-    def reconcile_path(self, path: str) -> str:
-        """Reconcile one path using the original v1 action vocabulary."""
+    def reconcile_path(self, path: str, *, janitor: bool = True) -> str:
+        """Reconcile one path using the original v1 action vocabulary.
+
+        ``janitor=False`` skips only the post-commit global janitor
+        passes (pending-edge resolution + orphan cleanup); batch callers
+        run them once via :meth:`reconcile_paths` instead of once per
+        file. All other callers keep the default full behavior.
+        """
         absolute = self._normalise_path(path)
         if absolute is None:
             # Keep an escaped in-root symlink deletion-only.  Do not stat,
@@ -537,15 +543,56 @@ class Reconciler:
             return "error"
         if conflicts:
             return "conflict"
-        resolver = getattr(self.db, "resolve_all_pending_edges", None)
-        if callable(resolver):
-            with self._publication_gate():
-                resolver()
-        janitor = getattr(self.db, "cleanup_orphan_edges", None)
-        if callable(janitor):
-            with self._publication_gate():
-                janitor()
+        if janitor:
+            resolver = getattr(self.db, "resolve_all_pending_edges", None)
+            if callable(resolver):
+                with self._publication_gate():
+                    resolver()
+            cleanup = getattr(self.db, "cleanup_orphan_edges", None)
+            if callable(cleanup):
+                with self._publication_gate():
+                    cleanup()
         return "indexed"
+
+    def reconcile_paths(self, paths: Iterable[str]) -> Tuple[int, Set[str]]:
+        """Reconcile a batch of paths with a single global janitor pass.
+
+        Contract: per-file commits stay individual (each file still takes
+        the publication gate on its own, so lock granularity is
+        unchanged), but the gated global janitors — pending-edge
+        resolution plus orphan cleanup — run exactly once for the whole
+        batch and only when something was published. A git checkout
+        touching N files therefore costs one full-graph pass instead of
+        N. LockBusy paths are deferred into the returned set (never
+        dropped); any other failure skips just that path. Returns
+        ``(published, deferred)`` where published counts outcomes outside
+        ``("error", "excluded")``, mirroring the watcher's per-file
+        semantics.
+        """
+        from sot_graph.locking import LockBusy
+
+        published = 0
+        deferred: Set[str] = set()
+        for path in sorted(paths):
+            try:
+                outcome = self.reconcile_path(path, janitor=False)
+            except LockBusy:
+                deferred.add(path)
+                continue
+            except Exception:
+                continue
+            if outcome not in ("error", "excluded"):
+                published += 1
+        if published:
+            resolver = getattr(self.db, "resolve_all_pending_edges", None)
+            if callable(resolver):
+                with self._publication_gate():
+                    resolver()
+            cleanup = getattr(self.db, "cleanup_orphan_edges", None)
+            if callable(cleanup):
+                with self._publication_gate():
+                    cleanup()
+        return published, deferred
 
     def _parallel_window(
         self,
