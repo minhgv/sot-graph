@@ -108,9 +108,12 @@ def ledger_repo(tmp_path_factory):
     stub.chmod(0o755)
     (repo / ".gitignore").write_text(".sot/sot.db*\n.sot/*.lock\n.sot/write.lock\n.sot/bundle/\n", encoding="utf-8")
     (repo / ".sot").mkdir()
+    import json
+    exe_arg = json.dumps(str(sys.executable))
+    stub_arg = json.dumps(str(stub))
     (repo / ".sot" / "config.toml").write_text(
         "allow_external = true\n"
-        f'[providers.codebase-memory]\ncommand = ["{sys.executable}", "{stub}"]\n',
+        f'[providers.codebase-memory]\ncommand = [{exe_arg}, {stub_arg}]\n',
         encoding="utf-8",
     )
     def _git(*args):
@@ -139,6 +142,7 @@ class TestCliQueryPersistsLedger:
             [sys.executable, "-m", "sot_graph.cli", "--root", str(ledger_repo),
              "usages", "run", "--provider", "auto"],
             cwd=ledger_repo, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
         )
         assert out.returncode == 0, out.stderr
         db = _db_of(ledger_repo)

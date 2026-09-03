@@ -514,12 +514,14 @@ class TestRunPersistenceRobustness:
     def test_record_provider_run_persists_every_field(self, tmp_path):
         db = open_db(tmp_path)
         try:
+            test_repo = str(tmp_path / "repo")
+            canonical_root = os.path.realpath(test_repo)
             rid = db.record_provider_run(
                 PROVIDER_NAME,
                 provider_version="0.10.8",
                 capability="search_graph",
                 snapshot_hash="a" * 40,
-                project_root="/repo",
+                project_root=test_repo,
                 status="ok",
                 exit_code=0,
                 duration_ms=12,
@@ -533,7 +535,7 @@ class TestRunPersistenceRobustness:
                 "FROM provider_runs WHERE id='run_fields'"
             ).fetchone()
             assert row == (
-                "0.10.8", "search_graph", "a" * 40, "/repo",
+                "0.10.8", "search_graph", "a" * 40, canonical_root,
                 "ok", 0, 12, "d" * 64,
             )
         finally:

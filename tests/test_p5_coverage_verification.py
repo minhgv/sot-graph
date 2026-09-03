@@ -184,6 +184,7 @@ class TestZeroResultIsNotNegativeClaim:
             [sys.executable, "-m", "sot_graph.cli", "--root", str(covered_repo),
              "search", "zzz_nothing", "--limit", "3"],
             check=True, cwd=covered_repo, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
         )
         assert "No verified matching knowledge found" in out.stdout
         assert "coverage:" in out.stdout

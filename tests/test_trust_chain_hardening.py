@@ -1097,16 +1097,17 @@ index 0000000..1111111 100644
 +def new_func_check(): pass
 '''
 
+    expected_bs = "path/with/bs.py" if os.sep == "\\" else "path\\with\\bs.py"
     file_intervals, hunks = extractor.parse_unified_diff(diff_text)
     assert "path\twith\ttab.py" in file_intervals
     assert 'path"with"quote.py' in file_intervals
-    assert 'path\\with\\bs.py' in file_intervals
+    assert expected_bs in file_intervals
     assert 'path✓.py' in file_intervals
 
     hunk_files = {h.file_path for h in hunks}
     assert "path\twith\ttab.py" in hunk_files
     assert 'path"with"quote.py' in hunk_files
-    assert 'path\\with\\bs.py' in hunk_files
+    assert expected_bs in hunk_files
     assert 'path✓.py' in hunk_files
 
 

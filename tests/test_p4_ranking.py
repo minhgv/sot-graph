@@ -92,6 +92,7 @@ def _search_json(repo: Path, query: str) -> dict:
         [sys.executable, "-m", "sot_graph.cli", "--root", str(repo),
          "search", query, "--json", "--limit", "10"],
         check=True, cwd=repo, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
     )
     return json.loads(out.stdout)
 
@@ -121,5 +122,6 @@ class TestSearchProvenance:
             [sys.executable, "-m", "sot_graph.cli", "--root", str(indexed_repo),
              "search", "run_server", "--limit", "5"],
             check=True, cwd=indexed_repo, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
         )
         assert "Rank:" in out.stdout

@@ -248,7 +248,8 @@ class TestBuiltinQueryAssurance:
     def _explore_json(self, repo: Path) -> dict:
         proc = subprocess.run(
             [sys.executable, "-m", "sot_graph.cli", "explore", "target", "--json"],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=120,
             cwd=str(repo),
         )
         assert proc.returncode == 0, proc.stderr
@@ -258,7 +259,8 @@ class TestBuiltinQueryAssurance:
         env = dict(os.environ, SOT_ROOT=str(clean_repo))
         proc = subprocess.run(
             [sys.executable, "-m", "sot_graph.cli", "reconcile"],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=120,
             cwd=str(clean_repo), env=env,
         )
         assert proc.returncode == 0, proc.stderr

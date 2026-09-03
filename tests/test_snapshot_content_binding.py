@@ -29,9 +29,8 @@ from sot_graph.assurance.ledger import union_evidence
 def _write(root, rel: str, text: str) -> None:
     p = os.path.join(root, *rel.split("/"))
     os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "w", encoding="utf-8") as fh:
+    with open(p, "w", encoding="utf-8", newline="") as fh:
         fh.write(text)
-
 
 class TestScopeDigestContentBinding:
     def test_same_file_different_contents_different_scope_digest(self, tmp_path):

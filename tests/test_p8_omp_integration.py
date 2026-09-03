@@ -39,6 +39,7 @@ def _sot(repo: Path, *args: str, check: bool = True):
     out = subprocess.run(
         [sys.executable, "-m", "sot_graph.cli", "--root", str(repo), *args],
         cwd=repo, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
     )
     if check:
         assert out.returncode == 0, out.stderr

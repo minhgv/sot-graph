@@ -20,6 +20,7 @@ def test_cli_version_via_subprocess() -> None:
         [sys.executable, "-m", "sot_graph.cli", "--version"],
         capture_output=True,
         text=True,
+        encoding="utf-8", errors="replace",
         timeout=60,
     )
     assert proc.returncode == 0, proc.stderr
@@ -31,6 +32,7 @@ def test_cli_help_via_subprocess() -> None:
         [sys.executable, "-m", "sot_graph.cli", "--help"],
         capture_output=True,
         text=True,
+        encoding="utf-8", errors="replace",
         timeout=60,
     )
     assert proc.returncode == 0, proc.stderr

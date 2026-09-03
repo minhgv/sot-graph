@@ -106,12 +106,13 @@ def test_diff_impact_oracle_precision_and_blast_radius():
 
         db_path = root / ".sot" / "sot.db"
         db = Database(str(db_path))
-        reconciler = Reconciler(db, str(root))
-        reconciler.reconcile()
+        try:
+            reconciler = Reconciler(db, str(root))
+            reconciler.reconcile()
 
-        # Modify src/math_lib.py
-        math_file = root / "src" / "math_lib.py"
-        math_file.write_text("""
+            # Modify src/math_lib.py
+            math_file = root / "src" / "math_lib.py"
+            math_file.write_text("""
 def base_add(a: int, b: int) -> int:
     return a + b + 1
 
@@ -119,25 +120,27 @@ def calculate_fee(amount: int) -> int:
     return base_add(amount, 20)
 """, encoding="utf-8")
 
-        # Reconcile working tree changes
-        reconciler.reconcile()
+            # Reconcile working tree changes
+            reconciler.reconcile()
 
-        engine = DiffImpactEngine(db, str(root))
-        impact = engine.analyze_diff_impact(working_tree=True)
+            engine = DiffImpactEngine(db, str(root))
+            impact = engine.analyze_diff_impact(working_tree=True)
 
-        impacted_paths = {item.path for item in impact.caller_impacts}
-        impacted_symbols = {item.symbol for item in impact.caller_impacts}
+            impacted_paths = {item.path for item in impact.caller_impacts}
+            impacted_symbols = {item.symbol for item in impact.caller_impacts}
 
-        # Verify direct / transitive inward callers
-        assert any("order_service.py" in p for p in impacted_paths)
-        assert any("process_order" in s for s in impacted_symbols)
+            # Verify direct / transitive inward callers
+            assert any("order_service.py" in p for p in impacted_paths)
+            assert any("process_order" in s for s in impacted_symbols)
 
-        # Ensure unrelated files are NOT tainted (Precision = 1.0 on unrelated services)
-        assert not any("user_service.py" in p for p in impacted_paths)
-        assert not any("get_user" in s for s in impacted_symbols)
-        # Verify affected test discovery
-        affected_tests = {item.path for item in impact.test_impacts}
-        assert any("test_math.py" in t for t in affected_tests)
+            # Ensure unrelated files are NOT tainted (Precision = 1.0 on unrelated services)
+            assert not any("user_service.py" in p for p in impacted_paths)
+            assert not any("get_user" in s for s in impacted_symbols)
+            # Verify affected test discovery
+            affected_tests = {item.path for item in impact.test_impacts}
+            assert any("test_math.py" in t for t in affected_tests)
+        finally:
+            db.close()
 
 def test_diff_impact_receipt_contract():
     """Verify that diff_impact_receipt generates complete deterministic state with snapshot digest."""
@@ -147,24 +150,27 @@ def test_diff_impact_receipt_contract():
 
         db_path = root / ".sot" / "sot.db"
         db = Database(str(db_path))
-        reconciler = Reconciler(db, str(root))
-        reconciler.reconcile()
+        try:
+            reconciler = Reconciler(db, str(root))
+            reconciler.reconcile()
 
-        # Modify src/math_lib.py
-        math_file = root / "src" / "math_lib.py"
-        math_file.write_text("""
+            # Modify src/math_lib.py
+            math_file = root / "src" / "math_lib.py"
+            math_file.write_text("""
 def base_add(a: int, b: int) -> int:
     return a + b + 1
 
 def calculate_fee(amount: int) -> int:
     return base_add(amount, 20)
 """, encoding="utf-8")
-        reconciler.reconcile()
-        receipt = diff_impact_receipt(db, repo_root=str(root), working_tree=True)
+            reconciler.reconcile()
+            receipt = diff_impact_receipt(db, repo_root=str(root), working_tree=True)
 
-        assert receipt["assurance"]["status"] in ("ASSURED_WITHIN_SCOPE", "PARTIAL", "STALE")
-        assert receipt["schema_version"] in ("1.1", "2.0")
-        assert "post_change_snapshot" in receipt
-        assert receipt["post_change_snapshot"]["scope_digest"] is not None
-        assert len(receipt["post_change_snapshot"]["content_digests"]) >= 1
-        assert any("math_lib.py" in p for p in receipt["post_change_snapshot"]["content_digests"])
+            assert receipt["assurance"]["status"] in ("ASSURED_WITHIN_SCOPE", "PARTIAL", "STALE")
+            assert receipt["schema_version"] in ("1.1", "2.0")
+            assert "post_change_snapshot" in receipt
+            assert receipt["post_change_snapshot"]["scope_digest"] is not None
+            assert len(receipt["post_change_snapshot"]["content_digests"]) >= 1
+            assert any("math_lib.py" in p for p in receipt["post_change_snapshot"]["content_digests"])
+        finally:
+            db.close()

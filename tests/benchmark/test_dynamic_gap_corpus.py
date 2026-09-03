@@ -38,17 +38,19 @@ def run_handler(name: str, payload: dict):
 
         db_path = root / ".sot" / "sot.db"
         db = Database(str(db_path))
-        reconciler = Reconciler(db, str(root))
-        reconciler.reconcile()
+        try:
+            reconciler = Reconciler(db, str(root))
+            reconciler.reconcile()
 
-        manifest = build_scope_manifest(db, str(root), ["dynamic_service.py"])
-        assert "dynamic_service.py" in manifest.included_files
-        assert any("dynamic_reflection" in c for c in manifest.unsupported_constructs)
+            manifest = build_scope_manifest(db, str(root), ["dynamic_service.py"])
+            assert "dynamic_service.py" in manifest.included_files
+            assert any("dynamic_reflection" in c for c in manifest.unsupported_constructs)
 
-        receipt = scope_receipt(db, target="run_handler", repo_root=str(root))
-        assert receipt["assurance"]["status"] == "PARTIAL"
-        assert "dynamic_dispatch_unresolved" in receipt["assurance"]["reason_codes"]
-
+            receipt = scope_receipt(db, target="run_handler", repo_root=str(root))
+            assert receipt["assurance"]["status"] == "PARTIAL"
+            assert "dynamic_dispatch_unresolved" in receipt["assurance"]["reason_codes"]
+        finally:
+            db.close()
 
 def test_dynamic_gap_typescript():
     """Verify TypeScript dynamic import/eval detection."""
@@ -65,17 +67,19 @@ export async function loadModule(name: string) {
 
         db_path = root / ".sot" / "sot.db"
         db = Database(str(db_path))
-        reconciler = Reconciler(db, str(root))
-        reconciler.reconcile()
+        try:
+            reconciler = Reconciler(db, str(root))
+            reconciler.reconcile()
 
-        manifest = build_scope_manifest(db, str(root), ["dynamic_loader.ts"])
-        assert "dynamic_loader.ts" in manifest.included_files
-        assert any("dynamic_eval" in c or "dynamic_import" in c for c in manifest.unsupported_constructs)
+            manifest = build_scope_manifest(db, str(root), ["dynamic_loader.ts"])
+            assert "dynamic_loader.ts" in manifest.included_files
+            assert any("dynamic_eval" in c or "dynamic_import" in c for c in manifest.unsupported_constructs)
 
-        receipt = scope_receipt(db, target="loadModule", repo_root=str(root))
-        assert receipt["assurance"]["status"] == "PARTIAL"
-        assert "dynamic_dispatch_unresolved" in receipt["assurance"]["reason_codes"]
-
+            receipt = scope_receipt(db, target="loadModule", repo_root=str(root))
+            assert receipt["assurance"]["status"] == "PARTIAL"
+            assert "dynamic_dispatch_unresolved" in receipt["assurance"]["reason_codes"]
+        finally:
+            db.close()
 
 def test_dynamic_gap_java():
     """Verify Java Class.forName / reflection detection."""
@@ -93,17 +97,19 @@ public class PluginManager {
 
         db_path = root / ".sot" / "sot.db"
         db = Database(str(db_path))
-        reconciler = Reconciler(db, str(root))
-        reconciler.reconcile()
+        try:
+            reconciler = Reconciler(db, str(root))
+            reconciler.reconcile()
 
-        manifest = build_scope_manifest(db, str(root), ["PluginManager.java"])
-        assert "PluginManager.java" in manifest.included_files
-        assert any("dynamic_class_loading" in c or "dynamic_reflection" in c for c in manifest.unsupported_constructs)
+            manifest = build_scope_manifest(db, str(root), ["PluginManager.java"])
+            assert "PluginManager.java" in manifest.included_files
+            assert any("dynamic_class_loading" in c or "dynamic_reflection" in c for c in manifest.unsupported_constructs)
 
-        receipt = scope_receipt(db, target="PluginManager.loadPlugin", repo_root=str(root))
-        assert receipt["assurance"]["status"] == "PARTIAL"
-        assert "dynamic_dispatch_unresolved" in receipt["assurance"]["reason_codes"]
-
+            receipt = scope_receipt(db, target="PluginManager.loadPlugin", repo_root=str(root))
+            assert receipt["assurance"]["status"] == "PARTIAL"
+            assert "dynamic_dispatch_unresolved" in receipt["assurance"]["reason_codes"]
+        finally:
+            db.close()
 
 def test_dynamic_gap_go():
     """Verify Go type switch / reflect detection."""
@@ -128,17 +134,19 @@ func dispatch(x interface{}) string {
 """, encoding="utf-8")
         db_path = root / ".sot" / "sot.db"
         db = Database(str(db_path))
-        reconciler = Reconciler(db, str(root))
-        reconciler.reconcile()
+        try:
+            reconciler = Reconciler(db, str(root))
+            reconciler.reconcile()
 
-        manifest = build_scope_manifest(db, str(root), ["dispatcher.go"])
-        assert "dispatcher.go" in manifest.included_files
-        assert any("dynamic_type_switch" in c for c in manifest.unsupported_constructs)
+            manifest = build_scope_manifest(db, str(root), ["dispatcher.go"])
+            assert "dispatcher.go" in manifest.included_files
+            assert any("dynamic_type_switch" in c for c in manifest.unsupported_constructs)
 
-        receipt = scope_receipt(db, target="dispatch", repo_root=str(root))
-        assert receipt["assurance"]["status"] == "PARTIAL"
-        assert "dynamic_dispatch_unresolved" in receipt["assurance"]["reason_codes"]
-
+            receipt = scope_receipt(db, target="dispatch", repo_root=str(root))
+            assert receipt["assurance"]["status"] == "PARTIAL"
+            assert "dynamic_dispatch_unresolved" in receipt["assurance"]["reason_codes"]
+        finally:
+            db.close()
 
 def test_dynamic_gap_rust():
     """Verify Rust dynamic trait object (&dyn Trait, Box<dyn Trait>) detection."""
@@ -162,17 +170,19 @@ impl PluginRunner {
 """, encoding="utf-8")
         db_path = root / ".sot" / "sot.db"
         db = Database(str(db_path))
-        reconciler = Reconciler(db, str(root))
-        reconciler.reconcile()
+        try:
+            reconciler = Reconciler(db, str(root))
+            reconciler.reconcile()
 
-        manifest = build_scope_manifest(db, str(root), ["plugin.rs"])
-        assert "plugin.rs" in manifest.included_files
-        assert any("dynamic_trait_object" in c for c in manifest.unsupported_constructs)
+            manifest = build_scope_manifest(db, str(root), ["plugin.rs"])
+            assert "plugin.rs" in manifest.included_files
+            assert any("dynamic_trait_object" in c for c in manifest.unsupported_constructs)
 
-        receipt = scope_receipt(db, target="PluginRunner.execute", repo_root=str(root))
-        assert receipt["assurance"]["status"] == "PARTIAL"
-        assert "dynamic_dispatch_unresolved" in receipt["assurance"]["reason_codes"]
-
+            receipt = scope_receipt(db, target="PluginRunner.execute", repo_root=str(root))
+            assert receipt["assurance"]["status"] == "PARTIAL"
+            assert "dynamic_dispatch_unresolved" in receipt["assurance"]["reason_codes"]
+        finally:
+            db.close()
 def test_static_negative_control_assured():
     """Verify pure static code without dynamic gaps or parser errors is ASSURED_WITHIN_SCOPE."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -188,17 +198,19 @@ def multiply(a: int, b: int) -> int:
 
         db_path = root / ".sot" / "sot.db"
         db = Database(str(db_path))
-        reconciler = Reconciler(db, str(root))
-        reconciler.reconcile()
+        try:
+            reconciler = Reconciler(db, str(root))
+            reconciler.reconcile()
 
-        manifest = build_scope_manifest(db, str(root), ["calculator.py"])
-        assert manifest.unsupported_constructs == []
-        assert manifest.parser_error_files == []
+            manifest = build_scope_manifest(db, str(root), ["calculator.py"])
+            assert manifest.unsupported_constructs == []
+            assert manifest.parser_error_files == []
 
-        receipt = scope_receipt(db, target="add", repo_root=str(root))
-        assert receipt["assurance"]["status"] == "ASSURED_WITHIN_SCOPE"
-        assert receipt["assurance"]["reason_codes"] == []
-
+            receipt = scope_receipt(db, target="add", repo_root=str(root))
+            assert receipt["assurance"]["status"] == "ASSURED_WITHIN_SCOPE"
+            assert receipt["assurance"]["reason_codes"] == []
+        finally:
+            db.close()
 
 def test_state_decision_with_dynamic_dispatch_unresolved():
     """Verify pure state decision downgrades to PARTIAL with dynamic_dispatch_unresolved reason."""

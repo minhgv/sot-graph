@@ -666,15 +666,26 @@ class Database:
 
     def get_file_journal(self, path: str) -> Optional[Dict[str, Any]]:
         norm_path = path.replace(os.sep, "/")
+        clean_fwd = path.replace("\\", "/").strip("/")
+        clean_back = path.replace("/", "\\").strip("\\")
         try:
-            real_path = os.path.realpath(path).replace(os.sep, "/")
+            real_path = os.path.realpath(path)
         except Exception:
-            real_path = norm_path
+            real_path = path
+        real_fwd = real_path.replace(os.sep, "/")
         row = self.conn.execute(
             "SELECT sha256, size, mtime_ms, generation, reconciled_at "
-            "FROM file_journal WHERE path = ? OR path = ? OR path = ? "
-            "OR path LIKE ? OR path LIKE ? LIMIT 1",
-            (path, norm_path, real_path, f"%/{norm_path.lstrip('/')}", f"%/{path.lstrip('/')}"),
+            "FROM file_journal WHERE path = ? OR path = ? OR path = ? OR path = ? "
+            "OR path LIKE ? OR path LIKE ? OR path LIKE ? LIMIT 1",
+            (
+                path,
+                norm_path,
+                real_path,
+                real_fwd,
+                f"%/{clean_fwd}",
+                f"%\\{clean_back}",
+                f"%/{norm_path.lstrip('/')}",
+            ),
         ).fetchone()
         if row is None:
             return None
@@ -718,6 +729,9 @@ class Database:
             if not raw:
                 continue
             prior = self.get_file_journal(str(raw))
+            if prior is None and root:
+                candidate_full = os.path.join(root, str(raw))
+                prior = self.get_file_journal(candidate_full)
             if prior is None:
                 continue
             candidate = str(raw)
@@ -758,8 +772,10 @@ class Database:
         marks: List[str] = []
         params: List[Any] = []
         for p in candidates:
-            marks.append("(path = ? OR file_path = ?)")
-            params.extend([p, p])
+            p_fwd = p.replace("\\", "/")
+            p_back = p.replace("/", "\\")
+            marks.append("(path = ? OR path = ? OR file_path = ? OR file_path = ?)")
+            params.extend([p_fwd, p_back, p_fwd, p_back])
         where = " OR ".join(marks)
         with self.conn:
             cur = self.conn.execute(

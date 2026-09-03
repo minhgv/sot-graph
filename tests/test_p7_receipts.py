@@ -282,6 +282,7 @@ class TestCliSurface:
             [sys.executable, "-m", "sot_graph.cli", "--root", str(receipt_repo),
              "scope-receipt", "run"],
             cwd=receipt_repo, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
         )
         assert out.returncode == 0, out.stderr
         assert "Scope receipt" in out.stdout
@@ -294,6 +295,7 @@ class TestCliSurface:
             [sys.executable, "-m", "sot_graph.cli", "--root", str(receipt_repo),
              "scope-receipt", "run", "--json"],
             cwd=receipt_repo, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
         )
         payload = json.loads(out.stdout)
         assert payload["digest"]
@@ -310,6 +312,7 @@ class TestCliSurface:
             [sys.executable, "-m", "sot_graph.cli", "--root", str(tmp_path),
              "scope-receipt", "ghost", "--change-kind", "rename"],
             cwd=tmp_path, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
         )
         assert out.returncode == 2
         assert "BLOCKED" in out.stdout

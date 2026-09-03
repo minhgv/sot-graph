@@ -80,9 +80,11 @@ def test_grandchild_flooder_killed_with_group(tmp_path) -> None:
     assert result.truncated is True
     # The flooding grandchild must be SIGKILLed with the group; give the OS a
     # moment then assert the parent is gone (group kill proven by the runner's
-    # reaping below — returncode present and negative means killed).
-    assert result.returncode is not None and result.returncode < 0
-
+    # reaping below — returncode present and negative on POSIX, non-zero on Win32).
+    if sys.platform == "win32":
+        assert result.returncode is not None and result.returncode != 0
+    else:
+        assert result.returncode is not None and result.returncode < 0
 
 def test_output_exactly_at_cap_not_truncated(tmp_path) -> None:
     exe = tmp_path / "exact.py"

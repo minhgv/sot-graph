@@ -29,16 +29,18 @@ def test_search_ranking_gate_and_exact_discrimination():
 
         db_path = root / ".sot" / "sot.db"
         db = Database(str(db_path))
-        reconciler = Reconciler(db, str(root))
-        reconciler.reconcile()
+        try:
+            reconciler = Reconciler(db, str(root))
+            reconciler.reconcile()
 
-        # Query exact symbol "authenticate_user"
-        results = db.search_fts("authenticate_user", limit=10)
-        assert len(results) >= 1
-        # Hit@1 must match the exact query
-        top_result = results[0]
-        assert "authenticate_user" in top_result["symbol"] or "authenticate_user" in top_result["label"]
-
+            # Query exact symbol "authenticate_user"
+            results = db.search_fts("authenticate_user", limit=10)
+            assert len(results) >= 1
+            # Hit@1 must match the exact query
+            top_result = results[0]
+            assert "authenticate_user" in top_result["symbol"] or "authenticate_user" in top_result["label"]
+        finally:
+            db.close()
 
 def test_federation_plan_builtin_isolation():
     """Verify federation plan resolves cleanly to builtin when no external provider is requested."""
