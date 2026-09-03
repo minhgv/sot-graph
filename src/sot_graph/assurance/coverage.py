@@ -224,16 +224,16 @@ def repo_coverage(
             state = _OUTCOME_TO_STATE.get(str(outcome), CoverageState.UNKNOWN)
         # Staleness beats parse state: a re-written file is stale until
         # the next reconcile, whatever the last parse achieved.
-            disk = _disk_state(os.path.join(repo_root, path))
-            if disk is not None and state != CoverageState.EXCLUDED:
-                sha, size = row[3], row[4]
-                # Content identity only (sha+size), mirroring
-                # db.stale_journal_files: mtime drift alone (git checkout,
-                # rebase, editor rewrite of identical content) is NOT
-                # staleness — the bytes on disk are still the indexed bytes.
-                same = bool(sha) and disk[0] == sha and disk[1] == size
-                if not same:
-                    state = CoverageState.STALE
+        disk = _disk_state(os.path.join(repo_root, path))
+        if disk is not None and state != CoverageState.EXCLUDED:
+            sha, size = row[3], row[4]
+            # Content identity only (sha+size), mirroring
+            # db.stale_journal_files: mtime drift alone (git checkout,
+            # rebase, editor rewrite of identical content) is NOT
+            # staleness — the bytes on disk are still the indexed bytes.
+            same = bool(sha) and disk[0] == sha and disk[1] == size
+            if not same:
+                state = CoverageState.STALE
         files.append(FileCoverage(
             path=path,
             state=state,

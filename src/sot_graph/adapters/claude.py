@@ -65,7 +65,7 @@ When requested to review or synthesize architecture documentation:
 | :--- | :--- | :--- |
 | **Search Codebase** | `sot search "<query>" [-n 5] [--hybrid]` | `sot_search` |
 | **Repository Map** | `sot map [--focus <areas>] [--tokens 1024]` | `sot_map` |
-| **Trace Call Graph** | `sot explore "<symbol>" [--max-hops 2]` | `sot_explore` |
+| **Trace Call Graph** | `sot explore "<symbol>" [--depth 2]` | `sot_explore` |
 | **Inspect Usages** | `sot usages "<symbol>"` | `sot_usages` |
 | **Implementations** | `sot implementations "<interface>"` | `sot_implementations` |
 | **Rename Impact** | `sot rename "<symbol>" --to <new_name>` | `CLI only` |
@@ -82,13 +82,13 @@ When requested to review or synthesize architecture documentation:
 | **Interactive Viz** | `sot viz [-o graph.html]` | `CLI only` |
 | **Export Graph** | `sot export -f <graphrag/obsidian/scip>` | `CLI only` |
 | **Fact Bundler** | `sot bundle [-o .sot/bundle/] [--include-tests]` | `sot_bundle` |
-| **Full-Stack Trace** | `sot trace "<target>" [--max-hops 2] [-o <file>]` | `sot_trace` |
+| **Full-Stack Trace** | `sot trace "<target>" [--depth 2] [-o <file>]` | `sot_trace` |
 | **UI Decision Tree** | `sot ui-tree "<component>"` | `sot_ui_tree` |
 | **Backend Flow** | `sot be-flow "<service>"` | `sot_backend_flow` |
 | **Feature Inventory** | `sot solution inventory [module] [-o <file>]` | `sot_solution_inventory` |
 | **Micro-steps Decompose** | `sot solution steps "<method>" [--format table/json]` | `sot_solution_steps` |
 | **Solution Bundle** | `sot solution bundle [module] [-o <file>]` | `sot_solution_bundle` |
-| **Diff Impact** | `sot diff-impact [target] [--staged] [--max-hops 2]` | `sot_diff_impact` |
+| **Diff Impact** | `sot diff-impact [target] [--staged] [--depth 2]` | `sot_diff_impact` |
 | **Commit History** | `sot log [-n 10] [--author <name>] [--since <date>]` | `sot_git_history` |
 """
 

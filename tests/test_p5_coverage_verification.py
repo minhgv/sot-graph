@@ -115,6 +115,53 @@ class TestCoverageStates:
                 "def run():\n    return 1\n", encoding="utf-8"
             )
 
+    def test_stale_flags_legacy_rows_without_outcome(self, covered_repo):
+        # Regression: the disk-staleness check must also run for legacy
+        # journal rows (parser_outcome NULL) — a mis-indented edit once
+        # nested it under the recorded-outcome branch, so a legacy row
+        # could never report STALE however far disk drifted.
+        db = _db_of(covered_repo)
+        # The journal may store absolute paths; resolve the row's exact key.
+        row = next(
+            (
+                (p, o)
+                for p, o in db.conn.execute(
+                    "SELECT path, parser_outcome FROM file_journal"
+                ).fetchall()
+                if os.path.relpath(p, str(covered_repo)).replace(os.sep, "/")
+                == "src/app.py"
+            ),
+            None,
+        )
+        assert row is not None, "src/app.py must be indexed"
+        journal_path, original_outcome = row
+        try:
+            db.conn.execute(
+                "UPDATE file_journal SET parser_outcome = NULL WHERE path = ?",
+                (journal_path,),
+            )
+            db.conn.commit()
+            (covered_repo / "src" / "app.py").write_text(
+                "def run():\n    return 3\n", encoding="utf-8"
+            )
+            report = repo_coverage(db, str(covered_repo))
+            states = {f.path: f.state for f in report.files}
+            assert states["src/app.py"] == CoverageState.STALE
+        finally:
+            db.close()
+            restore = _db_of(covered_repo)
+            try:
+                restore.conn.execute(
+                    "UPDATE file_journal SET parser_outcome = ? WHERE path = ?",
+                    (original_outcome, journal_path),
+                )
+                restore.conn.commit()
+            finally:
+                restore.close()
+            (covered_repo / "src" / "app.py").write_text(
+                "def run():\n    return 1\n", encoding="utf-8"
+            )
+
     def test_generated_paths_excluded(self, tmp_path):
         from sot_graph.db import Database
 
@@ -204,7 +251,6 @@ class TestZeroResultIsNotNegativeClaim:
 
 class TestLanguageAwareVerification:
     def _subject(self, tmp_path, rel, name, kind, start, end):
-        from types import SimpleNamespace
 
         return SimpleNamespace(
             path=rel, qualified_name=name, kind=kind,
