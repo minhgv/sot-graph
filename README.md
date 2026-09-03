@@ -6,26 +6,28 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](pyproject.toml)
 [![SQLite: WAL + FTS5](https://img.shields.io/badge/SQLite-FTS5%20%2B%20WAL-orange.svg)](src/sot_graph/db.py)
-[![Schema: v5 Multi-Provider](https://img.shields.io/badge/Schema-v5%20Multi--Provider-purple.svg)](src/sot_graph/db.py)
-[![Tests: 295 passed](https://img.shields.io/badge/Tests-295%2F295%20Passed-brightgreen.svg)](tests/)
-[![Architecture: Zero-Daemon](https://img.shields.io/badge/Architecture-Zero--Daemon-purple.svg)](#-database-architecture--project-isolation)
+[![Schema: v8 Multi-Provider](https://img.shields.io/badge/Schema-v8%20Multi--Provider-purple.svg)](src/sot_graph/db.py)
+[![Tests: 932 passed](https://img.shields.io/badge/Tests-932%2F932%20Passed-brightgreen.svg)](tests/)
+[![Quality Gates: Passing](https://img.shields.io/badge/Quality%20Gates-Passing%20(87%25%20Core%20%7C%2091%25%20Receipts)-success.svg)](scripts/quality_gates.sh)
+[![Architecture: Zero-Daemon](https://img.shields.io/badge/Architecture-Zero--Daemon-purple.svg)](#database-architecture--durability)
 [![Tree-Sitter: 10 Grammars](https://img.shields.io/badge/Tree--Sitter-10%20Grammars-success.svg)](src/sot_graph/ts_extract.py)
 
 ---
 
 ## What is sot-graph?
 
-`sot-graph` is an ultra-fast, zero-daemon knowledge graph and symbol navigation engine designed specifically for **Autonomous AI Coding Agents** (Oh My Pi / OMP, Claude Code, Cursor, OpenCode, Google Antigravity / Gemini CLI, ZCode IDE).
+`sot-graph` is an ultra-fast, zero-daemon knowledge graph and symbol intelligence engine designed specifically for **Autonomous AI Coding Agents** (Oh My Pi / OMP, Claude Code, Cursor, OpenCode, Google Antigravity / Gemini CLI, ZCode IDE).
 
 It replaces slow, blind, and hallucination-prone text grepping with an incremental, AST-verified structural graph stored in SQLite (WAL mode + FTS5 full-text indexing + Schema v8 Multi-Provider Provenance Ledger).
 
 ### Core Value Pillars
 
 1. **Zero Hallucinated Anchors**: The filesystem is the single source of truth. Every symbol returned is physically verified on disk with confidence scores and Trust Verdicts (`[STRONG]`, `[WEAK]`, `[REBUILT]`).
-2. **Multi-Provider Provenance Ledger (Schema v8)**: Transparently records both fast AST Heuristics (`AST_HEURISTIC_PARSER`) and exact compiler-backed SCIP indices (`COMPILER_INDEXED_SYMBOLS`) in dedicated `provider_runs` and `provider_evidence` tables.
-3. **Token-Bounded Context Packaging (`sot pack`)**: Extracts exact target spans (L0) + 1-hop caller/callee contracts (L1) + 2-hop signature stubs (L2) within strict hard token budgets (`--tokens` / `--max-tokens`), preventing prompt bloat.
-4. **Architectural Blast Radius (`sot usages` / `sot explore` / `sot diff-impact`)**: Inbound and outbound dependency traversal identifying transitive callers, breaking API contracts, and unresolved bare-name shadowing risk before refactoring or landing PRs.
-5. **Atomic Two-Phase Mutation Gateway**: All database mutations (`reconcile`, `batch-reconcile`, `insert`, `clean`, `import-scip`) execute inside write locks (`BEGIN IMMEDIATE` + write lock file) with automatic WAL backups and note preservation across schema migrations.
+2. **Multi-Provider Provenance Ledger (Schema v8)**: Transparently records fast AST Heuristics (`AST_HEURISTIC_PARSER`), compiler-backed SCIP indices (`COMPILER_INDEXED_SYMBOLS`), and external provider telemetry (Codebase Memory) in dedicated `provider_runs` and `provider_evidence` tables.
+3. **Bounded Impact Trust Chain & Canonical Root Isolation**: Strictly evaluates scope coverage through a fail-closed 6-state decision machine (`ASSURED_WITHIN_SCOPE`, `PARTIAL`, `CONFLICTED`, `STALE`, `UNVERIFIABLE`, `ABSTAINED`). Enforces canonical `os.path.realpath` bounding across DB persistence and ledger queries, preventing cross-repository evidence leakage and symlink retarget exploits in multi-tenant environments.
+4. **Token-Bounded Context Packaging (`sot pack`)**: Extracts exact target spans (L0) + 1-hop caller/callee contracts (L1) + 2-hop signature stubs (L2) within strict hard token budgets (`--tokens` / `--max-tokens`), preventing prompt bloat.
+5. **Architectural Blast Radius (`sot usages` / `sot explore` / `sot diff-impact`)**: Inbound and outbound dependency traversal identifying transitive callers, breaking API contracts, and unresolved bare-name shadowing risk before refactoring or landing pull requests.
+6. **Atomic Two-Phase Mutation Gateway**: All database mutations (`reconcile`, `batch-reconcile`, `insert`, `clean`, `import-scip`, `providers sync`) acquire exclusive write locks (`BEGIN IMMEDIATE` + `.sot/write.lock`) with note preservation across schema migrations.
 
 ---
 
@@ -52,7 +54,7 @@ It replaces slow, blind, and hallucination-prone text grepping with an increment
 
 ## 1-Command AI Agent Harness Provisioning (`sot setup`)
 
-`sot-graph` provisions MCP tools, extensions, and SSOT agent rules across all major AI coding harnesses:
+`sot-graph` automatically provisions MCP tools, extensions, and SSOT agent rules across all major AI coding harnesses:
 
 ```bash
 # Provision all supported harnesses at once (Global + Workspace)
@@ -103,7 +105,6 @@ option and `tokens` is forwarded as `--max-tokens`. The destructive OMP
 `sot_clean` reset requires an explicit `confirm: true` argument when `all: true`
 (unless `dry_run: true`); only an explicit confirmation adds the CLI `--yes`
 flag.
-
 ---
 
 ## CLI & Agent Tool Usage Reference
@@ -127,6 +128,9 @@ sot watch --debounce-ms 200
 
 # Audit graph health and Schema v8 table counts
 sot doctor
+
+# Emit machine-readable audit receipt
+sot doctor --receipt
 ```
 
 ### 2. Pure-Read Code Search & Trust Verdicts
@@ -165,7 +169,46 @@ sot pack "Database.commit_file_batch" --tokens 1500 --json
 sot map --tokens 1024 --focus "Database.commit_file_batch"
 ```
 
-### 5. Architecture Fact Bundles & SDLC Documentation
+### 5. Multi-Provider Assurance & Bounded Scope Receipts
+```bash
+# Detect installed provider executables and SCIP artifacts
+sot providers detect
+
+# List registered providers, health status, and supported capabilities
+sot providers list
+
+# Diagnose provider health with recommended remediation actions
+sot providers doctor
+
+# Synchronize index for a specific provider
+sot providers sync codebase-memory
+
+# Generate PRE-change bounded impact scope receipt (P7.1)
+sot scope-receipt "Pipeline.process" --depth 2 --change-kind local-body --json
+```
+
+### 6. Full-Stack Execution Tracing & Solution Workflows
+```bash
+# Extract full-stack execution trace with Mermaid sequence/flowchart diagrams
+sot trace "OrderController.createOrder" --depth 3
+
+# Extract frontend UI decision tree, validation rules, and modal transitions
+sot ui-tree "OrderModal.tsx" --json
+
+# Extract backend processing micro-steps, multi-datasources, and exception branches
+sot be-flow "OrderProcessingService" --json
+
+# Stage 1: Feature discovery by user role for solution documentation
+sot solution inventory "Billing" -o .sot/Feature_Inventory.md
+
+# Stage 2: Micro-step decomposition (4-column table) for labor estimation
+sot solution steps "PaymentService.processTransaction" --format table
+
+# Synthesize complete context bundle for downstream documentation agents
+sot solution bundle "Billing" -o .sot/bundle/ContextBundle.md
+```
+
+### 7. Architecture Fact Bundles & SDLC Documentation
 ```bash
 # Extract 5 high-density fact files into .sot/bundle/ for LLM documentation
 sot bundle -o .sot/bundle
@@ -177,7 +220,7 @@ sot report -o ARCHITECTURE_REPORT.md
 sot cluster
 ```
 
-### 6. Interactive Visualizer & Knowledge Graph Export
+### 8. Interactive Visualizer & Knowledge Graph Export
 ```bash
 # Launch zero-server D3.js interactive force-directed visualizer
 sot viz --open
@@ -189,7 +232,7 @@ sot export --format graphrag -o graphrag_dataset.json
 sot export --format obsidian -o .sot/obsidian_vault
 ```
 
-### 7. Git Diff Blast Radius & Commit Risk Analysis
+### 9. Git Diff Blast Radius & Commit Risk Analysis
 ```bash
 # Analyze blast radius and upstream caller impact for working tree changes
 sot diff-impact --working-tree
@@ -208,7 +251,7 @@ sot log -n 10 --author "developer"
 
 ## Model Context Protocol (MCP) Server
 
-`sot-graph` exposes 19 structured MCP tools and resources over standard I/O for AI coding agents:
+`sot-graph` exposes 22 structured MCP tools and resources over standard I/O for AI coding agents:
 
 ```bash
 # Start MCP server over stdio
@@ -217,12 +260,12 @@ sot mcp
 
 ### Registered MCP Tools & Exact Schemas
 
-#### Read-Only Inspection Tools
+#### Read-Only Inspection & Assurance Tools
 | MCP Tool | Description | Required Parameters | Optional Parameters |
 | :--- | :--- | :--- | :--- |
-| `sot_search` | Read-only verified graph search with resource links (`sot://node/{id}`) | `query` (str) | `limit` (int, default 6), `scope` (str), `threshold` (float 0-1) |
+| `sot_search` | Read-only verified graph search with resource links (`sot://node/{id}`) | `query` (str) | `limit` (int, default 6), `scope` (str), `threshold` (float 0-1), `assurance` (bool), `provider_policy` ('builtin_only'\|'prefer_external'\|'require_external'), `budget` (int) |
 | `sot_explore` | Bounded graph traversal (inbound and outbound) | `node_id` (str) | `depth` (int, default 1), `limit` (int, default 100) |
-| `sot_usages` | Find all references grouped by caller + bare-name shadowing risk | `target` (str) | `limit` (int, default 100) |
+| `sot_usages` | Find all references grouped by caller + bare-name shadowing risk | `target` (str) | `limit` (int, default 100), `scope` (str), `assurance` (bool), `provider_policy` ('builtin_only'\|'prefer_external'\|'require_external'), `budget` (int) |
 | `sot_implementations`| Extends and implements type hierarchy relationships | `target` (str) | — |
 | `sot_verify_drift` | Non-destructive filesystem vs database drift check | — | `deep` (bool), `limit` (int) |
 | `sot_architecture_report` | Architectural analysis with god nodes and modularity metrics | — | `scope` (str), `min_size` (int), `sigma` (float) |
@@ -236,10 +279,13 @@ sot mcp
 | `sot_solution_steps` | Stage 2 Micro-step decomposition (4-column table) for manpower effort | `method` (str) | — |
 | `sot_diff_impact` | Analyze git diff blast radius, inward callers, API contract impacts, and affected tests | — | `target` (str, default 'HEAD~1'), `depth` (int, default 2), `staged` (bool), `working_tree` (bool), `auto_reconcile` (bool), `format` ('markdown'\|'json') |
 | `sot_git_history` | Inspect git commit history with automated risk scoring and impacted symbol detection | — | `limit` (int, default 10), `author` (str), `since` (str), `with_impact` (bool, default true), `format` ('markdown'\|'json') |
+| `sot_scope_receipt` | PRE-change bounded impact scope receipt (P7.1) with snapshot binding and risk assessment | `target` (str) | `kind_of_change` ('local-body'\|'rename'\|'delete'\|'public-api'), `touches_auth` (bool), `dynamic_heavy` (bool), `depth` (int) |
+| `sot_diff_impact_receipt` | POST-change diff-impact receipt (P7.2) with post-change snapshot and closure verification | — | `target` (str), `depth` (int, 1-5), `staged` (bool), `working_tree` (bool) |
 
-#### Workspace Artifact Generator Tools (Confined to Project Root)
+#### Write-Guarded & Artifact Generator Tools
 | MCP Tool | Description | Required Parameters | Optional Parameters |
 | :--- | :--- | :--- | :--- |
+| `sot_providers_sync` | Explicit provider index sync (write path): records ledger run + evidence with snapshot | — | `provider_name` (str, default 'codebase-memory') |
 | `sot_bundle` | Generates 5 high-density architecture fact bundle markdown files | — | `output_dir` (str, default `.sot/bundle`) |
 | `sot_solution_inventory` | Stage 1 Feature Discovery by User Role for Solution docs | — | `module` (str), `output_file` (str) |
 | `sot_solution_bundle` | Full solution context bundle (UI forms, DataTable schemas, API specs) | — | `module` (str), `output_file` (str) |
@@ -252,9 +298,10 @@ sot mcp
 - **Physical Tables (Schema v8)**:
   - `graph_nodes`: AST symbols, signatures, docstrings, content hashes, roles, and generation timestamps.
   - `graph_edges`: Directed dependency edges (`calls`, `imports`, `extends`, `implements`, `defines`).
-  - `provider_runs`: Immutable ledger of extraction runs (`AST_HEURISTIC_PARSER` vs SCIP tool providers, versions, argument digests, snapshot hashes, status).
+  - `provider_runs`: Immutable ledger of extraction runs (`AST_HEURISTIC_PARSER` vs SCIP vs Codebase Memory, versions, argument digests, snapshot hashes, status, canonical project roots).
   - `provider_evidence`: Multi-provider provenance assertions keyed by run, target, capability, confidence score, and JSON payload.
   - `meta`: Key-value store tracking schema version, repository generation, and commit state.
+- **Canonical Project Root Isolation**: All run recordings and evidence queries resolve `os.path.realpath(project_root)` before database queries or inserts, guaranteeing strict multi-tenant isolation.
 - **Atomic Two-Phase Mutation Gateway**: All database-mutating operations acquire an exclusive file lock (`.sot/write.lock`) and execute inside `BEGIN IMMEDIATE` transactions.
 - **Note Preservation**: User notes (`kind == 'note'`) are preserved across schema migrations and `sot clean --all` resets. *(Note: physically deleting the `.sot/sot.db` file from the disk destroys all database data including notes).*
 
@@ -281,11 +328,17 @@ pip install -e ".[all,dev]"
 
 ## Verification & Test Suite
 
-The test suite includes 295 tests covering unit functionality, multi-OS file locking, stateful Hypothesis property testing, fault injection (WAL crash simulation, disk-full ENOSPC simulation, mid-batch connection drops), and cross-language AST extractions:
+The test suite includes **932 tests** covering unit functionality, multi-OS file locking, stateful Hypothesis property testing, fault injection (WAL crash simulation, disk-full ENOSPC simulation, mid-batch connection drops), cross-language AST extractions, and multi-provider trust chain boundary enforcement:
 
 ```bash
-# Run full test suite with pytest
+# Run full test suite with pytest (932 tests)
 pytest tests/ -v --strict-markers
+
+# Run end-to-end quality gates script (Ruff + Pyright + Bandit + Pip-Audit + Coverage)
+./scripts/quality_gates.sh
+
+# Run trust chain hardening and symlink isolation test suite
+pytest tests/test_trust_chain_hardening.py -v
 
 # Run fault-injection and process-crash resilience tests
 pytest tests/fault/test_fault_injection.py -v
