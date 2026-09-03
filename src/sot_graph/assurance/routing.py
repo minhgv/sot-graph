@@ -22,15 +22,18 @@ QUERYABLE_PROVIDERS = frozenset({"codebase-memory", "scip"})
 #: config advertises guide §11.3 names; alias so negotiation stays table-driven.
 CAPABILITY_ALIASES: Dict[str, Tuple[str, ...]] = {
     "trace": ("trace", "callgraph"),
+    "callgraph": ("callgraph", "trace"),
     "impact": ("impact",),
-    "search_symbols": ("symbols",),
-    "usages": ("usages", "symbols", "references"),
+    "search_symbols": ("symbols", "search_symbols"),
+    "symbols": ("symbols", "search_symbols"),
+    "usages": ("usages", "references", "callgraph", "trace"),
+    "references": ("references", "usages", "callgraph", "trace"),
 }
 
 #: Command kind -> guide §11.3 capability used for registry ranking.
 COMMAND_CAPABILITY: Dict[str, str] = {
     "explore": "callgraph",
-    "usages": "symbols",
+    "usages": "usages",
     "diff-impact": "impact",
     "architecture": "architecture",
 }
@@ -77,4 +80,6 @@ def supports_capability(provider: Any, method: str) -> bool:
     if supports_method(provider, method):
         return True
     caps = tuple(getattr(provider, "capabilities", ()) or ())
+    if method in caps:
+        return True
     return any(alias in caps for alias in CAPABILITY_ALIASES.get(method, ()))

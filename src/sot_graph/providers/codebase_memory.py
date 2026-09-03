@@ -805,51 +805,87 @@ class CodebaseMemoryProvider:
         cached = self._project_cache.get(target)
         if cached is not None:
             return cached
-        outcome = self._invoke(
-            "list_projects", {},
-            repo_root=repo_root,
-            timeout_seconds=self._query_timeout,
-        )
-        if not outcome.ok or not isinstance(outcome.payload, Mapping):
-            resolved: tuple[str | None, str | None, str | None] = (
+        all_projects: list[Any] = []
+        has_more = True
+        offset = 0
+        limit = 50
+        cursor = None
+        seen_cursors: set[str] = set()
+        loop_abort = False
+        cap_exhausted = False
+        max_safety_cap = 1000
+
+        while has_more:
+            args: dict[str, Any] = {"limit": limit, "offset": offset}
+            if cursor is not None:
+                args["cursor"] = cursor
+            outcome = self._invoke(
+                "list_projects", args,
+                repo_root=repo_root,
+                timeout_seconds=self._query_timeout,
+            )
+            if not outcome.ok or not isinstance(outcome.payload, Mapping):
+                resolved: tuple[str | None, str | None, str | None] = (
+                    None,
+                    f"list_projects failed: {outcome.error}",
+                    NEXT_ACTION_SYNC,
+                )
+                self._project_cache[target] = resolved
+                return resolved
+            projects = outcome.payload.get("projects")
+            if isinstance(projects, list) and projects:
+                all_projects.extend(projects)
+                offset += len(projects)
+            else:
+                if outcome.payload.get("has_more"):
+                    loop_abort = True
+                break
+
+            next_cursor = outcome.payload.get("next_cursor") or outcome.payload.get("cursor")
+            if next_cursor:
+                if str(next_cursor) in seen_cursors:
+                    loop_abort = True
+                    break
+                seen_cursors.add(str(next_cursor))
+                cursor = next_cursor
+
+            has_more = bool(outcome.payload.get("has_more"))
+            if not has_more:
+                break
+            if len(all_projects) >= max_safety_cap:
+                cap_exhausted = True
+                break
+
+        if loop_abort or cap_exhausted:
+            return (
                 None,
-                f"list_projects failed: {outcome.error}",
+                f"list_projects pagination incomplete (loop={loop_abort}, cap={cap_exhausted}); pass project explicitly",
+                "disambiguate with `codebase-memory-mcp cli list_projects` and pass the project explicitly",
+            )
+        matches = [
+            p["name"] for p in all_projects
+            if isinstance(p, Mapping)
+            and isinstance(p.get("name"), str)
+            and isinstance(p.get("root_path"), str)
+            and os.path.realpath(p["root_path"]) == target
+        ]
+        if len(matches) == 1:
+            resolved = (matches[0], None, None)
+        elif len(matches) == 0:
+            resolved = (
+                None,
+                f"no indexed CBM project covers {target}",
                 NEXT_ACTION_SYNC,
             )
         else:
-            projects = outcome.payload.get("projects")
-            projects = projects if isinstance(projects, list) else []
-            matches = [
-                p["name"] for p in projects
-                if isinstance(p, Mapping)
-                and isinstance(p.get("name"), str)
-                and isinstance(p.get("root_path"), str)
-                and os.path.realpath(p["root_path"]) == target
-            ]
-            if len(matches) == 1:
-                resolved = (matches[0], None, None)
-            elif len(matches) == 0 and bool(outcome.payload.get("has_more")):
-                resolved = (
-                    None,
-                    "no match in the first list_projects page (has_more=true); "
-                    "refusing to guess across pagination",
-                    NEXT_ACTION_SYNC,
-                )
-            elif len(matches) == 0:
-                resolved = (
-                    None,
-                    f"no indexed CBM project covers {target}",
-                    NEXT_ACTION_SYNC,
-                )
-            else:
-                resolved = (
-                    None,
-                    "ambiguous: %d indexed projects share %s (%s); pass project "
-                    "explicitly or delete duplicates"
-                    % (len(matches), target, ", ".join(sorted(matches))),
-                    "disambiguate with `codebase-memory-mcp cli list_projects` "
-                    "and pass the project explicitly",
-                )
+            resolved = (
+                None,
+                "ambiguous: %d indexed projects share %s (%s); pass project "
+                "explicitly or delete duplicates"
+                % (len(matches), target, ", ".join(sorted(matches))),
+                "disambiguate with `codebase-memory-mcp cli list_projects` "
+                "and pass the project explicitly",
+            )
         self._project_cache[target] = resolved
         return resolved
 

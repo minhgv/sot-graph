@@ -30,7 +30,13 @@ VERSION_PROBE_TIMEOUT_SECONDS = 10.0
 #: Artifact locations (relative to ``repo_root``) that count as an installed
 #: SCIP provider. SCIP is not an executable — presence of a fresh index file
 #: is the installation signal.
-SCIP_ARTIFACTS = ("index.scip", os.path.join(".scip", "index.scip"))
+SCIP_ARTIFACTS = (
+    "index.scip",
+    os.path.join(".scip", "index.scip"),
+    "index.scip.json",
+    "scip.json",
+    os.path.join(".scip", "index.scip.json"),
+)
 
 #: Canonical ranking of providers per capability (guide §11.3). Providers not
 #: listed here but advertising the capability are appended after the table in
@@ -39,6 +45,7 @@ CAPABILITY_PRIORITY: dict[str, tuple[str, ...]] = {
     "source-verification": ("sot-builtin",),
     "symbols": ("scip", "codebase-memory", "gitnexus", "sot-builtin"),
     "callgraph": ("scip", "codebase-memory", "gitnexus", "sot-builtin"),
+    "usages": ("scip", "codebase-memory", "gitnexus", "sot-builtin"),
     "impact": ("gitnexus", "codebase-memory", "sot-builtin"),
     "pdg": ("gitnexus",),
     "taint": ("gitnexus",),
@@ -165,9 +172,17 @@ def _join_detail(parts: list[str]) -> str:
 
 
 def _probe_scip(pcfg: ProviderConfig, repo_root: str) -> ProviderStatus:
+    canonical_root = os.path.realpath(repo_root)
     for rel in SCIP_ARTIFACTS:
         path = os.path.join(repo_root, rel)
         if os.path.isfile(path):
+            real_path = os.path.realpath(path)
+            try:
+                is_inside = os.path.commonpath([canonical_root, real_path]) == canonical_root
+            except ValueError:
+                is_inside = False
+            if not is_inside:
+                continue
             mtime = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(os.path.getmtime(path)))
             detail = f"artifact {rel} present (mtime {mtime})"
             return ProviderStatus(

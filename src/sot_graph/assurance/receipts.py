@@ -22,7 +22,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Dict, List, Optional, Sequence
+import os
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from dataclasses import asdict
 from .coverage import CoverageState, build_scope_manifest, coverage_note, repo_coverage
@@ -85,7 +86,7 @@ def receipt_digest(payload: Dict[str, Any]) -> str:
     canonical = json.dumps(_strip_volatile(payload), sort_keys=True,
                            separators=(",", ":"), ensure_ascii=False,
                            default=str)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return hashlib.sha256(canonical.encode("utf-8", errors="surrogateescape")).hexdigest()
 
 
 def _node_row(db: Any, symbol: str) -> Optional[Dict[str, Any]]:
@@ -128,35 +129,57 @@ def _looks_like_test(path: str, symbol: str) -> bool:
     return any(m in low for m in _TEST_PATH_MARKERS) or symbol.startswith("test_")
 
 
-def _ledger_cross_check(db: Any, repo_root: str, limit: int = 5) -> Dict[str, Any]:
-    """Recent successful provider runs + union conflicts for the receipt."""
+def _ledger_cross_check(
+    db: Any,
+    repo_root: str,
+    limit: int = 5,
+    snapshot_hash: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Recent provider runs + union conflicts for the receipt."""
+    has_failed_runs = False
     try:
-        runs = db.conn.execute(
+        canonical_root = os.path.realpath(repo_root) if repo_root else ""
+        if not canonical_root:
+            raise ValueError("repo_root must not be empty")
+        runs_query = (
             "SELECT id, provider_name, provider_version, capability, "
-            "snapshot_hash, status FROM provider_runs "
-            "WHERE status = 'ok' ORDER BY created_at DESC LIMIT ?",
-            (int(limit),),
-        ).fetchall()
+            "snapshot_hash, status, project_root FROM provider_runs "
+            "WHERE project_root = ? "
+            "ORDER BY created_at DESC"
+        )
+        params = (canonical_root,)
+        all_runs = db.conn.execute(runs_query, params).fetchall()
+        if snapshot_hash:
+            scoped_runs = [r for r in all_runs if r[4] == snapshot_hash]
+            runs_to_eval = scoped_runs
+        else:
+            runs_to_eval = all_runs
+        all_recent = runs_to_eval[:int(limit)]
+        latest_status_by_cap: Dict[Tuple[str, str], str] = {}
+        for r in reversed(runs_to_eval):
+            latest_status_by_cap[(r[1], r[3])] = r[5]
+        has_failed_runs = any(st != "ok" for st in latest_status_by_cap.values())
     except Exception:  # noqa: BLE001
-        runs = []
-    union = union_evidence(db, repo_root)
+        all_recent = []
+        has_failed_runs = True  # Strict Fail-Closed: ledger read exception is unhealthy
+    union = union_evidence(db, repo_root, snapshot_hash=snapshot_hash)
     errors = [e for e in union if e.get("error")]
-    usable = [e for e in union if not e.get("error")]
-    conflicts = [e for e in usable if e.get("conflict")]
+    conflicts = [e for e in union if e.get("conflict")]
     # P0 Contract 1: any union entry not fully SUPPORTED is unresolved
     # evidence (source_verified?/CONFLICT/etc.) and counts against the
     # evidence budget.
-    unresolved = len([e for e in usable if e.get("status") != "SUPPORTED"])
+    unresolved = len([e for e in union if e.get("status") != "SUPPORTED"])
+    usable = [e for e in union if not e.get("error")]
     return {
         "runs": [
             {"run_id": r[0], "provider": r[1], "version": r[2],
-             "capability": r[3], "snapshot": r[4]}
-            for r in runs
+             "capability": r[3], "snapshot": r[4], "status": r[5]}
+            for r in all_recent
         ],
         "union_entries": len(usable),
         "open_conflicts": len(conflicts),
         "unresolved_count": unresolved,
-        "provider_capability_ok": len(errors) == 0,
+        "provider_capability_ok": (len(errors) == 0 and not has_failed_runs),
     }
 
 def classify_change_risk(*, kind_of_change: str, symbol_kind: str = "",
@@ -479,8 +502,12 @@ def diff_impact_receipt(
         post_snapshot if isinstance(post_snapshot, dict)
         else post_snapshot.as_dict()
     )
-    snapshot_bound = bool(post_ps.get("scope_digest"))
-    diff_ledger = _ledger_cross_check(db, repo_root)
+    scope_dig = post_ps.get("scope_digest")
+    snapshot_bound = bool(scope_dig)
+    diff_ledger = _ledger_cross_check(
+        db, repo_root,
+        snapshot_hash=str(scope_dig) if scope_dig is not None else None,
+    )
     provider_capability_ok = bool(diff_ledger.get("provider_capability_ok", True))
     manifest = build_scope_manifest(db, repo_root, changed_files)
     dynamic_unresolved = bool(manifest.unsupported_constructs)
@@ -580,9 +607,26 @@ def reconcile_receipt(
     try:
         rows = db.conn.execute("SELECT path, parser_outcome FROM file_journal").fetchall()
         journal_paths = [str(r[0]) for r in rows if r[0]]
-        parser_failures = sum(1 for r in rows if r[1] == "PARSE_ERROR")
+        parser_failures = sum(1 for r in rows if r[1] in ("PARSE_ERROR", "PARSER_UNAVAILABLE"))
     except Exception as exc:
         collection_errors.append(f"journal_query_failed: {type(exc).__name__}")
+
+    manifest = build_scope_manifest(db, repo_root)
+    quarantined = list(manifest.quarantined_files)
+    if quarantined:
+        collection_errors.append(f"quarantined_files: {len(quarantined)} unjournaled or invalid files on disk: {quarantined[:5]}")
+        parser_failures += len(quarantined)
+    if manifest.parser_error_files:
+        parser_failures += len(manifest.parser_error_files)
+
+    all_cited = sorted(set(journal_paths) | set(manifest.included_files) | set(quarantined))
+    if reconcile_result:
+        rec_failed = int(reconcile_result.get("failed", 0) or 0)
+        if rec_failed > 0:
+            parser_failures += rec_failed
+            collection_errors.append(f"reconcile_failed: {rec_failed} files failed to reconcile")
+        if reconcile_result.get("ok") is False and not collection_errors:
+            collection_errors.append("reconcile_failed: reconcile reported ok=False")
 
     try:
         unresolved = int(
@@ -594,33 +638,37 @@ def reconcile_receipt(
         collection_errors.append(f"pending_edges_query_failed: {type(exc).__name__}")
 
     stale: List[str] = []
-    if hasattr(db, "stale_journal_files") and journal_paths:
+    if hasattr(db, "stale_journal_files") and all_cited:
         try:
-            stale = db.stale_journal_files(journal_paths, root=repo_root)
+            stale = db.stale_journal_files(all_cited, root=repo_root)
         except Exception as exc:
             collection_errors.append(f"stale_check_failed: {type(exc).__name__}")
 
     report = repo_coverage(db, repo_root)
-    cross = _ledger_cross_check(db, repo_root)
-    
     try:
-        snapshot = capture_worktree_snapshot(repo_root, cited_paths=journal_paths)
+        snapshot = capture_worktree_snapshot(repo_root, cited_paths=all_cited)
         snapshot_dict = snapshot.as_dict()
         snapshot_bound = bool(snapshot_dict.get("scope_digest"))
     except Exception as exc:
         collection_errors.append(f"snapshot_capture_failed: {type(exc).__name__}")
         snapshot_dict = {}
         snapshot_bound = False
-
-    identity_status = "UNVERIFIABLE" if collection_errors else "UNIQUE"
-
+    scope_dig = snapshot_dict.get("scope_digest")
+    cross = _ledger_cross_check(
+        db, repo_root,
+        snapshot_hash=str(scope_dig) if scope_dig is not None else None,
+    )
+    open_conflicts = cross.get("open_conflicts", 0)
+    if reconcile_result:
+        open_conflicts += int(reconcile_result.get("conflicts", 0) or 0)
     facts = AssuranceFacts(
-        identity_status=identity_status,
+        identity_status="UNIQUE",
+        collection_error=bool(collection_errors),
         snapshot_bound=snapshot_bound and not bool(collection_errors),
         stale_files=stale,
         parser_failures=parser_failures,
         unresolved_count=unresolved,
-        open_conflicts=cross.get("open_conflicts", 0),
+        open_conflicts=open_conflicts,
         coverage_measured=(report.basis == "measured" and not bool(collection_errors)),
         coverage_fraction=report.covered_fraction or 0.0,
         provider_capability_ok=cross.get("provider_capability_ok", True),
@@ -633,14 +681,16 @@ def reconcile_receipt(
         "proof_scope": "post_reconcile",
         "reconcile_summary": reconcile_result or {},
         "collection_errors": collection_errors,
+        "stale_files": stale,
         "coverage": {
             "basis": report.basis,
             "covered_fraction": report.covered_fraction,
+            "gaps": list(report.gaps),
             "note": coverage_note(report),
-            "gaps": report.gaps,
         },
+        "scope_manifest": manifest.to_dict(),
+        "quarantined_files": quarantined,
         "snapshot": snapshot_dict,
-        "stale_files": stale,
         "assurance_facts": asdict(facts),
         "assurance": {
             "status": decision["status"],
@@ -665,40 +715,69 @@ def audit_receipt(
     collection_errors: List[str] = []
     journal_paths: List[str] = []
     parser_failures = 0
+    unresolved = 0
 
     try:
         rows = db.conn.execute("SELECT path, parser_outcome FROM file_journal").fetchall()
         journal_paths = [str(r[0]) for r in rows if r[0]]
-        parser_failures = sum(1 for r in rows if r[1] == "PARSE_ERROR")
+        parser_failures = sum(1 for r in rows if r[1] in ("PARSE_ERROR", "PARSER_UNAVAILABLE"))
     except Exception as exc:
         collection_errors.append(f"journal_query_failed: {type(exc).__name__}")
 
+    manifest = build_scope_manifest(db, repo_root)
+    quarantined = list(manifest.quarantined_files)
+    if quarantined:
+        collection_errors.append(f"quarantined_files: {len(quarantined)} unjournaled or invalid files on disk: {quarantined[:5]}")
+        parser_failures += len(quarantined)
+    if manifest.parser_error_files:
+        parser_failures += len(manifest.parser_error_files)
+
+    all_cited = sorted(set(journal_paths) | set(manifest.included_files) | set(quarantined))
+    if doctor_report:
+        doc_errors = doctor_report.get("errors") or []
+        if doctor_report.get("ok") is False or doc_errors:
+            collection_errors.append(f"doctor_integrity_failed: {doc_errors or 'integrity_check_failed'}")
+        doc_unresolved = doctor_report.get("unresolved_count") or doctor_report.get("unresolved_edges") or 0
+        unresolved = max(unresolved, int(doc_unresolved or 0))
+
+    try:
+        db_unresolved = int(
+            db.conn.execute(
+                "SELECT COUNT(*) FROM pending_edges WHERE resolution_state != 'RESOLVED'"
+            ).fetchone()[0]
+        )
+        unresolved = max(unresolved, db_unresolved)
+    except Exception as exc:
+        collection_errors.append(f"pending_edges_query_failed: {type(exc).__name__}")
+
     stale: List[str] = []
-    if hasattr(db, "stale_journal_files") and journal_paths:
+    if hasattr(db, "stale_journal_files") and all_cited:
         try:
-            stale = db.stale_journal_files(journal_paths, root=repo_root)
+            stale = db.stale_journal_files(all_cited, root=repo_root)
         except Exception as exc:
             collection_errors.append(f"stale_check_failed: {type(exc).__name__}")
 
     report = repo_coverage(db, repo_root)
-    cross = _ledger_cross_check(db, repo_root)
-
     try:
-        snapshot = capture_worktree_snapshot(repo_root, cited_paths=journal_paths)
+        snapshot = capture_worktree_snapshot(repo_root, cited_paths=all_cited)
         snapshot_dict = snapshot.as_dict()
         snapshot_bound = bool(snapshot_dict.get("scope_digest"))
     except Exception as exc:
         collection_errors.append(f"snapshot_capture_failed: {type(exc).__name__}")
         snapshot_dict = {}
         snapshot_bound = False
-
-    identity_status = "UNVERIFIABLE" if collection_errors else "UNIQUE"
-
+    scope_dig = snapshot_dict.get("scope_digest")
+    cross = _ledger_cross_check(
+        db, repo_root,
+        snapshot_hash=str(scope_dig) if scope_dig is not None else None,
+    )
     facts = AssuranceFacts(
-        identity_status=identity_status,
+        identity_status="UNIQUE",
+        collection_error=bool(collection_errors),
         snapshot_bound=snapshot_bound and not bool(collection_errors),
         stale_files=stale,
         parser_failures=parser_failures,
+        unresolved_count=unresolved,
         open_conflicts=cross.get("open_conflicts", 0),
         coverage_measured=(report.basis == "measured" and not bool(collection_errors)),
         coverage_fraction=report.covered_fraction or 0.0,
@@ -712,11 +791,15 @@ def audit_receipt(
         "proof_scope": "system_integrity",
         "doctor_summary": doctor_report or {},
         "collection_errors": collection_errors,
+        "stale_files": stale,
         "coverage": {
             "basis": report.basis,
             "covered_fraction": report.covered_fraction,
+            "gaps": list(report.gaps),
             "note": coverage_note(report),
         },
+        "scope_manifest": manifest.to_dict(),
+        "quarantined_files": quarantined,
         "snapshot": snapshot_dict,
         "assurance_facts": asdict(facts),
         "assurance": {

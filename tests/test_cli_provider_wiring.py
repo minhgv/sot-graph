@@ -283,26 +283,33 @@ class TestMergeOrderAndVerdict:
         self, repo, bin_dir, monkeypatch, capsys
     ):
         allow_external(repo, True)
-        # symbols-only caps force search rows, which carry file paths
-        cfg = repo / ".sot"
-        cfg.mkdir(exist_ok=True)
-        (cfg / "config.toml").write_text(
-            "allow_external = true\n"
-            "[providers.codebase-memory]\n"
-            'capabilities = ["symbols"]\n'
-        )
-        # CBM claims `target` lives in app2.py while builtin says app.py
-        report = {
-            "total": 1, "search_mode": "bm25",
-            "cols": ["qn", "label", "file", "lines", "rank"],
-            "rows": [["fake-proj.app2.target", "Function", "app2.py", "9-9", -5.0]],
-            "has_more": False,
+        # SCIP claims `target` lives in app2.py while builtin says app.py
+        scip_file = repo / "index.scip"
+        doc = {
+            "metadata": {"version": "0.4.0"},
+            "documents": [
+                {
+                    "relative_path": "app2.py",
+                    "symbols": [
+                        {
+                            "symbol": "scip-python python app2 0.1.0 `app2.py`/target().",
+                            "kind": "function",
+                        }
+                    ],
+                    "occurrences": [
+                        {
+                            "range": [9, 0, 9, 10],
+                            "symbol": "scip-python python app2 0.1.0 `app2.py`/target().",
+                            "symbol_roles": 1,
+                        }
+                    ],
+                }
+            ],
         }
-        make_cbm_fake(bin_dir, search_report=report)
-        monkeypatch.setenv("PATH", str(bin_dir))
+        scip_file.write_text(json.dumps(doc), encoding="utf-8")
         rc = cli_main([
             "--root", str(repo), "usages", "target",
-            "--provider", "prefer:codebase-memory", "--json",
+            "--provider", "prefer:scip", "--json",
         ])
         out = json.loads(capsys.readouterr().out)
         assert rc == 0
@@ -315,21 +322,16 @@ class TestTruncationPropagation:
     @requires_path_spawned_cbm
     def test_has_more_sets_truncated_true(self, repo, bin_dir, monkeypatch, capsys):
         allow_external(repo, True)
-        # symbols-only capabilities force the search_symbols method
-        cfg = repo / ".sot"
-        cfg.mkdir(exist_ok=True)
-        (cfg / "config.toml").write_text(
-            "allow_external = true\n"
-            "[providers.codebase-memory]\n"
-            'capabilities = ["symbols"]\n'
-        )
         report = {
-            "total": 2, "search_mode": "bm25",
-            "cols": ["qn", "label", "file", "lines", "rank"],
-            "rows": [["fake-proj.app.target", "Function", "app.py", "1-2", -5.0]],
+            "function": "target", "direction": "both",
+            "callees_total": 0, "callees": {"cols": ["name", "hop"], "groups": []},
+            "callers_total": 1,
+            "callers": {"cols": ["name", "hop", "strategy", "confidence"],
+                        "groups": [{"qn_prefix": "fake-proj.app",
+                                    "rows": [["caller", 1, "lsp", 0.93]]}]},
             "has_more": True,
         }
-        make_cbm_fake(bin_dir, search_report=report)
+        make_cbm_fake(bin_dir, trace_report=report)
         monkeypatch.setenv("PATH", str(bin_dir))
         rc = cli_main([
             "--root", str(repo), "usages", "target",
@@ -338,7 +340,6 @@ class TestTruncationPropagation:
         out = json.loads(capsys.readouterr().out)
         assert rc == 0
         assert out["truncated"] is True
-
 
 class TestProvidersSync:
     @requires_path_spawned_cbm

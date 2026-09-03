@@ -19,6 +19,7 @@ of every provider query. This module:
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, Optional, Sequence
 
 from .identity import _language_of
@@ -65,42 +66,55 @@ def union_evidence(
     a uniquely verified span resolve to ``source_verified``; unresolved
     conflicts stay ``CONFLICT``.
     """
+    order_clause = " ORDER BY e.path, e.relation, e.src_symbol, e.dst_symbol, e.line_start, e.line_end, e.run_id, e.id"
+    is_truncated = False
+    canonical_root = os.path.realpath(repo_root) if repo_root else ""
+    if not canonical_root:
+        return []
     sql = (
         "SELECT e.path, e.relation, e.src_symbol, e.dst_symbol, "
         "e.snapshot_hash, e.provider_name, e.line_start, e.line_end, "
         "e.run_id, e.confidence "
         "FROM provider_evidence e JOIN provider_runs r ON e.run_id = r.id "
-        "WHERE r.status = 'ok' AND e.invalidated_at IS NULL"
+        "WHERE r.status = 'ok' AND e.invalidated_at IS NULL "
+        "AND r.project_root = ?"
     )
-    params: List[Any] = []
+    params: List[Any] = [canonical_root]
     if snapshot_hash is not None:
         sql += " AND e.snapshot_hash = ?"
         params.append(snapshot_hash)
-    sql += " LIMIT ?"
-    params.append(int(limit))
+    sql += order_clause + " LIMIT ?"
+    params.append(int(limit) + 1)
     try:
         rows = db.conn.execute(sql, params).fetchall()
+        if len(rows) > int(limit):
+            is_truncated = True
+            rows = rows[:int(limit)]
     except Exception as exc:  # noqa: BLE001 - ledger is a sidecar
         # Tolerant fallback for sidecars opened before the invalidated_at
         # migration landed: retry with the legacy stale-metadata filter.
-        legacy_params: List[Any] = []
+        legacy_params: List[Any] = [canonical_root]
         legacy = (
             "SELECT e.path, e.relation, e.src_symbol, e.dst_symbol, "
             "e.snapshot_hash, e.provider_name, e.line_start, e.line_end, "
             "e.run_id, e.confidence "
             "FROM provider_evidence e JOIN provider_runs r ON e.run_id = r.id "
             "WHERE r.status = 'ok' AND COALESCE(e.metadata_json, '') "
-            "NOT LIKE '%\"stale\": true%'"
+            "NOT LIKE '%\"stale\": true%' "
+            "AND r.project_root = ?"
         )
         if snapshot_hash is not None:
             legacy += " AND e.snapshot_hash = ?"
             legacy_params.append(snapshot_hash)
-        legacy_params.append(int(limit))
+        legacy += order_clause + " LIMIT ?"
+        legacy_params.append(int(limit) + 1)
         try:
             rows = db.conn.execute(legacy, legacy_params).fetchall()
+            if len(rows) > int(limit):
+                is_truncated = True
+                rows = rows[:int(limit)]
         except Exception:  # noqa: BLE001 - still unreadable: degrade honestly
             return [{"error": f"ledger read failed: {type(exc).__name__}"}]
-
     groups: Dict[tuple, Dict[str, Any]] = {}
     for row in rows:
         key = _union_key(row)
@@ -175,9 +189,29 @@ def union_evidence(
             # else: verification skipped or failed — stays UNVERIFIED.
         # else: zero distinct spans — stays UNVERIFIED.
         out.append(entry)
+    if is_truncated:
+        out.append({
+            "error": f"evidence truncated: query exceeded limit of {limit} records",
+            "status": "UNVERIFIED",
+            "conflict": True,
+            "truncated": True,
+            "identity": {
+                "path": "",
+                "language": "",
+                "relation": "",
+                "src": "",
+                "dst": "",
+                "snapshot": None,
+            },
+            "providers": [],
+        })
     out.sort(key=lambda e: (
-        e["status"] != "SUPPORTED", e["conflict"],
-        e["identity"]["path"], e["identity"]["src"],
+        e.get("status") != "SUPPORTED",
+        bool(e.get("conflict")),
+        str(e.get("identity", {}).get("path") or ""),
+        str(e.get("identity", {}).get("relation") or ""),
+        str(e.get("identity", {}).get("src") or ""),
+        str(e.get("identity", {}).get("dst") or ""),
     ))
     return out
 

@@ -26,6 +26,8 @@ def _run_git(repo_root: str, *args: str) -> subprocess.CompletedProcess | None:
             ["git", "-C", repo_root, *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
             timeout=GIT_TIMEOUT_SECONDS,
         )
     except (subprocess.SubprocessError, FileNotFoundError, OSError):
@@ -86,7 +88,7 @@ def dirty_state(repo_root: str) -> tuple[bool | None, str | None]:
 def _fingerprint(entries: list[str]) -> str:
     hasher = hashlib.sha256()
     for entry in sorted(entries):
-        hasher.update(entry.encode("utf-8"))
+        hasher.update(entry.encode("utf-8", errors="surrogateescape"))
         hasher.update(b"\x00")
     return f"sha256:{hasher.hexdigest()}"
 
@@ -164,11 +166,11 @@ def _content_binding(
 ) -> tuple[dict[str, str], str | None, list[str]]:
     """Hash every cited file from the working tree (Contract 2).
 
-    Returns ``(content_digests, scope_digest, unreadable)``. Paths are
-    deduplicated and normalized to forward slashes; digests fold into a
-    single ``scope_digest`` over the sorted ``"path  hexdigest"`` lines.
-    Any read failure is fail-closed: the offending path lands in
-    ``unreadable`` and ``scope_digest`` comes back None.
+    Threat Model & Concurrency Invariant:
+    Assumes a stationary worktree during sampling. Any concurrent path
+    mutation, symlink swap, or unreadable file detected during sampling
+    is strictly fail-closed: the offending path is recorded in ``unreadable``
+    and ``scope_digest`` is invalidated (returned as None).
     """
     if not cited_paths:
         return {}, None, []
@@ -176,32 +178,53 @@ def _content_binding(
     unreadable: list[str] = []
     root_real = os.path.realpath(repo_root)
     for raw in cited_paths:
-        raw_s = str(raw).replace(os.sep, "/")
+        if raw is None or not str(raw).strip():
+            unreadable.append(str(raw if raw is not None else "<empty>"))
+            continue
+        raw_s = str(raw)
         if os.path.isabs(raw_s):
-            # Graph nodes store absolute paths; normalize anything under
-            # the repo root to repo-relative so CLI and MCP citing the
-            # same node produce identical digest keys (Contract 2).
-            real = os.path.realpath(raw_s)
-            if real == root_real or real.startswith(root_real + os.sep):
-                rel = os.path.relpath(real, root_real).replace(os.sep, "/")
-            else:
-                # Cited path outside the repo: fail-closed below.
-                rel = raw_s.strip("/")
+            candidate_abs = raw_s
         else:
-            rel = raw_s.strip("/")
-        abs_path = os.path.join(root_real, *rel.split("/"))
+            candidate_abs = os.path.join(root_real, raw_s)
+        candidate_real = os.path.realpath(candidate_abs)
         try:
-            with open(abs_path, "rb") as fh:
-                digests[rel] = hashlib.sha256(fh.read()).hexdigest()
+            is_inside = os.path.commonpath([candidate_real, root_real]) == root_real
+        except ValueError:
+            is_inside = False
+        if not is_inside or not os.path.isfile(candidate_real):
+            unreadable.append(raw_s)
+            continue
+        rel = os.path.relpath(candidate_real, root_real)
+        if os.sep == "\\":
+            rel = rel.replace("\\", "/")
+        try:
+            fd = os.open(candidate_real, os.O_RDONLY)
+            try:
+                st1 = os.fstat(fd)
+                with os.fdopen(fd, "rb", closefd=True) as fh:
+                    data = fh.read()
+                st2 = os.stat(candidate_real)
+                if (
+                    st1.st_ino != st2.st_ino
+                    or st1.st_dev != st2.st_dev
+                    or st1.st_mtime_ns != st2.st_mtime_ns
+                    or st1.st_size != st2.st_size
+                    or len(data) != st1.st_size
+                    or os.path.realpath(candidate_abs) != candidate_real
+                ):
+                    unreadable.append(raw_s)
+                    continue
+                digests[rel] = hashlib.sha256(data).hexdigest()
+            except Exception:
+                unreadable.append(raw_s)
         except OSError:
-            unreadable.append(rel)
+            unreadable.append(raw_s)
     if unreadable:
-        return digests, None, sorted(unreadable)
+        return digests, None, sorted(list(set(unreadable)))
     hasher = hashlib.sha256()
-    for rel in sorted(digests):
-        hasher.update(f"{rel}  {digests[rel]}\n".encode("utf-8"))
+    for rel_p in sorted(digests):
+        hasher.update(f"{rel_p}  {digests[rel_p]}\n".encode("utf-8", errors="surrogateescape"))
     return digests, f"sha256:{hasher.hexdigest()}", []
-
 
 def capture_worktree_snapshot(
     repo_root: str,
@@ -257,7 +280,7 @@ def capture_worktree_snapshot(
         # git state never collide.
         snapshot.algo_version, str(snapshot.scope_digest),
     ):
-        hasher.update(part.encode("utf-8"))
+        hasher.update(part.encode("utf-8", errors="surrogateescape"))
         hasher.update(b"\x00")
     digest = f"sha256:{hasher.hexdigest()}"
     snapshot = replace(snapshot, descriptor_digest=digest)

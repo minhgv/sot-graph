@@ -20,7 +20,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-
+# Ensure src is in sys.path when running standalone
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 def log(msg: str) -> None:
     print(f"[E2E] {msg}", flush=True)
 
@@ -31,11 +32,16 @@ def fail(msg: str) -> None:
 
 
 def run_cmd(args: list[str], cwd: str) -> str:
+    env = dict(os.environ)
+    src_path = str(Path(__file__).resolve().parent.parent / "src")
+    existing_pp = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{src_path}{os.pathsep}{existing_pp}" if existing_pp else src_path
     res = subprocess.run(
         args,
         cwd=cwd,
         capture_output=True,
         text=True,
+        env=env,
     )
     if res.returncode != 0:
         fail(f"Command failed ({res.returncode}): {' '.join(args)}\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}")
@@ -162,13 +168,17 @@ def test_e2e() -> None:
             log(f"Pre-sync git status entries: {_status_entries(str(repo_dir))}")
             log(f"Pre-sync dirty state: {dirty_state(str(repo_dir))}")
             log("Running sot providers sync codebase-memory...")
+            env = dict(os.environ)
+            src_path = str(Path(__file__).resolve().parent.parent / "src")
+            existing_pp = env.get("PYTHONPATH", "")
+            env["PYTHONPATH"] = f"{src_path}{os.pathsep}{existing_pp}" if existing_pp else src_path
             res_sync = subprocess.run(
                 [sys.executable, "-m", "sot_graph.cli", "providers", "sync", "codebase-memory", "--json"],
                 cwd=str(repo_dir),
                 capture_output=True,
                 text=True,
+                env=env,
             )
-            log(f"Sync return code: {res_sync.returncode}, output: {res_sync.stdout.strip()[:100]}")
             if res_sync.returncode != 0:
                 fail(f"CBM provider sync failed: {res_sync.stderr}\n{res_sync.stdout}")
             log("Testing require:codebase-memory federated query...")
@@ -241,6 +251,59 @@ def test_e2e() -> None:
                 expected_head = get_head_sha(str(repo_dir))
                 if bind_row[2] != expected_head:
                     fail(f"Binding head_sha mismatch: expected {expected_head}, got {bind_row[2]}")
+        # 4.3 Test SCIP real artifact indexing & require:scip
+        log("Generating and testing real SCIP provider artifact...")
+        scip_doc = {
+            "metadata": {"version": "0.4.0"},
+            "documents": [
+                {
+                    "relative_path": "src/auth_service.py",
+                    "symbols": [
+                        {"symbol": "scip-python python auth_service 0.1.0 `src/auth_service.py`/verify_credentials().", "kind": "function"}
+                    ],
+                    "occurrences": [
+                        {
+                            "range": [4, 4, 4, 22],
+                            "symbol": "scip-python python auth_service 0.1.0 `src/auth_service.py`/verify_credentials().",
+                            "symbol_roles": 1,  # Definition
+                        }
+                    ],
+                },
+                {
+                    "relative_path": "tests/test_auth.py",
+                    "symbols": [],
+                    "occurrences": [
+                        {
+                            "range": [10, 4, 10, 22],
+                            "symbol": "scip-python python auth_service 0.1.0 `src/auth_service.py`/verify_credentials().",
+                            "symbol_roles": 0,  # Reference / Call
+                        }
+                    ],
+                },
+            ],
+        }
+        (repo_dir / "index.scip.json").write_text(json.dumps(scip_doc), encoding="utf-8")
+        out_scip = run_cmd(
+            [sys.executable, "-m", "sot_graph.cli", "usages", "verify_credentials", "--provider", "require:scip", "--json"],
+            cwd=str(repo_dir),
+        )
+        try:
+            scip_json = json.loads(out_scip)
+            scip_ext_cands = scip_json.get("external_candidates", [])
+            log(f"SCIP external_candidates count: {len(scip_ext_cands)}")
+            if not scip_ext_cands:
+                fail("require:scip returned zero external candidates for verify_credentials!")
+            for cand in scip_ext_cands:
+                if cand.get("provider") != "scip":
+                    fail(f"Candidate provider is not scip: {cand}")
+                log(f"Found SCIP candidate: path={cand.get('path')}, line={cand.get('line')}, provider_relation={cand.get('provider_relation')}")
+            provs = scip_json.get("providers", [])
+            if not any(p.get("name") == "scip" for p in provs):
+                fail("scip not declared in response envelope providers!")
+            log("SCIP real provider query verified with semantic assertions!")
+        except json.JSONDecodeError:
+            fail(f"Failed to parse require:scip output: {out_scip}")
+
         log("Testing fail-closed negative path for non-existent provider...")
         res_neg = subprocess.run(
             [sys.executable, "-m", "sot_graph.cli", "usages", "verify_credentials", "--provider", "require:nonexistent", "--json"],
@@ -251,7 +314,6 @@ def test_e2e() -> None:
         if res_neg.returncode == 0:
             fail("Expected require:nonexistent to fail closed, but it returned 0!")
         log(f"Fail-closed verified: non-existent provider exited with code {res_neg.returncode}")
-
         # 5. Run scope_receipt via CLI
         log("Running sot scope-receipt for verify_credentials...")
         out_receipt = run_cmd(
@@ -303,12 +365,40 @@ def verify_credentials(user: str, token: str) -> bool:
             if not any("auth_service.py" in f for f in changed_files):
                 fail(f"Expected auth_service.py in changed files, got: {changed_files}")
 
+            # 6.1 Test untracked file capture in working-tree diff
+            log("Creating untracked file and verifying working-tree diff capture...")
+            untracked_file = repo_dir / "src" / "untracked_helper.py"
+            untracked_file.write_text("def untracked_func(): pass\n", encoding="utf-8")
+            out_diff_untracked = run_cmd(
+                [sys.executable, "-m", "sot_graph.cli", "diff-impact", "--working-tree", "--json"],
+                cwd=str(repo_dir),
+            )
+            diff_untracked_json = json.loads(out_diff_untracked)
+            untracked_changed = diff_untracked_json.get("changed_files", [])
+            log(f"Diff Impact with untracked file: {untracked_changed}")
+            if not any("untracked_helper.py" in f for f in untracked_changed):
+                fail(f"Expected untracked_helper.py in changed_files, got: {untracked_changed}")
+
+            # 6.2 Test audit-receipt fail-closed on unjournaled file
+            log("Verifying audit_receipt fails closed when unjournaled files exist...")
+            from sot_graph.assurance.receipts import audit_receipt
+            from sot_graph.db import Database
+            sot_db = Database(str(db_path))
+            audit_res = audit_receipt(sot_db, str(repo_dir))
+            if audit_res["assurance"]["status"] == "ASSURED_WITHIN_SCOPE":
+                fail("Semantic gate failed: audit_receipt returned ASSURED_WITHIN_SCOPE despite unjournaled file on disk!")
+            if not audit_res["quarantined_files"]:
+                fail("quarantined_files missing from audit_receipt payload!")
+            log(f"Quarantined files flagged by audit_receipt: {audit_res['quarantined_files']}")
+
+            # Clean up untracked file before reconcile
+            untracked_file.unlink()
+
             # Verify caller impact on user_handler
             caller_impacts = diff_json.get("caller_impacts", [])
             log(f"Caller impacts: {len(caller_impacts)}")
         except json.JSONDecodeError:
             fail(f"Failed to parse diff-impact JSON: {out_diff}")
-
         # 7. Post-reconcile and ledger validation
         log("Reconciling and checking ledger recording...")
         run_cmd([sys.executable, "-m", "sot_graph.cli", "reconcile"], cwd=str(repo_dir))

@@ -2407,6 +2407,7 @@ class Database:
         import uuid
         rid = run_id or f"run_{int(time.time())}_{uuid.uuid4().hex[:8]}"
         now = int(time.time())
+        canonical_project_root = os.path.realpath(project_root) if project_root else None
         self.conn.execute(
             "INSERT OR REPLACE INTO provider_runs "
             "(id, provider_name, provider_version, capability, snapshot_hash, "
@@ -2419,7 +2420,7 @@ class Database:
                 provider_version,
                 capability,
                 snapshot_hash,
-                project_root,
+                canonical_project_root,
                 position_encoding,
                 arguments_json,
                 status,
@@ -2624,10 +2625,10 @@ class Database:
             bare_src = item.get("symbol") or src_symbol
             bare_dst = item.get("target_symbol") or dst_symbol
             relation = item.get("relation") or item.get("role", "reference")
-            line_start = item.get("line_start")
-            line_end = item.get("line_end")
-            col_start = item.get("col_start")
-            col_end = item.get("col_end")
+            line_start = item.get("line_start") if item.get("line_start") is not None else item.get("start_line")
+            line_end = item.get("line_end") if item.get("line_end") is not None else item.get("end_line")
+            col_start = item.get("col_start") if item.get("col_start") is not None else item.get("start_column")
+            col_end = item.get("col_end") if item.get("col_end") is not None else item.get("end_column")
             syntax_kind = item.get("syntax_kind")
             documentation = item.get("documentation")
             confidence = float(item.get("confidence", 1.0))

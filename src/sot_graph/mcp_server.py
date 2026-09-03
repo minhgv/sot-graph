@@ -17,10 +17,10 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional
+from typing import Any, AsyncIterator, Dict, Optional
 from urllib.parse import quote, unquote, urlparse
 
-from sot_graph.mcp_service import McpService, McpServiceError
+from sot_graph.mcp_service import McpService, McpServiceError, sanitize_transport_value
 
 LOGGER = logging.getLogger("sot_graph.mcp")
 
@@ -45,12 +45,12 @@ def _sdk() -> Any:
 
 
 def _json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
+    sanitized = sanitize_transport_value(value)
+    return json.dumps(sanitized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 def _error(exc: Exception) -> Dict[str, Any]:
     if isinstance(exc, McpServiceError):
-        return {"error": exc.as_dict()}
+        return sanitize_transport_value({"error": exc.as_dict()})
     LOGGER.exception("MCP request failed")
     return {"error": {"code": "internal", "message": "internal MCP service error"}}
 
@@ -179,7 +179,7 @@ def create_server(service: McpService) -> Any:
                 pass
 
     @asynccontextmanager
-    async def _lifespan(server_app: Any) -> Any:
+    async def _lifespan(server_app: Any) -> AsyncIterator[Dict[str, Any]]:
         watcher = asyncio.create_task(_watch_generation())
         try:
             yield {"sot_state": state}
@@ -383,6 +383,7 @@ def create_server(service: McpService) -> Any:
                 )
             else:
                 result = {"error": {"code": "unknown_tool", "message": "unknown MCP tool"}}
+            result = sanitize_transport_value(result)
             content: list[Any] = [types.TextContent(type="text", text=_json(result))]
             # Resource Links: decouple search results from full node fetches.
             if name == "sot_search":

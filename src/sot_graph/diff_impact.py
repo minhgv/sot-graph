@@ -215,10 +215,8 @@ class GitDeltaExtractor:
                 cwd=self.repo_path,
                 capture_output=True,
                 text=True,
-                # Repository content may be UTF-8 beyond the console
-                # codepage (e.g. cp1252 runners); a strict decode kills the
-                # pipe reader thread and orphans the git child.
-                errors="replace",
+                encoding="utf-8",
+                errors="surrogateescape",
                 timeout=timeout_sec,
                 check=False,
             )
@@ -278,10 +276,71 @@ class GitDeltaExtractor:
                 ["diff", "--no-ext-diff", "--no-textconv", "-U0", target]
             )
 
-        if code != 0 or not stdout.strip():
-            return {}, []
+        if code == 0 and stdout.strip():
+            file_intervals, hunks = self.parse_unified_diff(stdout)
+        else:
+            file_intervals, hunks = {}, []
 
-        return self.parse_unified_diff(stdout)
+        # Include untracked files when inspecting working tree / unstaged changes
+        if working_tree or (not staged and not target):
+            untracked_code, untracked_out, _ = self.run_git(
+                ["ls-files", "-z", "--others", "--exclude-standard"]
+            )
+            canonical_root = os.path.realpath(self.repo_path)
+            if untracked_code == 0 and untracked_out:
+                for raw_p in untracked_out.split("\0"):
+                    if not raw_p:
+                        continue
+                    full_p = os.path.realpath(os.path.join(canonical_root, raw_p))
+                    try:
+                        is_inside = os.path.commonpath([canonical_root, full_p]) == canonical_root
+                    except ValueError:
+                        is_inside = False
+                    if not is_inside or not os.path.isfile(full_p):
+                        continue
+                    line_count = 1
+                    try:
+                        with open(full_p, "rb") as f:
+                            line_count = max(1, sum(1 for _ in f))
+                    except Exception:
+                        pass
+                    if raw_p not in file_intervals:
+                        file_intervals[raw_p] = [(1, line_count)]
+                    else:
+                        file_intervals[raw_p].append((1, line_count))
+                    hunks.append(
+                        DiffHunk(
+                            file_path=raw_p,
+                            old_start=0,
+                            old_count=0,
+                            new_start=1,
+                            new_count=line_count,
+                            heading="untracked file",
+                            lines_added=line_count,
+                            lines_deleted=0,
+                            intervals=[(1, line_count)],
+                        )
+                    )
+        return file_intervals, hunks
+    @staticmethod
+    def unquote_git_path(path_str: str) -> str:
+        """Decode a Git C-quoted path if enclosed in double quotes."""
+        s = path_str.strip()
+        if len(s) >= 2 and s.startswith('"') and s.endswith('"'):
+            raw_body = s[1:-1]
+            try:
+                b = raw_body.encode("latin1").decode("unicode_escape").encode("latin1")
+                return b.decode("utf-8", errors="surrogateescape")
+            except Exception:
+                import re
+                def _replace(m: Any) -> str:
+                    esc = m.group(1)
+                    if esc.isdigit():
+                        return chr(int(esc, 8))
+                    mapping = {"t": "\t", "n": "\n", "r": "\r", "\\": "\\", '"': '"', "b": "\b", "f": "\f", "a": "\a", "v": "\v"}
+                    return str(mapping.get(esc, esc))
+                return re.sub(r'\\([0-7]{1,3}|[trn"\\bfa])', _replace, raw_body)
+        return s
 
     def parse_unified_diff(self, diff_text: str) -> Tuple[Dict[str, List[Tuple[int, int]]], List[DiffHunk]]:
         """
@@ -298,13 +357,22 @@ class GitDeltaExtractor:
             # Handle diff header
             if line.startswith("diff --git "):
                 current_is_binary = False
-                parts = line.split(" ")
-                if len(parts) >= 4:
-                    # Strip a/ and b/ prefixes
-                    a_path = parts[2]
-                    b_path = parts[3]
-                    current_file_old = a_path[2:] if a_path.startswith("a/") else a_path
-                    current_file_new = b_path[2:] if b_path.startswith("b/") else b_path
+                rest = line[11:].strip()
+                if rest.startswith('"'):
+                    import re
+                    qmatches = re.findall(r'"(?:[^"\\]|\\.)*"', rest)
+                    if len(qmatches) >= 2:
+                        a_path = self.unquote_git_path(qmatches[0])
+                        b_path = self.unquote_git_path(qmatches[1])
+                        current_file_old = a_path[2:] if a_path.startswith("a/") else a_path
+                        current_file_new = b_path[2:] if b_path.startswith("b/") else b_path
+                else:
+                    parts = rest.split(" ")
+                    if len(parts) >= 2:
+                        a_path = parts[0]
+                        b_path = parts[1]
+                        current_file_old = a_path[2:] if a_path.startswith("a/") else a_path
+                        current_file_new = b_path[2:] if b_path.startswith("b/") else b_path
                 continue
 
             if line.startswith("Binary files ") or "differ" in line:
@@ -312,7 +380,7 @@ class GitDeltaExtractor:
                 continue
 
             if line.startswith("--- "):
-                path_part = line[4:].strip()
+                path_part = self.unquote_git_path(line[4:])
                 if path_part == "/dev/null":
                     current_file_old = None
                 elif path_part.startswith("a/"):
@@ -322,7 +390,7 @@ class GitDeltaExtractor:
                 continue
 
             if line.startswith("+++ "):
-                path_part = line[4:].strip()
+                path_part = self.unquote_git_path(line[4:])
                 if path_part == "/dev/null":
                     current_file_new = None
                 elif path_part.startswith("b/"):
@@ -330,7 +398,6 @@ class GitDeltaExtractor:
                 else:
                     current_file_new = path_part
                 continue
-
             if current_is_binary:
                 continue
 
@@ -355,8 +422,9 @@ class GitDeltaExtractor:
                     continue
 
                 # Standardize path separators
-                norm_file = active_file.replace("\\", "/")
-
+                norm_file = active_file.replace("\\", "/") if os.sep == "\\" else active_file
+                if norm_file.startswith("./"):
+                    norm_file = norm_file[2:]
                 # Calculate modified interval
                 if new_count > 0:
                     interval = (new_start, new_start + new_count - 1)
@@ -400,7 +468,10 @@ class ASTCoordinateMapper:
 
     def _normalize_path(self, path: str) -> str:
         """Normalize file paths for consistent SQLite matching."""
-        return path.replace("\\", "/").lstrip("./")
+        norm = path.replace("\\", "/") if os.sep == "\\" else path
+        if norm.startswith("./"):
+            norm = norm[2:]
+        return norm
 
     def map_intervals_to_nodes(
         self,
@@ -418,7 +489,7 @@ class ASTCoordinateMapper:
                 continue
 
             norm_path = self._normalize_path(file_path)
-            like_path = f"%{norm_path}"
+            like_path = f"%/{norm_path}" if not norm_path.startswith("/") else f"%{norm_path}"
 
             # Query all candidate nodes for this file that have line coordinates
             try:
@@ -619,7 +690,9 @@ class CommitHistoryEngine:
                     dels = int(del_str) if del_str.isdigit() else 0
                     current["insertions"] += ins
                     current["deletions"] += dels
-                    norm_path = file_path.replace("\\", "/")
+                    norm_path = file_path.replace("\\", "/") if os.sep == "\\" else file_path
+                    if norm_path.startswith("./"):
+                        norm_path = norm_path[2:]
                     current["files"].append(norm_path)
 
         if current:
@@ -632,8 +705,10 @@ class CommitHistoryEngine:
         symbols: List[str] = []
         seen = set()
         for f in files:
-            norm = f.replace("\\", "/").lstrip("./")
-            like = f"%{norm}"
+            norm = f.replace("\\", "/") if os.sep == "\\" else f
+            if norm.startswith("./"):
+                norm = norm[2:]
+            like = f"%/{norm}" if not norm.startswith("/") else f"%{norm}"
             try:
                 rows = conn.execute(
                     "SELECT symbol FROM graph_nodes "
@@ -967,8 +1042,10 @@ class DiffImpactEngine:
 
         # 3. Match by Changed File Paths
         for f in changed_files:
-            norm_f = f.replace("\\", "/").lstrip("./")
-            like_f = f"%{norm_f}"
+            norm_f = f.replace("\\", "/") if os.sep == "\\" else f
+            if norm_f.startswith("./"):
+                norm_f = norm_f[2:]
+            like_f = f"%/{norm_f}" if not norm_f.startswith("/") else f"%{norm_f}"
             rows = self.conn.execute(
                 "SELECT id, fe_caller_symbol, http_method, normalized_uri, be_controller_symbol, fe_file, be_file "
                 "FROM api_cross_bindings "
@@ -1070,9 +1147,8 @@ class DiffImpactEngine:
 
     def _is_test_path(self, path: str) -> bool:
         """Check if a file path belongs to test directories or test naming conventions."""
-        norm = path.replace("\\", "/")
+        norm = path.replace("\\", "/") if os.sep == "\\" else path
         return any(pat.search(norm) for pat in self.TEST_PATTERNS)
-
     def _compute_summary(
         self,
         changed_files: List[str],

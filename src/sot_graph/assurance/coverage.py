@@ -118,9 +118,18 @@ _OUTCOME_TO_STATE = {
     "PARSER_UNAVAILABLE": CoverageState.SKIPPED,
 }
 def _is_excluded(path: str) -> bool:
-    parts = path.replace("\\", "/").split("/")
+    if os.sep == "\\":
+        parts = path.replace("\\", "/").split("/")
+    else:
+        parts = path.split("/")
     return any(p in _GENERATED_PARTS for p in parts[:-1]) or bool(_PB_RE.search(parts[-1]))
 
+
+def _normalize_rel_path(rel_path: str) -> str:
+    """Normalize directory separators on Windows while preserving POSIX literal backslashes."""
+    if os.sep == "\\":
+        return rel_path.replace("\\", "/")
+    return rel_path
 
 @dataclass(frozen=True)
 class FileCoverage:
@@ -187,13 +196,21 @@ def repo_coverage(
     root_norm = os.path.abspath(repo_root)
     for abs_path in [p for p in journal if os.path.isabs(p)]:
         try:
-            rel = os.path.relpath(abs_path, root_norm).replace(os.sep, "/")
+            rel = os.path.relpath(abs_path, root_norm)
+            if os.sep == "\\":
+                rel = rel.replace("\\", "/")
         except ValueError:
             continue
         if not rel.startswith("..") and rel not in journal:
             journal[rel] = journal.pop(abs_path)
-    scope = [p.replace("\\", "/").lstrip("./") for p in paths] if paths else None
 
+    def _norm_scope_path(p: str) -> str:
+        norm = p.replace("\\", "/") if os.sep == "\\" else p
+        if norm.startswith("./"):
+            norm = norm[2:]
+        return norm
+
+    scope = [_norm_scope_path(p) for p in paths] if paths else None
     files: List[FileCoverage] = []
     for path, row in sorted(journal.items()):
         if scope is not None and path not in scope:
@@ -344,6 +361,34 @@ class ScopeManifest:
         }
 
 
+def _matches_exclusion(path: str, exclusions: Sequence[str]) -> bool:
+    """Match path against standard exclusions and custom exclusion patterns."""
+    if _is_excluded(path):
+        return True
+    if os.sep == "\\":
+        norm_path = path.replace("\\", "/")
+        parts = norm_path.split("/")
+    else:
+        norm_path = path
+        parts = path.split("/")
+    filename = parts[-1]
+    import fnmatch
+    for exc in exclusions:
+        if not exc:
+            continue
+        exc_norm = exc.replace("\\", "/") if os.sep == "\\" else exc
+        # Direct directory / segment match (e.g. "build", "dist", "vendor")
+        if any(part == exc or part == exc_norm for part in parts[:-1]):
+            return True
+        if filename == exc or filename == exc_norm:
+            return True
+        if fnmatch.fnmatch(norm_path, exc_norm) or fnmatch.fnmatch(filename, exc_norm):
+            return True
+        if fnmatch.fnmatch(path, exc) or fnmatch.fnmatch(filename, exc):
+            return True
+    return False
+
+
 def build_scope_manifest(
     db: Any,
     repo_root: str,
@@ -368,10 +413,25 @@ def build_scope_manifest(
     quarantined: List[str] = []
     unsupported: List[str] = []
 
-    targets = set(target_paths) if target_paths else None
+    targets: Optional[set[str]] = None
+    if target_paths:
+        targets = set()
+        for tp in target_paths:
+            if not tp:
+                continue
+            tp_str = str(tp)
+            try:
+                abs_tp = os.path.realpath(
+                    tp_str if os.path.isabs(tp_str) else os.path.join(canonical_root, tp_str)
+                )
+                rel_tp = _normalize_rel_path(os.path.relpath(abs_tp, canonical_root))
+                targets.add(rel_tp)
+            except Exception:
+                targets.add(_normalize_rel_path(tp_str))
+    journal_paths: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
 
     for r in rows:
-        p_raw, outcome, _ = str(r[0]), r[1], r[2]
+        p_raw, outcome, p_err = str(r[0]), r[1], r[2]
         abs_cand = os.path.realpath(
             p_raw if os.path.isabs(p_raw) else os.path.join(canonical_root, p_raw)
         )
@@ -386,18 +446,89 @@ def build_scope_manifest(
             unsupported.append(f"{p_raw}:path_traversal_out_of_repo")
             continue
 
-        p = os.path.relpath(abs_cand, canonical_root).replace("\\", "/")
-        if _is_excluded(p) or any(exc in p for exc in default_exclusions):
+        p = _normalize_rel_path(os.path.relpath(abs_cand, canonical_root))
+        journal_paths[p] = (outcome, p_err)
+
+    # Filesystem audit: discover unjournaled candidate files on disk
+    ignored_dir_names = set(_GENERATED_PARTS) | {
+        ".git", ".sot", ".venv", "venv", ".idea", ".vscode", "__pycache__", ".scip"
+    }
+    def _on_walk_error(err: OSError) -> None:
+        err_msg = str(err)
+        quarantined.append(err_msg)
+        parser_errors.append(err_msg)
+        unsupported.append(f"walk_error:{err_msg}")
+
+    try:
+        for root_dir, dirs, files in os.walk(canonical_root, followlinks=False, onerror=_on_walk_error):
+            surviving_dirs: list[str] = []
+            for d in dirs:
+                abs_d_target = os.path.join(root_dir, d)
+                abs_d_real = os.path.realpath(abs_d_target)
+                try:
+                    d_inside = os.path.commonpath([canonical_root, abs_d_real]) == canonical_root
+                except ValueError:
+                    d_inside = False
+
+                rel_d = _normalize_rel_path(os.path.relpath(abs_d_target, canonical_root))
+                if not d_inside:
+                    quarantined.append(rel_d)
+                    parser_errors.append(rel_d)
+                    unsupported.append(f"{rel_d}:outside_symlink")
+                    continue
+
+                if d in ignored_dir_names:
+                    continue
+                if _matches_exclusion(rel_d, default_exclusions):
+                    continue
+                surviving_dirs.append(d)
+            dirs[:] = surviving_dirs
+            for f in files:
+                abs_f_target = os.path.join(root_dir, f)
+                abs_f_real = os.path.realpath(abs_f_target)
+                try:
+                    f_inside = os.path.commonpath([canonical_root, abs_f_real]) == canonical_root
+                except ValueError:
+                    f_inside = False
+
+                rel_f = _normalize_rel_path(os.path.relpath(abs_f_target, canonical_root))
+                if not f_inside:
+                    quarantined.append(rel_f)
+                    parser_errors.append(rel_f)
+                    unsupported.append(f"{rel_f}:outside_symlink")
+                    continue
+
+                if _matches_exclusion(rel_f, default_exclusions):
+                    continue
+                if targets is not None and rel_f not in targets:
+                    continue
+                _, ext = os.path.splitext(f)
+                from sot_graph.reconciler import EXT_DISPATCH, TEXT_EXTENSIONS
+                supported_exts = frozenset(EXT_DISPATCH.keys()) | frozenset(TEXT_EXTENSIONS)
+                if ext.lower() not in supported_exts and rel_f not in journal_paths:
+                    continue
+                if rel_f not in journal_paths:
+                    included.append(rel_f)
+                    parser_errors.append(rel_f)
+                    quarantined.append(rel_f)
+                    unsupported.append(f"{rel_f}:unjournaled_file")
+    except OSError as exc:
+        _on_walk_error(exc)
+    # Process journaled files
+    for p, (outcome, _) in journal_paths.items():
+        if _matches_exclusion(p, default_exclusions):
             continue
-        if targets is not None and p not in targets and p_raw not in targets:
+        if targets is not None and p not in targets:
             continue
-        included.append(p)
+        if p not in included:
+            included.append(p)
         if outcome in ("PARSE_ERROR", "PARSER_UNAVAILABLE"):
             parser_errors.append(p)
             quarantined.append(p)
+
     included.sort()
     for inc in included:
-        abs_p = os.path.join(repo_root, inc)
+        abs_p = os.path.join(canonical_root, inc)
         if not os.path.isfile(abs_p):
             parser_errors.append(inc)
             quarantined.append(inc)
@@ -425,9 +556,9 @@ def build_scope_manifest(
     unsupported = sorted(list(set(unsupported)))
     hasher = hashlib.sha256()
     for inc in included:
-        hasher.update(f"inc:{inc}\n".encode("utf-8"))
+        hasher.update(f"inc:{inc}\n".encode("utf-8", errors="surrogateescape"))
     for exc in default_exclusions:
-        hasher.update(f"exc:{exc}\n".encode("utf-8"))
+        hasher.update(f"exc:{exc}\n".encode("utf-8", errors="surrogateescape"))
     digest = f"sha256:{hasher.hexdigest()}"
 
     return ScopeManifest(

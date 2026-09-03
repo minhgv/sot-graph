@@ -20,6 +20,8 @@ __all__ = [
     "CANONICAL_STATUSES",
     "CLAIM_PROFILES",
     "STATUS_SEVERITY",
+    "ReceiptStatus",
+    "CanonicalReceiptStatus",
     "AssuranceFacts",
     "decide",
 ]
@@ -33,6 +35,18 @@ CANONICAL_STATUSES = (
     "UNVERIFIABLE",
     "ABSTAINED",
 )
+
+class ReceiptStatus:
+    ASSURED_WITHIN_SCOPE = "ASSURED_WITHIN_SCOPE"
+    PARTIAL = "PARTIAL"
+    CONFLICTED = "CONFLICTED"
+    STALE = "STALE"
+    UNVERIFIABLE = "UNVERIFIABLE"
+    ABSTAINED = "ABSTAINED"
+
+
+#: Alias for ReceiptStatus
+CanonicalReceiptStatus = ReceiptStatus
 
 #: Claim profiles
 CLAIM_PROFILES = (
@@ -56,10 +70,12 @@ STATUS_SEVERITY: Dict[str, int] = {
 class AssuranceFacts:
     """Every fact the verdict may rest on. Pure data, no I/O."""
 
-    #: UNIQUE | AMBIGUOUS | NOT_FOUND (Contract 3 resolver)
+    #: Target identity resolution: "UNIQUE" | "NOT_FOUND" | "AMBIGUOUS"
     identity_status: str
     #: scope_digest present and binds the current content
-    snapshot_bound: bool
+    snapshot_bound: bool = True
+    #: Collection/tool/DB errors during evidence collection
+    collection_error: bool = False
     stale_files: List[str] = field(default_factory=list)
     #: coverage basis == "measured"
     coverage_measured: bool = False
@@ -94,6 +110,11 @@ def decide(facts: AssuranceFacts) -> Dict[str, Any]:
     candidate_statuses: List[str] = []
 
     # 1. identity check
+    # 0. collection / tool error
+    if facts.collection_error:
+        reasons.append("collection_error")
+        candidate_statuses.append("UNVERIFIABLE")
+
     if facts.identity_status != "UNIQUE":
         reason = (
             "target_not_found"

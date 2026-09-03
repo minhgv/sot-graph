@@ -7,13 +7,13 @@ No fake callgraph/trace advertising without verified call edges.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
-
 from sot_graph.importer.scip import (
-    ROLE_DEFINITION,
     parse_scip_json,
     parse_scip_protobuf,
     parse_scip_symbol,
@@ -31,7 +31,31 @@ from sot_graph.providers.base import (
 )
 
 PROVIDER_NAME = "scip"
-SCIP_DEFAULT_ARTIFACTS = ("index.scip", os.path.join(".scip", "index.scip"))
+SCIP_DEFAULT_ARTIFACTS = (
+    "index.scip",
+    "index.scip.json",
+    "scip.json",
+    os.path.join(".scip", "index.scip"),
+    os.path.join(".scip", "index.scip.json"),
+)
+
+SCIP_KIND_MAP: Dict[int, str] = {
+    0: "unknown", 1: "file", 2: "module", 3: "namespace", 4: "package",
+    5: "class", 6: "method", 7: "property", 8: "field", 9: "constructor",
+    10: "enum", 11: "interface", 12: "function", 13: "variable", 14: "constant",
+    15: "string", 16: "number", 17: "boolean", 18: "array", 19: "object",
+    20: "key", 21: "null", 22: "enum_member", 23: "struct", 24: "event",
+    25: "operator", 26: "type_parameter", 27: "type_alias", 28: "macro",
+    29: "trait",
+}
+
+
+def _normalize_scip_kind(raw_kind: Any) -> str:
+    if isinstance(raw_kind, int):
+        return SCIP_KIND_MAP.get(raw_kind, "symbol")
+    if isinstance(raw_kind, str) and raw_kind:
+        return raw_kind.lower()
+    return "symbol"
 
 
 class ScipProvider:
@@ -39,22 +63,109 @@ class ScipProvider:
 
     name: str = PROVIDER_NAME
     provider_version: str = "1.0.0"
-    # Explicit honest capabilities: NO trace/callgraph without verified call graph
     capabilities: Tuple[str, ...] = ("symbols", "usages", "references", "source-verification")
 
-    def __init__(self, index_path: Optional[str] = None):
+    def __init__(self, index_path: Optional[str] = None, db: Optional[Any] = None):
         self.index_path = index_path
+        self.db = db
 
+    def _persist_outcome(
+        self,
+        capability: str,
+        status: str,
+        exit_code: int,
+        duration_ms: int,
+        repo_root: str,
+        results: List[Dict[str, Any]],
+        error: Optional[str] = None,
+        arguments: Optional[Dict[str, Any]] = None,
+    ) -> ProviderRunRecord:
+        run_id = f"scip_{capability}_{uuid.uuid4().hex[:8]}"
+        record = ProviderRunRecord(
+            run_id=run_id,
+            provider_name=self.name,
+            provider_version=self.provider_version,
+            capability=capability,
+            status=status,
+            exit_code=exit_code,
+            duration_ms=duration_ms,
+            detail=error or "",
+        )
+        if self.db is not None:
+            cmd_payload = json.dumps(arguments or {"capability": capability}, sort_keys=True)
+            cmd_digest = hashlib.sha256(f"{self.name}:{capability}:{cmd_payload}".encode("utf-8")).hexdigest()
+            run_kwargs = {
+                "run_id": run_id,
+                "provider_name": self.name,
+                "provider_version": self.provider_version,
+                "capability": capability,
+                "status": status,
+                "exit_code": exit_code,
+                "duration_ms": duration_ms,
+                "project_root": repo_root,
+                "position_encoding": "UTF-8",
+                "arguments_json": cmd_payload,
+                "command_digest": cmd_digest,
+            }
+            evidence_items = []
+            if status == "ok":
+                for sym in results:
+                    span = sym.get("span") or {}
+                    evidence_items.append({
+                        "path": sym.get("path") or "",
+                        "symbol": sym.get("qualified_name") or sym.get("name") or "",
+                        "target_symbol": None,
+                        "relation": "definition" if sym.get("is_definition") else "reference",
+                        "start_line": span.get("start_line"),
+                        "line_start": span.get("start_line"),
+                        "start_column": span.get("start_column"),
+                        "col_start": span.get("start_column"),
+                        "end_line": span.get("end_line"),
+                        "line_end": span.get("end_line"),
+                        "end_column": span.get("end_column"),
+                        "col_end": span.get("end_column"),
+                        "confidence": 1.0,
+                        "metadata_json": {
+                            "kind": sym.get("kind"),
+                            "symbol": sym.get("symbol"),
+                        },
+                    })
+            atomic = getattr(self.db, "record_provider_outcome", None)
+            try:
+                if atomic is not None:
+                    atomic(run_kwargs, None, evidence_items)
+                else:
+                    if hasattr(self.db, "record_provider_run"):
+                        self.db.record_provider_run(**run_kwargs)
+                    if hasattr(self.db, "record_provider_evidence") and evidence_items:
+                        self.db.record_provider_evidence(run_id, evidence_items)
+            except Exception:
+                pass
+        return record
     def _find_index_file(self, repo_root: str) -> Optional[str]:
+        canonical_root = os.path.realpath(repo_root)
         if self.index_path:
             p = os.path.join(repo_root, self.index_path) if not os.path.isabs(self.index_path) else self.index_path
-            return p if os.path.isfile(p) else None
+            if os.path.isfile(p):
+                real_p = os.path.realpath(p)
+                try:
+                    is_inside = os.path.commonpath([canonical_root, real_p]) == canonical_root
+                except ValueError:
+                    is_inside = False
+                if is_inside:
+                    return real_p
+            return None
         for candidate in SCIP_DEFAULT_ARTIFACTS:
             p = os.path.join(repo_root, candidate)
             if os.path.isfile(p):
-                return p
+                real_p = os.path.realpath(p)
+                try:
+                    is_inside = os.path.commonpath([canonical_root, real_p]) == canonical_root
+                except ValueError:
+                    is_inside = False
+                if is_inside:
+                    return real_p
         return None
-
     def _parse_index(self, file_path: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
         with open(file_path, "rb") as f:
             data = f.read()
@@ -150,37 +261,51 @@ class ScipProvider:
                             "qualified_name": fqn,
                             "symbol": raw_sym,
                             "path": rel_path,
-                            "kind": sym.get("kind", "symbol"),
+                            "kind": _normalize_scip_kind(sym.get("kind")),
                             "is_definition": True,
                             "documentation": sym.get("documentation", []),
                         })
-                        if len(results) >= request.limit:
+                        if request.limit and len(results) > request.limit:
                             break
-                if len(results) >= request.limit:
+                if request.limit and len(results) > request.limit:
                     break
 
+            if request.limit and len(results) > request.limit:
+                truncated = True
+                results = results[:request.limit]
+            else:
+                truncated = False
             duration_ms = int((time.monotonic() - start_t) * 1000)
-            run = ProviderRunRecord(
-                run_id=f"scip_search_{uuid.uuid4().hex[:8]}",
-                provider_name=self.name,
-                provider_version=self.provider_version,
+            run = self._persist_outcome(
                 capability="symbols",
                 status="ok",
                 exit_code=0,
                 duration_ms=duration_ms,
+                repo_root=request.repo_root,
+                results=results,
+                arguments={"query": request.query, "limit": request.limit},
             )
-            return QueryOutcome(ok=True, run=run, payload={"symbols": results, "count": len(results)})
+            return QueryOutcome(
+                ok=True,
+                run=run,
+                payload={
+                    "symbols": results,
+                    "count": len(results),
+                    "truncated": truncated,
+                    "has_more": truncated,
+                },
+            )
         except Exception as exc:
             duration_ms = int((time.monotonic() - start_t) * 1000)
-            run = ProviderRunRecord(
-                run_id=f"scip_search_{uuid.uuid4().hex[:8]}",
-                provider_name=self.name,
-                provider_version=self.provider_version,
+            run = self._persist_outcome(
                 capability="symbols",
                 status="error",
                 exit_code=1,
                 duration_ms=duration_ms,
-                detail=str(exc),
+                repo_root=request.repo_root,
+                results=[],
+                error=str(exc),
+                arguments={"query": request.query, "limit": request.limit},
             )
             return QueryOutcome(ok=False, run=run, error=str(exc))
 
@@ -205,6 +330,7 @@ class ScipProvider:
             _, documents = self._parse_index(index_file)
             results: List[Dict[str, Any]] = []
             query_lower = request.query.lower()
+            truncated = False
 
             for doc in documents:
                 rel_path = doc.get("relative_path", "")
@@ -215,55 +341,75 @@ class ScipProvider:
                     fqn = parsed.get("fqn") or bare_name
                     if query_lower in bare_name.lower() or query_lower in fqn.lower() or query_lower in raw_sym.lower():
                         roles = occ.get("symbol_roles", 0)
-                        is_def = bool(roles & ROLE_DEFINITION)
-                        rng = occ.get("range", [])
+                        # SCIP symbol_roles bit 0 (0x1) is Definition
+                        is_def = bool(roles & 1)
                         span = None
-                        if rng and len(rng) >= 3:
-                            # [start_line, start_col, end_line, end_col] or [start_line, start_col, end_col]
-                            if len(rng) == 4:
-                                span = {"start_line": rng[0] + 1, "end_line": rng[2] + 1}
-                            else:
-                                span = {"start_line": rng[0] + 1, "end_line": rng[0] + 1}
-                        elif rng and len(rng) >= 1:
-                            span = {"start_line": rng[0] + 1, "end_line": rng[0] + 1}
-
+                        r = occ.get("range", [])
+                        if len(r) == 3:
+                            span = {
+                                "start_line": r[0] + 1,
+                                "start_column": r[1] + 1,
+                                "end_line": r[0] + 1,
+                                "end_column": r[2] + 1,
+                            }
+                        elif len(r) >= 4:
+                            span = {
+                                "start_line": r[0] + 1,
+                                "start_column": r[1] + 1,
+                                "end_line": r[2] + 1,
+                                "end_column": r[3] + 1,
+                            }
                         results.append({
                             "name": bare_name,
                             "qualified_name": fqn,
                             "symbol": raw_sym,
                             "path": rel_path,
-                            "span": span,
+                            "kind": "definition" if is_def else "reference",
                             "is_definition": is_def,
-                            "relation": "defines" if is_def else "references",
-                            "syntax_kind": occ.get("syntax_kind", 0),
+                            "span": span,
                         })
-                        if len(results) >= request.limit:
+                        if request.limit and len(results) > request.limit:
                             break
-                if len(results) >= request.limit:
+                if request.limit and len(results) > request.limit:
                     break
 
+            if request.limit and len(results) > request.limit:
+                truncated = True
+                results = results[:request.limit]
+            else:
+                truncated = False
+
             duration_ms = int((time.monotonic() - start_t) * 1000)
-            run = ProviderRunRecord(
-                run_id=f"scip_usages_{uuid.uuid4().hex[:8]}",
-                provider_name=self.name,
-                provider_version=self.provider_version,
+            run = self._persist_outcome(
                 capability="usages",
                 status="ok",
                 exit_code=0,
                 duration_ms=duration_ms,
+                repo_root=request.repo_root,
+                results=results,
+                arguments={"query": request.query, "limit": request.limit},
             )
-            return QueryOutcome(ok=True, run=run, payload={"symbols": results, "count": len(results)})
+            return QueryOutcome(
+                ok=True,
+                run=run,
+                payload={
+                    "symbols": results,
+                    "count": len(results),
+                    "truncated": truncated,
+                    "has_more": truncated,
+                },
+            )
         except Exception as exc:
             duration_ms = int((time.monotonic() - start_t) * 1000)
-            run = ProviderRunRecord(
-                run_id=f"scip_usages_{uuid.uuid4().hex[:8]}",
-                provider_name=self.name,
-                provider_version=self.provider_version,
+            run = self._persist_outcome(
                 capability="usages",
                 status="error",
                 exit_code=1,
                 duration_ms=duration_ms,
-                detail=str(exc),
+                repo_root=request.repo_root,
+                results=[],
+                error=str(exc),
+                arguments={"query": request.query, "limit": request.limit},
             )
             return QueryOutcome(ok=False, run=run, error=str(exc))
 

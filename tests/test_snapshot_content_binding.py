@@ -107,19 +107,20 @@ class TestScopeDigestContentBinding:
 
 # --------------------------------------------- Contract 4: fail-closed ledger union
 
-def _seed_union_db(db: Database, rows: list[dict]) -> None:
+def _seed_union_db(db: Database, rows: list[dict], project_root: Optional[str] = None) -> None:
     """Insert ok runs + evidence rows.
 
-    Row keys: provider, path, src, snap, dst, l1, l2, invalidated.
+    Row keys: provider, path, src, snap, dst, l1, l2, invalidated, project_root.
     """
     with db.conn:
         for i, r in enumerate(rows):
             rid = f"run_seed_{i}"
+            proj_root = r.get("project_root") or project_root
             db.conn.execute(
                 "INSERT OR REPLACE INTO provider_runs "
-                "(id, provider_name, capability, status, created_at) "
-                "VALUES (?,?,?,?,1)",
-                (rid, r["provider"], "trace_path", "ok"),
+                "(id, provider_name, capability, status, created_at, project_root) "
+                "VALUES (?,?,?,?,1,?)",
+                (rid, r["provider"], "trace_path", "ok", proj_root),
             )
             db.conn.execute(
                 "INSERT OR REPLACE INTO provider_evidence "
@@ -162,7 +163,7 @@ class TestFailClosedUnion:
             _seed_union_db(db, [{
                 "provider": "cbm", "path": "app.py", "src": "run_1",
                 "snap": "s1", "l1": 1, "l2": 2,
-            }])
+            }], project_root=union_repo)
             out = union_evidence(db, union_repo)
             entry = _by_src(out, "run_1")
             assert entry["status"] == "SUPPORTED"
@@ -182,7 +183,7 @@ class TestFailClosedUnion:
                 # NULL snapshot hash
                 {"provider": "scip", "path": "app.py", "src": "run_2",
                  "snap": None, "l1": 1, "l2": 2},
-            ])
+            ], project_root=union_repo)
             out = union_evidence(db, union_repo)
             e1 = _by_src(out, "run_1")
             e2 = _by_src(out, "run_2")
@@ -198,7 +199,7 @@ class TestFailClosedUnion:
             _seed_union_db(db, [{
                 "provider": "cbm", "path": "", "src": "run_1",
                 "snap": "s1", "l1": 1, "l2": 2,
-            }])
+            }], project_root=union_repo)
             out = union_evidence(db, union_repo)
             assert _by_src(out, "run_1")["status"] == "UNBOUND"
         finally:
@@ -211,7 +212,7 @@ class TestFailClosedUnion:
             _seed_union_db(db, [{
                 "provider": "cbm", "path": "app.py", "src": "ghost_fn",
                 "snap": "s1", "l1": 1, "l2": 2,
-            }])
+            }], project_root=union_repo)
             out = union_evidence(db, union_repo)
             entry = _by_src(out, "ghost_fn")
             assert entry["status"] == "UNVERIFIED"
@@ -225,7 +226,7 @@ class TestFailClosedUnion:
             _seed_union_db(db, [{
                 "provider": "cbm", "path": "app.py", "src": "run_1",
                 "snap": "s1", "l1": None, "l2": None,
-            }])
+            }], project_root=union_repo)
             out = union_evidence(db, union_repo)
             entry = _by_src(out, "run_1")
             assert entry["status"] == "UNVERIFIED"
@@ -240,7 +241,7 @@ class TestFailClosedUnion:
             _seed_union_db(db, [{
                 "provider": "cbm", "path": "app.py", "src": "run_1",
                 "snap": "s1", "l1": 1, "l2": 2,
-            }])
+            }], project_root=union_repo)
             out = union_evidence(db, union_repo, verify_spans=False)
             entry = _by_src(out, "run_1")
             assert entry["status"] == "UNVERIFIED"
@@ -256,7 +257,7 @@ class TestFailClosedUnion:
                  "snap": "s1", "l1": 1, "l2": 2},
                 {"provider": "scip", "path": "app.py", "src": "run_1",
                  "snap": "s1", "l1": 1, "l2": 2},
-            ])
+            ], project_root=union_repo)
             n = db.invalidate_provider_evidence(["ev_seed_1"])
             assert n == 1
             out = union_evidence(db, union_repo)

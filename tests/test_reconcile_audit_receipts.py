@@ -62,6 +62,15 @@ class TestReconcileAndAuditReceipts:
         assert len(receipt["digest"]) == 64
         assert "assurance" in receipt
         assert receipt["collection_errors"] == []
+        assert "stale_files" in receipt
+        assert isinstance(receipt["stale_files"], list)
+        assert "coverage" in receipt
+        assert "gaps" in receipt["coverage"]
+        assert isinstance(receipt["coverage"]["gaps"], list)
+        assert "scope_manifest" in receipt
+        assert "snapshot" in receipt
+        assert "assurance_facts" in receipt
+        assert receipt["assurance"]["status"] == "ASSURED_WITHIN_SCOPE"
 
     def test_audit_receipt_collection_error_fails_closed(self, tmp_path):
         db = MagicMock()
@@ -72,3 +81,22 @@ class TestReconcileAndAuditReceipts:
         assert receipt["kind"] == "audit"
         assert len(receipt["collection_errors"]) > 0
         assert receipt["assurance"]["status"] != "ASSURED_WITHIN_SCOPE"
+    def test_reconcile_result_failed_count_fails_closed(self, sample_repo):
+        db = Database(str(sample_repo / ".sot" / "sot.db"))
+        receipt = reconcile_receipt(
+            db, str(sample_repo),
+            reconcile_result={"reconciled": 2, "failed": 2, "ok": False}
+        )
+        assert receipt["kind"] == "reconcile"
+        assert receipt["assurance"]["status"] != "ASSURED_WITHIN_SCOPE"
+        assert any("reconcile_failed" in err for err in receipt["collection_errors"])
+
+    def test_audit_receipt_doctor_not_ok_fails_closed(self, sample_repo):
+        db = Database(str(sample_repo / ".sot" / "sot.db"))
+        receipt = audit_receipt(
+            db, str(sample_repo),
+            doctor_report={"ok": False, "errors": ["Foreign key integrity check failed"]}
+        )
+        assert receipt["kind"] == "audit"
+        assert receipt["assurance"]["status"] != "ASSURED_WITHIN_SCOPE"
+        assert any("doctor_integrity_failed" in err for err in receipt["collection_errors"])

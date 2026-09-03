@@ -145,7 +145,7 @@ class TestCliQueryPersistsLedger:
         try:
             runs = db.conn.execute(
                 "SELECT capability, status, snapshot_hash FROM provider_runs "
-                "WHERE capability IN ('trace_path','search_graph') "
+                "WHERE capability IN ('trace_path','search_graph', 'usages', 'trace', 'symbols') "
                 "ORDER BY created_at DESC LIMIT 5"
             ).fetchall()
             assert runs, "no query run recorded in ledger"

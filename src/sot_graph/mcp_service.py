@@ -19,12 +19,38 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, cast
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import quote
 
 from sot_graph.analytics.graph import OperationCancelledError
 from sot_graph.db import Database
 from sot_graph.verifier import TrustVerifier, tokenize
 from sot_graph.assurance import assured_query_context
+
+def sanitize_transport_value(value: Any) -> Any:
+    """Recursively sanitize strings containing lone surrogates so they are transport-safe.
+
+    Surrogate characters (e.g. from surrogateescape non-UTF8 paths or unpartnered high/low
+    surrogates U+D800–U+DFFF) are converted into reversible backslash-escaped representation
+    so Pydantic and MCP stdio transports can serialize them without UnicodeEncodeError or
+    PydanticSerializationError.
+    """
+    if isinstance(value, str):
+        try:
+            value.encode("utf-8")
+            return value
+        except UnicodeEncodeError:
+            try:
+                return value.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="backslashreplace")
+            except UnicodeEncodeError:
+                return value.encode("utf-8", errors="backslashreplace").decode("utf-8", errors="replace")
+    elif isinstance(value, dict):
+        return {sanitize_transport_value(k): sanitize_transport_value(v) for k, v in value.items()}
+    elif isinstance(value, list):
+        return [sanitize_transport_value(item) for item in value]
+    elif isinstance(value, tuple):
+        return tuple(sanitize_transport_value(item) for item in value)
+    return value
+
 
 class McpServiceError(Exception):
     """Stable public error with a machine-readable code."""
@@ -32,10 +58,11 @@ class McpServiceError(Exception):
     def __init__(self, code: str, message: str):
         self.code = code
         self.message = message
-        super().__init__(message)
+        super().__init__(f"{code}: {message}")
 
     def as_dict(self) -> Dict[str, str]:
         return {"code": self.code, "message": self.message}
+
 
 def resolve_and_validate_output_path(
     project_root: str,
@@ -237,9 +264,8 @@ class McpService:
     def _run(self, operation: Any) -> Any:
         conn = self._connection()
         try:
-            return operation(conn)
-        except McpServiceError:
-            raise
+            res = operation(conn)
+            return sanitize_transport_value(res)
         except OperationCancelledError as exc:
             raise McpServiceError("cancelled", str(exc)) from exc
         except sqlite3.OperationalError as exc:
@@ -300,10 +326,10 @@ class McpService:
 
     def _body(self, value: Any) -> str:
         text = str(value or "")
-        raw = text.encode("utf-8")
+        raw = text.encode("utf-8", errors="surrogateescape")
         if len(raw) <= self.limits.body_bytes:
             return text
-        return raw[: self.limits.body_bytes].decode("utf-8", errors="ignore")
+        return raw[: self.limits.body_bytes].decode("utf-8", errors="surrogateescape")
 
     def _coverage_note(self, conn: sqlite3.Connection) -> Dict[str, Any]:
         """P5: honest index-coverage statement for every search reply.
@@ -378,26 +404,76 @@ class McpService:
     def _fits_response(self, value: Any) -> Any:
         # Keep the API JSON-ready while enforcing a hard response ceiling.  A
         # deterministic truncation is preferable to returning an oversized body.
-        import json
+        value = sanitize_transport_value(value)
         encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         if len(encoded) <= self.limits.response_bytes:
             return value
         if isinstance(value, dict):
-            for key in ("results", "drift", "relations"):
-                if not isinstance(value.get(key), list):
-                    continue
-                value = dict(value)
-                items = list(value[key])
-                value[key] = []
-                value["truncated"] = True
-                for item in items:
-                    trial = dict(value)
-                    trial[key] = value[key] + [item]
-                    if len(json.dumps(trial, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > self.limits.response_bytes:
+            import copy
+            from sot_graph.assurance.receipts import receipt_digest
+
+            value = copy.deepcopy(value)
+            # 1. Truncate oversized raw text / markdown fields if present
+            for text_key in ("markdown", "text", "raw"):
+                if isinstance(value.get(text_key), str) and len(value[text_key]) > 8000:
+                    value[text_key] = value[text_key][:4000] + "\n\n... [truncated to fit response limit]"
+                    value["truncated"] = True
+                    if "digest" in value:
+                        value["digest"] = receipt_digest({k: v for k, v in value.items() if k != "digest"})
+                    encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                    if len(encoded) <= self.limits.response_bytes:
+                        return value
+
+            list_keys = [
+                "caller_impacts", "test_impacts", "direct_nodes", "api_impacts",
+                "invalidated_evidence", "results", "drift", "relations",
+                "nodes", "edges", "changed_files", "commits", "timeline",
+                "impacted", "affected_tests", "affected_files", "candidate_tests",
+                "callers", "callees", "transitive", "runs", "hunks", "stale_files",
+                "quarantined_files", "unsupported_constructs", "parser_error_files"
+            ]
+
+            # Inspect top-level dict and nested containers like 'result'
+            dicts_to_inspect = [value]
+            if isinstance(value.get("result"), dict):
+                dicts_to_inspect.append(value["result"])
+
+            # Phase 1: Progressive list emptying until base envelope fits
+            stored_items: Dict[Tuple[int, str], Tuple[Dict[str, Any], str, List[Any]]] = {}
+            for d in dicts_to_inspect:
+                for k in list_keys:
+                    if isinstance(d.get(k), list) and d[k]:
+                        stored_items[(id(d), k)] = (d, k, list(d[k]))
+                        d[k] = []
+                        value["truncated"] = True
+                        if "digest" in value:
+                            value["digest"] = receipt_digest({k2: v2 for k2, v2 in value.items() if k2 != "digest"})
+                        enc = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                        if len(enc) <= self.limits.response_bytes:
+                            break
+                if len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= self.limits.response_bytes:
+                    break
+
+            # Phase 2: Refill items progressively under the byte ceiling
+            for (d_id, k), (d, key, items) in stored_items.items():
+                for it in items:
+                    d[key].append(it)
+                    if "digest" in value:
+                        value["digest"] = receipt_digest({k2: v2 for k2, v2 in value.items() if k2 != "digest"})
+                    if len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > self.limits.response_bytes:
+                        d[key].pop()
+                        if "digest" in value:
+                            value["digest"] = receipt_digest({k2: v2 for k2, v2 in value.items() if k2 != "digest"})
                         break
-                    value[key].append(item)
-                if key == "results":
-                    value["returned"] = len(value[key])
+
+            if "results" in value and isinstance(value.get("results"), list) and "returned" in value:
+                value["returned"] = len(value["results"])
+
+            if "digest" in value:
+                value["digest"] = receipt_digest({k: v for k, v in value.items() if k != "digest"})
+
+            encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            if len(encoded) <= self.limits.response_bytes:
                 return value
 
         raise McpServiceError("response_too_large", "response exceeds configured size limit")
@@ -581,9 +657,10 @@ class McpService:
             hop1_count = sum(1 for r in relations if r.get("hop") == 1)
             hop2_count = sum(1 for r in relations if r.get("hop", 0) > 1)
             view = cast(Database, _ConnView(conn))
+            cited_nodes = [p for p in [node.get("path")] + [r.get("path") for r in relations] if isinstance(p, str)]
             snapshot, stale = assured_query_context(
                 view, self.project_root,
-                [node.get("path")] + [r.get("path") for r in relations if r.get("path")],
+                cited_nodes,
                 mark_ledger=False,  # read-only connection: detect, never write
             )
             return self._fits_response({
@@ -767,7 +844,7 @@ class McpService:
             ).fetchone()
             return {"generation": row[0], "paths": row[1], "providers": self._providers(conn)}
         return self._run(op)
-    def _node_dict(self, row: Mapping[str, Any]) -> Dict[str, Any]:
+    def _node_dict(self, row: Any) -> Dict[str, Any]:
         return {"id": row["id"], "path": self._relative_path(row["path"]), "kind": row["kind"], "symbol": row["symbol"], "label": row["label"], "body": self._body(row["body"]), "keywords": row["keywords"], "line": row["line_start"]}
 
     def node(self, node_id: str) -> Dict[str, Any]:
@@ -818,7 +895,7 @@ class McpService:
     def stats(self) -> Dict[str, Any]:
         def op(conn: sqlite3.Connection) -> Dict[str, Any]:
             counts = {"paths": "file_journal", "nodes": "graph_nodes", "edges": "graph_edges", "pending": "pending_edges"}
-            res = {key: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]) for key, table in counts.items()}
+            res: Dict[str, Any] = {key: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]) for key, table in counts.items()}
             res["providers"] = self._providers(conn)
             return res
         return self._run(op)
@@ -875,12 +952,12 @@ class McpService:
             ]
             surprises = [
                 {
-                    "source_id": s.source_id,
-                    "target_id": s.target_id,
+                    "source_id": s.src_id,
+                    "target_id": s.dst_id,
                     "relation": s.relation,
-                    "source_community": s.source_community,
-                    "target_community": s.target_community,
-                    "explanation": s.explanation,
+                    "source_community": s.src_community,
+                    "target_community": s.dst_community,
+                    "explanation": s.description,
                 }
                 for s in analysis.surprising_connections
             ]
@@ -1165,10 +1242,10 @@ class McpService:
             for key in ("changed_files", "impacted", "affected_tests"):
                 entries = result_dict.get(key)
                 if isinstance(entries, list):
-                    cited.extend(
-                        e.get("path") if isinstance(e, dict) else str(e)
-                        for e in entries
-                    )
+                    for e in entries:
+                        p = e.get("path") if isinstance(e, dict) else str(e)
+                        if p and isinstance(p, str):
+                            cited.append(p)
             snapshot, stale = assured_query_context(
                 view, self.project_root, cited,
                 mark_ledger=False,  # read-only connection: detect, never write

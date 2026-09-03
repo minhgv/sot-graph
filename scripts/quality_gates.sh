@@ -11,22 +11,35 @@ fail() { echo "❌ gate failed: $1" >&2; exit 1; }
 
 echo "== ruff (core modules)"
 uv run ruff check src/sot_graph/assurance/ src/sot_graph/providers/ \
-    src/sot_graph/diff_impact.py src/sot_graph/db.py \
+    src/sot_graph/diff_impact.py src/sot_graph/db.py src/sot_graph/snapshot.py \
+    src/sot_graph/providers_registry.py src/sot_graph/mcp_service.py src/sot_graph/mcp_server.py \
     || fail "ruff"
 
 echo "== pyright (core modules)"
 uv run pyright src/sot_graph/assurance/ src/sot_graph/providers/ \
-    src/sot_graph/diff_impact.py src/sot_graph/db.py \
+    src/sot_graph/diff_impact.py src/sot_graph/db.py src/sot_graph/snapshot.py \
+    src/sot_graph/providers_registry.py src/sot_graph/mcp_service.py src/sot_graph/mcp_server.py \
     || fail "pyright"
 
 echo "== coverage floor (core >= 85%, receipts >= 90%)"
-"$PY" -m coverage run --source=src/sot_graph/assurance,src/sot_graph/providers,src/sot_graph/diff_impact,src/sot_graph/db -m pytest -q >/dev/null
-CORE=$("$PY" -m coverage report 2>/dev/null | awk '/^TOTAL/ {print $4+0}')
-REC=$("$PY" -m coverage report 2>/dev/null | awk '/receipts.py/ {print $4+0}')
+COVERAGE_INCLUDES="src/sot_graph/assurance/*,src/sot_graph/providers/*,src/sot_graph/diff_impact.py,src/sot_graph/db.py,src/sot_graph/snapshot.py,src/sot_graph/providers_registry.py,src/sot_graph/mcp_service.py,src/sot_graph/mcp_server.py"
+
+uv run coverage run --source=src/sot_graph \
+    --include="$COVERAGE_INCLUDES" \
+    -m pytest tests/ -q >/dev/null 2>&1
+
+REPORT=$(uv run coverage report --include="$COVERAGE_INCLUDES")
+echo "$REPORT"
+
+for f in "assurance/receipts.py" "assurance/coverage.py" "assurance/state.py" "assurance/routing.py" "assurance/orchestrator.py" "providers/scip.py" "diff_impact.py" "db.py" "snapshot.py" "providers_registry.py" "mcp_service.py" "mcp_server.py"; do
+    echo "$REPORT" | grep -q "$f" || fail "expected module $f missing from coverage data"
+done
+
+CORE=$(echo "$REPORT" | awk '/^TOTAL/ {print $4+0}')
+REC=$(echo "$REPORT" | awk '/receipts\.py/ {print $4+0}')
 echo "core=${CORE}% receipts=${REC}%"
 [ "$CORE" -ge 85 ] || fail "core coverage ${CORE}% < 85%"
 [ "$REC" -ge 90 ] || fail "receipts coverage ${REC}% < 90%"
-
 echo "== bandit (reviewed config: bandit.yaml)"
 uvx bandit -q -c bandit.yaml -r src/sot_graph || fail "bandit"
 

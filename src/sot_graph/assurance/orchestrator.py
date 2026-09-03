@@ -9,7 +9,7 @@ federation result contract.
 from __future__ import annotations
 
 import os
-from typing import Mapping, Optional
+from typing import Any, Mapping, Optional
 
 from .routing import (
     COMMAND_CAPABILITY,
@@ -56,15 +56,14 @@ def federation_plan(provider_spec: Optional[str], root: str, command_kind: str, 
         return plan
 
     cfg = load_config(root)
-    if not cfg.allow_external:
-        msg = "external providers disabled (allow_external=false)"
-        if mode == "require":
-            plan["fail_message"] = f"{msg}: require:{name} fails closed"
-        else:
-            plan["warnings"].append(f"{msg}; using sot-builtin only")
-        return plan
-
     if mode in ("prefer", "require"):
+        if not cfg.allow_external and name != "scip":
+            msg = "external providers disabled (allow_external=false)"
+            if mode == "require":
+                plan["fail_message"] = f"{msg}: require:{name} fails closed"
+            else:
+                plan["warnings"].append(f"{msg}; using sot-builtin only")
+            return plan
         names = [name]
     else:  # auto | all: registry-ranked external providers for this command
         ranked = [
@@ -75,9 +74,14 @@ def federation_plan(provider_spec: Optional[str], root: str, command_kind: str, 
         if mode == "auto":
             names = names[:1]
     if not names:
-        plan["warnings"].append(
-            f"no queryable external provider for '{command_kind}'; using sot-builtin only"
-        )
+        if not cfg.allow_external:
+            plan["warnings"].append(
+                "external providers disabled (allow_external=false); using sot-builtin only"
+            )
+        else:
+            plan["warnings"].append(
+                f"no queryable external provider for '{command_kind}'; using sot-builtin only"
+            )
         return plan
 
     # Probe EVERY ranked queryable provider ('all' keeps the full ranked
@@ -107,7 +111,7 @@ def federation_plan(provider_spec: Optional[str], root: str, command_kind: str, 
                 plan["warnings"].append(f"{msg}; using sot-builtin only")
             continue
         if target == "scip":
-            provider = ScipProvider()
+            provider = ScipProvider(db=db)
         else:
             provider = CodebaseMemoryProvider(config=pcfg, db=db)
         st = provider.probe(root)
@@ -121,6 +125,11 @@ def federation_plan(provider_spec: Optional[str], root: str, command_kind: str, 
                 plan["fail_message"] = f"{msg}: failing closed"
             else:
                 plan["warnings"].append(f"{msg}; using sot-builtin only")
+            continue
+        req_cap = COMMAND_CAPABILITY.get(command_kind)
+        if mode == "require" and req_cap and not supports_capability(provider, req_cap):
+            msg = f"provider '{target}' does not support required capability '{req_cap}'"
+            plan["fail_message"] = f"{msg}: failing closed"
             continue
         plan["providers"].append(provider)
         if first_healthy is None:
@@ -140,17 +149,41 @@ def run_federated_query(
     """Invoke the negotiated provider method; returns ``(outcome, method)``."""
     from sot_graph.providers.base import ImpactRequest, SymbolRequest, TraceRequest
 
-    provider = plan["provider"]
+    provider = plan.get("provider")
+    if provider is None:
+        return None, None
+
     if command_kind == "diff-impact":
-        method = "impact" if supports_capability(provider, "impact") else None
-    elif supports_capability(provider, "trace"):
-        method = "trace"
-    elif supports_capability(provider, "search_symbols"):
+        method = "impact" if (supports_capability(provider, "impact") and callable(getattr(provider, "impact", None))) else None
+    elif command_kind == "usages":
+        if supports_capability(provider, "usages") and callable(getattr(provider, "usages", None)):
+            method = "usages"
+        elif supports_capability(provider, "callgraph") and callable(getattr(provider, "trace", None)):
+            method = "trace"
+        elif supports_capability(provider, "trace") and callable(getattr(provider, "trace", None)):
+            method = "trace"
+        else:
+            method = None
+    elif command_kind in ("trace", "explore"):
+        if supports_capability(provider, "trace") and callable(getattr(provider, "trace", None)):
+            method = "trace"
+        elif supports_capability(provider, "callgraph") and callable(getattr(provider, "trace", None)):
+            method = "trace"
+        else:
+            method = None
+    elif command_kind in ("search", "symbols"):
+        if supports_capability(provider, "search_symbols") and callable(getattr(provider, "search_symbols", None)):
+            method = "search_symbols"
+        else:
+            method = None
+    elif supports_capability(provider, "search_symbols") and callable(getattr(provider, "search_symbols", None)):
         method = "search_symbols"
     else:
         method = None
     if method is None:
         return None, None
+
+    outcome: Any = None
     if method == "impact":
         # P3.1: the wire tool diffs git refs; ``symbol`` carries the SOT
         # diff target (e.g. HEAD~1) and staged/working-tree scopes surface
@@ -159,14 +192,15 @@ def run_federated_query(
             repo_root=root, path=root, since=symbol,
             depth=depth, staged=staged, working_tree=working_tree,
         ))
+    elif method == "usages":
+        outcome = provider.usages(SymbolRequest(repo_root=root, query=symbol))
     elif method == "trace":
         outcome = provider.trace(TraceRequest(repo_root=root, symbol=symbol))
-    else:
+    elif method == "search_symbols":
         outcome = provider.search_symbols(
             SymbolRequest(repo_root=root, query=symbol)
         )
     return outcome, method
-
 
 def _span_from_lines(value) -> Optional[tuple[int, int]]:
     """Wire ``lines`` cell (``"38-54"``) -> ``(start, end)``; None on drift."""
@@ -407,16 +441,41 @@ def cbm_candidates_from_outcome(outcome, method: str, provider_name: str,
             cand["strategy"] = edge["strategy"]
             cand["confidence"] = edge["confidence"]
             candidates.append(cand)
-        return candidates, truncated, None
+        return candidates, truncated or bool(payload.get("has_more")), None
 
+    if "symbols" in payload and isinstance(payload["symbols"], list):
+        for sym in payload["symbols"]:
+            if not isinstance(sym, dict):
+                continue
+            raw = {
+                "qualified_name": sym.get("qualified_name") or sym.get("name") or "",
+                "kind": sym.get("kind", "symbol"),
+                "path": sym.get("path"),
+            }
+            if sym.get("span"):
+                raw["span"] = sym["span"]
+            relation = sym.get("relation") or ("define" if sym.get("is_definition") else "references")
+            assertion = normalize_assertion(
+                raw_subject=raw,
+                provider_relation=relation,
+                targets=(raw["qualified_name"],),
+                snapshot_bound=False,
+                version_compatibility=version_compatibility,
+            )
+            cand = _finish(assertion)
+            cand["provider_relation"] = relation
+            candidates.append(cand)
+        is_trunc = truncated or bool(payload.get("truncated") or payload.get("has_more"))
+        return candidates, is_trunc, None
     rows, has_more, drift = search_rows_from_payload(payload)
     if drift:
         return candidates, True, (
             f"{provider_name} search payload missing valid cols/rows; abstaining"
         )
     for row in rows:
-        raw: dict = {
-            "qualified_name": row["qualified_name"], "kind": row["kind"],
+        raw = {
+            "qualified_name": row["qualified_name"],
+            "kind": row["kind"],
             "path": row["path"],
         }
         if row["start_line"] is not None:
@@ -617,8 +676,17 @@ def federated_extras(
             "queried": bool(outcome is not None and outcome.ok), "method": method,
         }
         if outcome is None:
-            gaps.append("capability negotiation found no invocable CBM method")
+            gaps.append(f"{pname}: capability negotiation found no invocable method for '{command_kind}'")
             cov["error"] = "no invocable method"
+            if plan["mode"] == "require":
+                plan["fail_message"] = result["fail_message"] = (
+                    f"require:{pname}: no invocable method for '{command_kind}'; failing closed"
+                )
+                coverage[pname] = cov
+                break
+            result["warnings"].append(
+                f"{pname}: no invocable method for '{command_kind}'; using sot-builtin only"
+            )
         elif not outcome.ok:
             cov["error"] = outcome.error
             if outcome.next_action:
