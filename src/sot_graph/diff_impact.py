@@ -429,12 +429,17 @@ class GitDeltaExtractor:
                 norm_file = active_file.replace("\\", "/") if os.sep == "\\" else active_file
                 if norm_file.startswith("./"):
                     norm_file = norm_file[2:]
-                # Calculate modified interval
+                # Calculate modified interval. The AST coordinate mapper
+                # intersects intervals against the PRE-change graph (old
+                # line spans), so a deletion-only hunk must use its OLD-side
+                # coordinates. Using new_start here previously mapped a
+                # whole-file deletion (`@@ -1,N +0,0 @@`) to the empty
+                # interval (0, 0), hiding every deleted symbol from the
+                # blast radius (file deletion reported zero impact).
                 if new_count > 0:
                     interval = (new_start, new_start + new_count - 1)
                 else:
-                    # Deletion only at new_start
-                    interval = (new_start, new_start)
+                    interval = (old_start, max(old_start, old_start + old_count - 1))
 
                 hunk = DiffHunk(
                     file_path=norm_file,

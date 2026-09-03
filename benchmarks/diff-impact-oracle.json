@@ -1,0 +1,416 @@
+{
+  "benchmark": "diff-impact-oracle",
+  "config": {
+    "depth": 4,
+    "diff": "git -U0",
+    "engine_relations": [
+      "calls",
+      "extends",
+      "implements",
+      "uses",
+      "imports"
+    ],
+    "mode": "working_tree"
+  },
+  "corpus": {
+    "digest": "7b5830896155252402efd477c41e732d0b165e917312939428df67b945647a60",
+    "files": 9,
+    "planted_edges": 9,
+    "scenarios": 6
+  },
+  "environment": {
+    "cpu_count": 10,
+    "machine": "arm64",
+    "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+    "python": "3.14.6",
+    "sqlite": "3.53.3"
+  },
+  "gates": {
+    "passed": true,
+    "rationale": "Thresholds were fixed ONCE from the first measured run on the planted corpus (macro symbol F1 1.00, macro test F1 1.00, macro F1 1.00, files exact 1.00 \u2014 after the R3 deletion-interval fix in diff_impact.py; before that fix the delete_file scenario scored 0.00 across the board because whole-file deletions mapped to an empty line interval). The 0.95 floor leaves headroom for cross-platform rank/parsing jitter while still failing on any real blast-radius regression, including a reintroduction of the deletion bug. The planted corpus is small by design; its purpose is regression detection, not capability claims.",
+    "results": {
+      "files_exact_rate": {
+        "measured": 1.0,
+        "passed": true,
+        "threshold": 0.95
+      },
+      "macro_f1": {
+        "measured": 1.0,
+        "passed": true,
+        "threshold": 0.95
+      },
+      "macro_symbol_f1": {
+        "measured": 1.0,
+        "passed": true,
+        "threshold": 0.95
+      },
+      "macro_test_f1": {
+        "measured": 1.0,
+        "passed": true,
+        "threshold": 0.95
+      }
+    },
+    "thresholds": {
+      "files_exact_rate": 0.95,
+      "macro_f1": 0.95,
+      "macro_symbol_f1": 0.95,
+      "macro_test_f1": 0.95
+    }
+  },
+  "metrics": {
+    "macro": {
+      "files_exact_rate": 1.0,
+      "files_f1": 1.0,
+      "files_precision": 1.0,
+      "files_recall": 1.0,
+      "symbols_f1": 1.0,
+      "symbols_precision": 1.0,
+      "symbols_recall": 1.0,
+      "tests_f1": 1.0,
+      "tests_precision": 1.0,
+      "tests_recall": 1.0
+    },
+    "macro_f1": 1.0,
+    "per_scenario": [
+      {
+        "description": "edit a line inside render_payload's body",
+        "expected": {
+          "callers": [
+            "handle_request",
+            "main_dispatch",
+            "transform_data"
+          ],
+          "direct_symbols": [
+            "render_payload"
+          ],
+          "files": [
+            "src/leaf.py"
+          ],
+          "test_files": [
+            "tests/test_chain.py",
+            "tests/test_render.py"
+          ],
+          "tests": [
+            "test_full_chain",
+            "test_render_payload"
+          ]
+        },
+        "files": {
+          "exact": true,
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0
+        },
+        "predicted": {
+          "callers": [
+            "handle_request",
+            "main_dispatch",
+            "transform_data"
+          ],
+          "direct_symbols": [
+            "render_payload"
+          ],
+          "files": [
+            "src/leaf.py"
+          ],
+          "test_files": [
+            "tests/test_chain.py",
+            "tests/test_render.py"
+          ],
+          "tests": [
+            "test_full_chain",
+            "test_render_payload"
+          ]
+        },
+        "scenario": "modify_body",
+        "symbols": {
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0
+        },
+        "tests": {
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0
+        }
+      },
+      {
+        "description": "rename transform_data to transform_data_v2 (def line only)",
+        "expected": {
+          "callers": [
+            "handle_request",
+            "main_dispatch"
+          ],
+          "direct_symbols": [
+            "transform_data"
+          ],
+          "files": [
+            "src/mid.py"
+          ],
+          "test_files": [
+            "tests/test_chain.py"
+          ],
+          "tests": [
+            "test_full_chain"
+          ]
+        },
+        "files": {
+          "exact": true,
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0
+        },
+        "predicted": {
+          "callers": [
+            "handle_request",
+            "main_dispatch"
+          ],
+          "direct_symbols": [
+            "transform_data"
+          ],
+          "files": [
+            "src/mid.py"
+          ],
+          "test_files": [
+            "tests/test_chain.py"
+          ],
+          "tests": [
+            "test_full_chain"
+          ]
+        },
+        "scenario": "rename_symbol",
+        "symbols": {
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0
+        },
+        "tests": {
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0
+        }
+      },
+      {
+        "description": "delete src/leaf.py from the working tree",
+        "expected": {
+          "callers": [
+            "handle_request",
+            "main_dispatch",
+            "transform_data"
+          ],
+          "direct_symbols": [
+            "render_payload"
+          ],
+          "files": [
+            "src/leaf.py"
+          ],
+          "test_files": [
+            "tests/test_chain.py",
+            "tests/test_render.py"
+          ],
+          "tests": [
+            "test_full_chain",
+            "test_render_payload"
+          ]
+        },
+        "files": {
+          "exact": true,
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0
+        },
+        "predicted": {
+          "callers": [
+            "handle_request",
+            "main_dispatch",
+            "transform_data"
+          ],
+          "direct_symbols": [
+            "render_payload"
+          ],
+          "files": [
+            "src/leaf.py"
+          ],
+          "test_files": [
+            "tests/test_chain.py",
+            "tests/test_render.py"
+          ],
+          "tests": [
+            "test_full_chain",
+            "test_render_payload"
+          ]
+        },
+        "scenario": "delete_file",
+        "symbols": {
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0
+        },
+        "tests": {
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0
+        }
+      },
+      {
+        "description": "add keyword-only retry parameter to handle_request",
+        "expected": {
+          "callers": [
+            "main_dispatch"
+          ],
+          "direct_symbols": [
+            "handle_request"
+          ],
+          "files": [
+            "src/top.py"
+          ],
+          "test_files": [
+            "tests/test_chain.py"
+          ],
+          "tests": [
+            "test_full_chain"
+          ]
+        },
+        "files": {
+          "exact": true,
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0
+        },
+        "predicted": {
+          "callers": [
+            "main_dispatch"
+          ],
+          "direct_symbols": [
+            "handle_request"
+          ],
+          "files": [
+            "src/top.py"
+          ],
+          "test_files": [
+            "tests/test_chain.py"
+          ],
+          "tests": [
+            "test_full_chain"
+          ]
+        },
+        "scenario": "api_signature_change",
+        "symbols": {
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0
+        },
+        "tests": {
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0
+        }
+      },
+      {
+        "description": "edit Notifier.send body (line also intersects the class node)",
+        "expected": {
+          "callers": [
+            "EmailNotifier",
+            "notify_user"
+          ],
+          "direct_symbols": [
+            "Notifier",
+            "Notifier.send"
+          ],
+          "files": [
+            "src/notifier.py"
+          ],
+          "test_files": [
+            "tests/test_alerts.py"
+          ],
+          "tests": [
+            "test_notify_user"
+          ]
+        },
+        "files": {
+          "exact": true,
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0
+        },
+        "predicted": {
+          "callers": [
+            "EmailNotifier",
+            "notify_user"
+          ],
+          "direct_symbols": [
+            "Notifier",
+            "Notifier.send"
+          ],
+          "files": [
+            "src/notifier.py"
+          ],
+          "test_files": [
+            "tests/test_alerts.py"
+          ],
+          "tests": [
+            "test_notify_user"
+          ]
+        },
+        "scenario": "extends_hierarchy",
+        "symbols": {
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0
+        },
+        "tests": {
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0
+        }
+      },
+      {
+        "description": "tighten the assertion inside test_render_payload",
+        "expected": {
+          "callers": [],
+          "direct_symbols": [
+            "test_render_payload"
+          ],
+          "files": [
+            "tests/test_render.py"
+          ],
+          "test_files": [
+            "tests/test_render.py"
+          ],
+          "tests": []
+        },
+        "files": {
+          "exact": true,
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0
+        },
+        "predicted": {
+          "callers": [],
+          "direct_symbols": [
+            "test_render_payload"
+          ],
+          "files": [
+            "tests/test_render.py"
+          ],
+          "test_files": [
+            "tests/test_render.py"
+          ],
+          "tests": []
+        },
+        "scenario": "test_file_edit",
+        "symbols": {
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0
+        },
+        "tests": {
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0
+        }
+      }
+    ]
+  },
+  "schema_version": 1
+}

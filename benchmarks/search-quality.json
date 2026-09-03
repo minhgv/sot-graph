@@ -1,0 +1,1290 @@
+{
+  "benchmark": "search-quality",
+  "config": {
+    "search_path": "search_fts -> TrustVerifier -> P4 rank",
+    "top_k": 10
+  },
+  "corpus": {
+    "classes": {
+      "ambiguous": 12,
+      "exact": 12,
+      "path_qualified": 12,
+      "semantic": 12
+    },
+    "digest": "d82920655f7e9cde828b727ebf079f3f87e1eb6b0e44b2dc6f35bbbf717865a4",
+    "files": 194,
+    "filler": {
+      "files": 150,
+      "generator": "benchmarks.fixtures.generate_fixture",
+      "seed": 20250219
+    },
+    "nodes": 363,
+    "probes": 48
+  },
+  "environment": {
+    "cpu_count": 10,
+    "filler_files": 150,
+    "implementation": "CPython",
+    "machine": "arm64",
+    "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.14.6",
+    "python_executable": "/Users/giapminh79/code/GitHub/sot-graph/.venv/bin/python",
+    "sqlite": "3.53.3",
+    "top_k": 10
+  },
+  "gates": {
+    "passed": true,
+    "rationale": "Thresholds were fixed ONCE, a step below the first measured run on the planted corpus (exact Hit@1 1.00, semantic Hit@5 1.00 with Hit@1 0.75, ambiguous Hit@5 1.00, path_qualified Hit@1 1.00, overall MRR 0.969); the corpus was never tuned to move the numbers. Margins absorb cross-platform BM25 rank jitter (a few probe flips) while still failing on real ranking regressions. The ambiguous margin is the widest because the class is intentionally hostile (one bare name planted in three modules) and targets the 44.4% Hit@5 weakness recorded in the 2026-08-28 reassessment; a fall back below 0.75 trips the gate.",
+    "results": {
+      "ambiguous_hit_at_5": {
+        "measured": 1.0,
+        "passed": true,
+        "threshold": 0.75
+      },
+      "exact_hit_at_1": {
+        "measured": 1.0,
+        "passed": true,
+        "threshold": 0.85
+      },
+      "overall_mrr": {
+        "measured": 0.9688,
+        "passed": true,
+        "threshold": 0.85
+      },
+      "path_qualified_hit_at_1": {
+        "measured": 1.0,
+        "passed": true,
+        "threshold": 0.9
+      },
+      "semantic_hit_at_5": {
+        "measured": 1.0,
+        "passed": true,
+        "threshold": 0.9
+      }
+    },
+    "thresholds": {
+      "ambiguous_hit_at_5": 0.75,
+      "exact_hit_at_1": 0.85,
+      "overall_mrr": 0.85,
+      "path_qualified_hit_at_1": 0.9,
+      "semantic_hit_at_5": 0.9
+    }
+  },
+  "metrics": {
+    "by_class": {
+      "ambiguous": {
+        "hit_at_1": 1.0,
+        "hit_at_10": 1.0,
+        "hit_at_5": 1.0,
+        "mrr": 1.0,
+        "probes": 12
+      },
+      "exact": {
+        "hit_at_1": 1.0,
+        "hit_at_10": 1.0,
+        "hit_at_5": 1.0,
+        "mrr": 1.0,
+        "probes": 12
+      },
+      "path_qualified": {
+        "hit_at_1": 1.0,
+        "hit_at_10": 1.0,
+        "hit_at_5": 1.0,
+        "mrr": 1.0,
+        "probes": 12
+      },
+      "semantic": {
+        "hit_at_1": 0.75,
+        "hit_at_10": 1.0,
+        "hit_at_5": 1.0,
+        "mrr": 0.875,
+        "probes": 12
+      }
+    },
+    "overall": {
+      "hit_at_1": 0.9375,
+      "hit_at_10": 1.0,
+      "hit_at_5": 1.0,
+      "mrr": 0.9688,
+      "probes": 48
+    },
+    "probes": 48,
+    "top_k": 10
+  },
+  "probes": [
+    {
+      "class": "exact",
+      "expected_fqn": "app.pricing.calc_order_total",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "calc_order_total",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.pricing.calc_order_total",
+          "path": "app/pricing.py"
+        },
+        {
+          "fqn": "app.pricing",
+          "path": "app/pricing.py"
+        },
+        {
+          "fqn": "app.pricing.apply_seasonal_discount",
+          "path": "app/pricing.py"
+        }
+      ]
+    },
+    {
+      "class": "exact",
+      "expected_fqn": "app.auth.validate_session_token",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "validate_session_token",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.auth.validate_session_token",
+          "path": "app/auth.py"
+        },
+        {
+          "fqn": "app.auth",
+          "path": "app/auth.py"
+        },
+        {
+          "fqn": "app.session_store.reap_idle_logins",
+          "path": "app/session_store.py"
+        }
+      ]
+    },
+    {
+      "class": "exact",
+      "expected_fqn": "app.inventory.sync_stock_levels",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "sync_stock_levels",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.inventory.sync_stock_levels",
+          "path": "app/inventory.py"
+        },
+        {
+          "fqn": "app.inventory",
+          "path": "app/inventory.py"
+        },
+        {
+          "fqn": "app.git_sync.fetch",
+          "path": "app/git_sync.py"
+        }
+      ]
+    },
+    {
+      "class": "exact",
+      "expected_fqn": "app.shipping.estimate_freight_cost",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "estimate_freight_cost",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.shipping.estimate_freight_cost",
+          "path": "app/shipping.py"
+        },
+        {
+          "fqn": "app.shipping",
+          "path": "app/shipping.py"
+        }
+      ]
+    },
+    {
+      "class": "exact",
+      "expected_fqn": "app.reporting.aggregate_daily_revenue",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "aggregate_daily_revenue",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.reporting.aggregate_daily_revenue",
+          "path": "app/reporting.py"
+        },
+        {
+          "fqn": "app.reporting",
+          "path": "app/reporting.py"
+        },
+        {
+          "fqn": "app.notifications.throttle_push_alerts",
+          "path": "app/notifications.py"
+        }
+      ]
+    },
+    {
+      "class": "exact",
+      "expected_fqn": "app.notifications.schedule_digest_email",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "schedule_digest_email",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.notifications.schedule_digest_email",
+          "path": "app/notifications.py"
+        },
+        {
+          "fqn": "app.notifications",
+          "path": "app/notifications.py"
+        }
+      ]
+    },
+    {
+      "class": "exact",
+      "expected_fqn": "app.pricing.apply_seasonal_discount",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "apply_seasonal_discount",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.pricing.apply_seasonal_discount",
+          "path": "app/pricing.py"
+        },
+        {
+          "fqn": "app.pricing",
+          "path": "app/pricing.py"
+        },
+        {
+          "fqn": "app.pricing.calc_order_total",
+          "path": "app/pricing.py"
+        }
+      ]
+    },
+    {
+      "class": "exact",
+      "expected_fqn": "app.auth.hash_credentials",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "hash_credentials",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.auth.hash_credentials",
+          "path": "app/auth.py"
+        },
+        {
+          "fqn": "app.auth",
+          "path": "app/auth.py"
+        }
+      ]
+    },
+    {
+      "class": "exact",
+      "expected_fqn": "app.inventory.reserve_batch",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "reserve_batch",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.inventory.reserve_batch",
+          "path": "app/inventory.py"
+        },
+        {
+          "fqn": "app.inventory",
+          "path": "app/inventory.py"
+        },
+        {
+          "fqn": "app.streaming.persist_consumer_progress",
+          "path": "app/streaming.py"
+        }
+      ]
+    },
+    {
+      "class": "exact",
+      "expected_fqn": "app.shipping.track_shipment",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "track_shipment",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.shipping.track_shipment",
+          "path": "app/shipping.py"
+        },
+        {
+          "fqn": "app.shipping",
+          "path": "app/shipping.py"
+        },
+        {
+          "fqn": "app.shipping.quotes.quote",
+          "path": "app/shipping/quotes.py"
+        }
+      ]
+    },
+    {
+      "class": "exact",
+      "expected_fqn": "app.reporting.render_sales_csv",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "render_sales_csv",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.reporting.render_sales_csv",
+          "path": "app/reporting.py"
+        },
+        {
+          "fqn": "app.reporting",
+          "path": "app/reporting.py"
+        },
+        {
+          "fqn": "app.notifications.templates.template",
+          "path": "app/notifications/templates.py"
+        }
+      ]
+    },
+    {
+      "class": "exact",
+      "expected_fqn": "app.notifications.throttle_push_alerts",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "throttle_push_alerts",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.notifications.throttle_push_alerts",
+          "path": "app/notifications.py"
+        },
+        {
+          "fqn": "app.notifications",
+          "path": "app/notifications.py"
+        },
+        {
+          "fqn": "app.inventory.sync_stock_levels",
+          "path": "app/inventory.py"
+        }
+      ]
+    },
+    {
+      "class": "semantic",
+      "expected_fqn": "app.resilience.attempt_with_jitter",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "retry backoff policy",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.resilience.attempt_with_jitter",
+          "path": "app/resilience.py"
+        },
+        {
+          "fqn": "app.resilience",
+          "path": "app/resilience.py"
+        },
+        {
+          "fqn": "app.queue_health",
+          "path": "app/queue_health.py"
+        }
+      ]
+    },
+    {
+      "class": "semantic",
+      "expected_fqn": "app.queue_health.quarantine_poison_message",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "dead letter queue",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.queue_health.quarantine_poison_message",
+          "path": "app/queue_health.py"
+        },
+        {
+          "fqn": "app.queue_health",
+          "path": "app/queue_health.py"
+        },
+        {
+          "fqn": "app.jobs.process",
+          "path": "app/jobs.py"
+        }
+      ]
+    },
+    {
+      "class": "semantic",
+      "expected_fqn": "app.cache_maintenance.sweep_eviction_hourly",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "purge expired cache",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.cache_maintenance.sweep_eviction_hourly",
+          "path": "app/cache_maintenance.py"
+        },
+        {
+          "fqn": "app.cache_maintenance",
+          "path": "app/cache_maintenance.py"
+        },
+        {
+          "fqn": "app.cache.resolve",
+          "path": "app/cache.py"
+        }
+      ]
+    },
+    {
+      "class": "semantic",
+      "expected_fqn": "app.compliance.roll_compliance_files",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "rotate audit log",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.compliance.roll_compliance_files",
+          "path": "app/compliance.py"
+        },
+        {
+          "fqn": "app.compliance",
+          "path": "app/compliance.py"
+        },
+        {
+          "fqn": "app.oauth.rotate_oauth_grant",
+          "path": "app/oauth.py"
+        }
+      ]
+    },
+    {
+      "class": "semantic",
+      "expected_fqn": "app.webhooks.authenticate_delivery_event",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "verify webhook signature",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.webhooks.authenticate_delivery_event",
+          "path": "app/webhooks.py"
+        },
+        {
+          "fqn": "app.webhooks",
+          "path": "app/webhooks.py"
+        },
+        {
+          "fqn": "app.licensing.validate",
+          "path": "app/licensing.py"
+        }
+      ]
+    },
+    {
+      "class": "semantic",
+      "expected_fqn": "app.ingest.drop_duplicate_fingerprints",
+      "hit_at_1": false,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "dedupe incoming events",
+      "rank": 2,
+      "reciprocal_rank": 0.5,
+      "top3": [
+        {
+          "fqn": "app.ingest",
+          "path": "app/ingest.py"
+        },
+        {
+          "fqn": "app.ingest.drop_duplicate_fingerprints",
+          "path": "app/ingest.py"
+        },
+        {
+          "fqn": "app.webhooks.authenticate_delivery_event",
+          "path": "app/webhooks.py"
+        }
+      ]
+    },
+    {
+      "class": "semantic",
+      "expected_fqn": "app.paging.bump_severity_rotation",
+      "hit_at_1": false,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "escalate oncall page",
+      "rank": 2,
+      "reciprocal_rank": 0.5,
+      "top3": [
+        {
+          "fqn": "app.paging",
+          "path": "app/paging.py"
+        },
+        {
+          "fqn": "app.paging.bump_severity_rotation",
+          "path": "app/paging.py"
+        }
+      ]
+    },
+    {
+      "class": "semantic",
+      "expected_fqn": "app.metrics_backfill.rebuild_missing_series",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "backfill historical metrics",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.metrics_backfill.rebuild_missing_series",
+          "path": "app/metrics_backfill.py"
+        },
+        {
+          "fqn": "app.metrics_backfill",
+          "path": "app/metrics_backfill.py"
+        }
+      ]
+    },
+    {
+      "class": "semantic",
+      "expected_fqn": "app.streaming.persist_consumer_progress",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "checkpoint stream offset",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.streaming.persist_consumer_progress",
+          "path": "app/streaming.py"
+        },
+        {
+          "fqn": "app.streaming",
+          "path": "app/streaming.py"
+        }
+      ]
+    },
+    {
+      "class": "semantic",
+      "expected_fqn": "app.forms.strip_control_chars",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "sanitize user input",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.forms.strip_control_chars",
+          "path": "app/forms.py"
+        },
+        {
+          "fqn": "app.forms",
+          "path": "app/forms.py"
+        },
+        {
+          "fqn": "app.notifications.schedule_digest_email",
+          "path": "app/notifications.py"
+        }
+      ]
+    },
+    {
+      "class": "semantic",
+      "expected_fqn": "app.oauth.rotate_oauth_grant",
+      "hit_at_1": false,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "refresh access token",
+      "rank": 2,
+      "reciprocal_rank": 0.5,
+      "top3": [
+        {
+          "fqn": "app.oauth",
+          "path": "app/oauth.py"
+        },
+        {
+          "fqn": "app.oauth.rotate_oauth_grant",
+          "path": "app/oauth.py"
+        },
+        {
+          "fqn": "app.auth.tokenizer.tokenize",
+          "path": "app/auth/tokenizer.py"
+        }
+      ]
+    },
+    {
+      "class": "semantic",
+      "expected_fqn": "app.session_store.reap_idle_logins",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "vacuum stale sessions",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.session_store.reap_idle_logins",
+          "path": "app/session_store.py"
+        },
+        {
+          "fqn": "app.session_store",
+          "path": "app/session_store.py"
+        },
+        {
+          "fqn": "app.cache_maintenance.sweep_eviction_hourly",
+          "path": "app/cache_maintenance.py"
+        }
+      ]
+    },
+    {
+      "class": "ambiguous",
+      "expected_fqn": "app.cache.resolve",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "cache resolve",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.cache.resolve",
+          "path": "app/cache.py"
+        },
+        {
+          "fqn": "app.cache",
+          "path": "app/cache.py"
+        },
+        {
+          "fqn": "app.cache_maintenance.sweep_eviction_hourly",
+          "path": "app/cache_maintenance.py"
+        }
+      ]
+    },
+    {
+      "class": "ambiguous",
+      "expected_fqn": "app.dns.resolve",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "dns resolve",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.dns.resolve",
+          "path": "app/dns.py"
+        },
+        {
+          "fqn": "app.graphql.resolvers.field_resolver",
+          "path": "app/graphql/resolvers.py"
+        },
+        {
+          "fqn": "app.config.resolve",
+          "path": "app/config.py"
+        }
+      ]
+    },
+    {
+      "class": "ambiguous",
+      "expected_fqn": "app.config.resolve",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "config resolve",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.config.resolve",
+          "path": "app/config.py"
+        },
+        {
+          "fqn": "app.config",
+          "path": "app/config.py"
+        },
+        {
+          "fqn": "app.dns.resolve",
+          "path": "app/dns.py"
+        }
+      ]
+    },
+    {
+      "class": "ambiguous",
+      "expected_fqn": "app.payments.process",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "payments process",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.payments.process",
+          "path": "app/payments.py"
+        },
+        {
+          "fqn": "app.images.process",
+          "path": "app/images.py"
+        },
+        {
+          "fqn": "app.jobs.process",
+          "path": "app/jobs.py"
+        }
+      ]
+    },
+    {
+      "class": "ambiguous",
+      "expected_fqn": "app.images.process",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "images process",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.images.process",
+          "path": "app/images.py"
+        },
+        {
+          "fqn": "app.jobs.process",
+          "path": "app/jobs.py"
+        },
+        {
+          "fqn": "app.payments.process",
+          "path": "app/payments.py"
+        }
+      ]
+    },
+    {
+      "class": "ambiguous",
+      "expected_fqn": "app.jobs.process",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "jobs process",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.jobs.process",
+          "path": "app/jobs.py"
+        },
+        {
+          "fqn": "app.images.process",
+          "path": "app/images.py"
+        },
+        {
+          "fqn": "app.payments.process",
+          "path": "app/payments.py"
+        }
+      ]
+    },
+    {
+      "class": "ambiguous",
+      "expected_fqn": "app.git_sync.fetch",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "git fetch",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.git_sync.fetch",
+          "path": "app/git_sync.py"
+        },
+        {
+          "fqn": "app.mail.fetch",
+          "path": "app/mail.py"
+        },
+        {
+          "fqn": "app.weather.fetch",
+          "path": "app/weather.py"
+        }
+      ]
+    },
+    {
+      "class": "ambiguous",
+      "expected_fqn": "app.weather.fetch",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "weather fetch",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.weather.fetch",
+          "path": "app/weather.py"
+        },
+        {
+          "fqn": "app.mail.fetch",
+          "path": "app/mail.py"
+        },
+        {
+          "fqn": "app.git_sync.fetch",
+          "path": "app/git_sync.py"
+        }
+      ]
+    },
+    {
+      "class": "ambiguous",
+      "expected_fqn": "app.mail.fetch",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "mail fetch",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.mail.fetch",
+          "path": "app/mail.py"
+        },
+        {
+          "fqn": "app.weather.fetch",
+          "path": "app/weather.py"
+        },
+        {
+          "fqn": "app.git_sync.fetch",
+          "path": "app/git_sync.py"
+        }
+      ]
+    },
+    {
+      "class": "ambiguous",
+      "expected_fqn": "app.schema_registry.validate",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "schema validate",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.schema_registry.validate",
+          "path": "app/schema_registry.py"
+        },
+        {
+          "fqn": "app.schema_registry",
+          "path": "app/schema_registry.py"
+        },
+        {
+          "fqn": "app.licensing.validate",
+          "path": "app/licensing.py"
+        }
+      ]
+    },
+    {
+      "class": "ambiguous",
+      "expected_fqn": "app.licensing.validate",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "license validate",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.licensing.validate",
+          "path": "app/licensing.py"
+        },
+        {
+          "fqn": "app.licensing",
+          "path": "app/licensing.py"
+        },
+        {
+          "fqn": "app.auth.validate_session_token",
+          "path": "app/auth.py"
+        }
+      ]
+    },
+    {
+      "class": "ambiguous",
+      "expected_fqn": "app.addressbook.validate",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "address validate",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.addressbook.validate",
+          "path": "app/addressbook.py"
+        },
+        {
+          "fqn": "app.addressbook",
+          "path": "app/addressbook.py"
+        },
+        {
+          "fqn": "app.licensing.validate",
+          "path": "app/licensing.py"
+        }
+      ]
+    },
+    {
+      "class": "path_qualified",
+      "expected_fqn": "app.auth.tokenizer.tokenize",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "auth tokenize",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.auth.tokenizer.tokenize",
+          "path": "app/auth/tokenizer.py"
+        },
+        {
+          "fqn": "app.auth.tokenizer",
+          "path": "app/auth/tokenizer.py"
+        },
+        {
+          "fqn": "app.webhooks.authenticate_delivery_event",
+          "path": "app/webhooks.py"
+        }
+      ]
+    },
+    {
+      "class": "path_qualified",
+      "expected_fqn": "app.billing.totals.compute_total",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "billing compute_total",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.billing.totals.compute_total",
+          "path": "app/billing/totals.py"
+        },
+        {
+          "fqn": "app.billing.totals",
+          "path": "app/billing/totals.py"
+        },
+        {
+          "fqn": "app.pricing.calc_order_total",
+          "path": "app/pricing.py"
+        }
+      ]
+    },
+    {
+      "class": "path_qualified",
+      "expected_fqn": "app.inventory.adjustments.adjust",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "inventory adjust",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.inventory.adjustments.adjust",
+          "path": "app/inventory/adjustments.py"
+        },
+        {
+          "fqn": "app.inventory.reserve_batch",
+          "path": "app/inventory.py"
+        },
+        {
+          "fqn": "app.inventory.sync_stock_levels",
+          "path": "app/inventory.py"
+        }
+      ]
+    },
+    {
+      "class": "path_qualified",
+      "expected_fqn": "app.shipping.quotes.quote",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "shipping quote",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.shipping.quotes.quote",
+          "path": "app/shipping/quotes.py"
+        },
+        {
+          "fqn": "app.shipping.estimate_freight_cost",
+          "path": "app/shipping.py"
+        },
+        {
+          "fqn": "app.shipping.track_shipment",
+          "path": "app/shipping.py"
+        }
+      ]
+    },
+    {
+      "class": "path_qualified",
+      "expected_fqn": "app.reporting.exports.export",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "reporting export",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.reporting.exports.export",
+          "path": "app/reporting/exports.py"
+        },
+        {
+          "fqn": "app.reporting.render_sales_csv",
+          "path": "app/reporting.py"
+        },
+        {
+          "fqn": "app.reporting.aggregate_daily_revenue",
+          "path": "app/reporting.py"
+        }
+      ]
+    },
+    {
+      "class": "path_qualified",
+      "expected_fqn": "app.notifications.templates.template",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "notifications template",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.notifications.templates.template",
+          "path": "app/notifications/templates.py"
+        },
+        {
+          "fqn": "app.notifications.templates",
+          "path": "app/notifications/templates.py"
+        },
+        {
+          "fqn": "app.forms.strip_control_chars",
+          "path": "app/forms.py"
+        }
+      ]
+    },
+    {
+      "class": "path_qualified",
+      "expected_fqn": "app.search.ranking.rank",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "search rank",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.search.ranking.rank",
+          "path": "app/search/ranking.py"
+        },
+        {
+          "fqn": "app.search.ranking",
+          "path": "app/search/ranking.py"
+        },
+        {
+          "fqn": "app.search_index.build_index",
+          "path": "app/search_index.py"
+        }
+      ]
+    },
+    {
+      "class": "path_qualified",
+      "expected_fqn": "app.media.transcoder.transcode",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "media transcode",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.media.transcoder.transcode",
+          "path": "app/media/transcoder.py"
+        },
+        {
+          "fqn": "app.media.transcoder",
+          "path": "app/media/transcoder.py"
+        }
+      ]
+    },
+    {
+      "class": "path_qualified",
+      "expected_fqn": "app.audit.trail.append_trail",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "audit append_trail",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.audit.trail.append_trail",
+          "path": "app/audit/trail.py"
+        },
+        {
+          "fqn": "app.audit.trail",
+          "path": "app/audit/trail.py"
+        },
+        {
+          "fqn": "app.compliance.roll_compliance_files",
+          "path": "app/compliance.py"
+        }
+      ]
+    },
+    {
+      "class": "path_qualified",
+      "expected_fqn": "app.graphql.resolvers.field_resolver",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "graphql field_resolver",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.graphql.resolvers.field_resolver",
+          "path": "app/graphql/resolvers.py"
+        },
+        {
+          "fqn": "app.graphql.resolvers",
+          "path": "app/graphql/resolvers.py"
+        },
+        {
+          "fqn": "app.addressbook.validate",
+          "path": "app/addressbook.py"
+        }
+      ]
+    },
+    {
+      "class": "path_qualified",
+      "expected_fqn": "app.i18n.translate.translate",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "i18n translate",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.i18n.translate.translate",
+          "path": "app/i18n/translate.py"
+        },
+        {
+          "fqn": "app.i18n.translate",
+          "path": "app/i18n/translate.py"
+        },
+        {
+          "fqn": "app.glossary",
+          "path": "app/glossary.py"
+        }
+      ]
+    },
+    {
+      "class": "path_qualified",
+      "expected_fqn": "app.cli.arguments.parse_args",
+      "hit_at_1": true,
+      "hit_at_10": true,
+      "hit_at_5": true,
+      "in_fts_candidates": true,
+      "query": "cli parse_args",
+      "rank": 1,
+      "reciprocal_rank": 1.0,
+      "top3": [
+        {
+          "fqn": "app.cli.arguments.parse_args",
+          "path": "app/cli/arguments.py"
+        },
+        {
+          "fqn": "app.cli.arguments",
+          "path": "app/cli/arguments.py"
+        },
+        {
+          "fqn": "app.oauth",
+          "path": "app/oauth.py"
+        }
+      ]
+    }
+  ],
+  "schema_version": 1
+}

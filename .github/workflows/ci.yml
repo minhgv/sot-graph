@@ -106,6 +106,12 @@ jobs:
           print("corpus digest stable:", fresh["corpus"]["digest"][:16])
           EOF
 
+      - name: Search quality gates (Hit@k/MRR)
+        run: uv run python scripts/bench_search_quality.py --gate
+
+      - name: Diff-impact oracle gates (P/R/F1)
+        run: uv run python scripts/bench_diff_impact.py --gate
+
       - name: Upload baseline artifact
         uses: actions/upload-artifact@v4
         with:

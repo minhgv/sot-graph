@@ -1528,6 +1528,77 @@ pub fn run_engine_{i}(data: &str) -> String {{
             edges.append(b.edge(rel, f"Engine{i}.check", "calls", "ValidateKey",
                                 "go_pkg/storage/db.go", None, lang, "static_negative", "cross_lang_negative"))
 
+    # -- implements/extends NEGATIVES (Rust) -------------------------------------------------------
+    # Cases that must NOT resolve as implements/extends: inherent impl blocks,
+    # generic/where bounds, commented-out impls, similarly-named lookalikes,
+    # and forward references to undefined bases.
+    b.add_file("rust_pkg/src/negatives.rs", '''
+pub trait Persist {
+    fn flush(&self) -> bool;
+}
+
+pub trait NotificationHandler {
+    fn handle(&self, raw: &str) -> bool;
+}
+
+pub struct Store;
+
+pub struct Cache<T> {
+    pub backend: T,
+}
+
+// impl Persist for Cache<Store> {
+//     fn flush(&self) -> bool { true }
+// }
+
+impl<T> Cache<T>
+where
+    T: Sized,
+{
+    pub fn get(&self, _key: &str) -> Option<String> {
+        None
+    }
+}
+
+pub struct NotificationService;
+
+impl NotificationService {
+    pub fn dispatch(&self, raw: &str) -> bool {
+        raw.len() > 0
+    }
+}
+
+pub struct PhantomJob;
+
+// impl Persist for PhantomJob {
+//     fn flush(&self) -> bool { false }
+// }
+
+pub fn adopt(job: PhantomJob) -> PhantomJob {
+    job
+}
+''')
+    f = "rust_pkg/src/negatives.rs"
+    edges.append(b.edge(f, "Cache", "implements", "Persist", f, None, lang,
+                        "static_negative", "implements_negative",
+                        "trait-bound-free generic struct; trait impl only in a comment"))
+    edges.append(b.edge(f, "Cache", "implements", "NotificationHandler", f, None, lang,
+                        "static_negative", "implements_negative",
+                        "where-clause bound must not imply trait implementation"))
+    edges.append(b.edge(f, "NotificationService", "implements", "NotificationHandler", f, None, lang,
+                        "static_negative", "implements_negative",
+                        "similarly-named lookalike; only an inherent impl exists"))
+    edges.append(b.edge(f, "PhantomJob", "implements", "Persist", f, None, lang,
+                        "static_negative", "implements_negative",
+                        "forward reference: only commented impl mentions the pair"))
+    edges.append(b.edge("rust_pkg/src/mod_1.rs", "Engine1", "implements", "Shape",
+                        "rust_pkg/src/shape.rs", None, lang,
+                        "static_negative", "implements_negative",
+                        "inherent impl Engine1 must not resolve as implementing Shape"))
+    edges.append(b.edge(f, "PhantomJob", "extends", "Persist", f, None, lang,
+                        "static_negative", "extends_negative",
+                        "Rust has no extends relation; inheritance-style claim must not exist"))
+
     probes = [
         SearchProbe("hash_data", [("rust_pkg/src/crypto.rs", "hash_data")], False, lang),
         SearchProbe("verify_data", [("rust_pkg/src/crypto.rs", "verify_data")], False, lang),
@@ -1789,6 +1860,75 @@ public class Handler{i} {{
             edges.append(b.edge(rel, f"Handler{i}.check", "calls", "nonExistentMethod",
                                 "java_pkg/core/Validator.java", None, lang,
                                 "static_negative", "negative_target"))
+
+    # -- implements/extends NEGATIVES (Java) ---------------------------------------------------------
+    # Cases that must NOT resolve as implements/extends: interface-typed fields,
+    # type-parameter bounds, "Impl"-suffixed lookalikes, commented declarations,
+    # and forward references to undefined bases.
+    b.add_file("java_pkg/negatives/JavaNegatives.java", '''
+package java_pkg.negatives;
+
+import java_pkg.core.Validator;
+import java_pkg.shapes.Shape;
+import java.util.concurrent.Callable;
+
+public class CacheClient {
+    private Callable<String> fetcher;
+
+    public String run() throws Exception {
+        return fetcher.call();
+    }
+}
+
+public class Repo<T extends Comparable<T>> {
+    private final T id;
+
+    public Repo(T id) {
+        this.id = id;
+    }
+}
+
+public class NotifierImpl {
+    public boolean send(String token) {
+        return Validator.isValid(token);
+    }
+}
+
+public class Orphan extends MissingBase {
+    public String describe() {
+        return "orphan:" + Shape.class.getName();
+    }
+}
+
+// public class Ghost implements Shape { }
+''')
+    f = "java_pkg/negatives/JavaNegatives.java"
+    neg_dst = "java_pkg/shapes/Shape.java"
+    edges.append(b.edge(f, "CacheClient", "implements", "Callable", f, None, lang,
+                        "static_negative", "implements_negative",
+                        "external-dependency interface used as a field type only"))
+    edges.append(b.edge(f, "Repo", "extends", "Comparable", f, None, lang,
+                        "static_negative", "extends_negative",
+                        "type-parameter bound <T extends Comparable<T>> is not class inheritance"))
+    edges.append(b.edge(f, "Repo", "implements", "Comparable", f, None, lang,
+                        "static_negative", "implements_negative",
+                        "type-parameter bound must not imply implements either"))
+    edges.append(b.edge(f, "NotifierImpl", "implements", "Shape", neg_dst, None, lang,
+                        "static_negative", "implements_negative",
+                        "'Impl' suffix lookalike; no implements declaration exists"))
+    edges.append(b.edge(f, "Orphan", "extends", "MissingBase", f, None, lang,
+                        "static_negative", "extends_negative",
+                        "forward reference: base type is undefined in the corpus"))
+    edges.append(b.edge(f, "Orphan", "implements", "Shape", neg_dst, None, lang,
+                        "static_negative", "implements_negative",
+                        "name-only mention of Shape must not become a claimed edge"))
+    edges.append(b.edge(f, "CacheClient", "extends", "Validator",
+                        "java_pkg/core/Validator.java", None, lang,
+                        "static_negative", "extends_negative",
+                        "import + method usage must not imply inheritance"))
+    edges.append(b.edge(f, "Ghost", "implements", "Shape", neg_dst, None, lang,
+                        "static_negative", "implements_negative",
+                        "commented-out declaration must stay a comment"))
 
     probes = [
         SearchProbe("sanitize", [("java_pkg/core/Validator.java", "Validator.sanitize")], False, lang),

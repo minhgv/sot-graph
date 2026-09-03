@@ -1,9 +1,12 @@
 {
-  "timestamp": "2026-09-03T00:00:00Z",
+  "timestamp": "2026-09-03T20:30:00Z",
   "environment": {
     "arch": "arm64",
     "os": "darwin",
     "kernel": "25.3.0",
+    "os_version": "macOS 26.3.1",
+    "machine": "arm64",
+    "platform": "Darwin-25.3.0-arm64-arm-64bit",
     "python": "3.14.6",
     "sqlite": "3.53.3",
     "cpu_count": 10
@@ -15,7 +18,14 @@
     "bounded_query_files": 5000,
     "monorepo_reconcile_150_files_workers_2_p50_ms": 207.2,
     "monorepo_reconcile_150_files_workers_2_p95_ms": 235.5,
-    "reconcile_median_ms_reported": 207.2
+    "reconcile_median_ms_reported": 207.2,
+    "reconcile_10000_files": 10000,
+    "reconcile_10000_files_workers_2_p50_ms": 6416.0,
+    "reconcile_10000_files_workers_2_p95_ms": 6477.0,
+    "reconcile_10000_files_workers_2_min_ms": 6398.0,
+    "bounded_query_mixed_10000_files": 10000,
+    "bounded_query_mixed_10000_p50_ms": 97.469,
+    "bounded_query_mixed_10000_p95_ms": 98.515
   },
   "context_reduction": {
     "gate_threshold_percent": 60.0,
@@ -24,5 +34,5 @@
     "max_reduction_percent": 89.0,
     "gate_passed": true
   },
-  "notes": "G10 re-measurement. Metric keys renamed to what the current suite emits: bench_query reports one mixed aggregate (11 bounded queries) instead of per-shape medians, so old per-shape keys were dropped rather than carried forward stale. Correctness flags were true on all runs (bench_query, bench_reconcile, benchmark_accuracy strict P/R/F1 = 1.0)."
+  "notes": "R3 re-measurement adds the first 10,000-file scale numbers (R3 evidence hardening): reconcile via `python3 -m benchmarks.bench_reconcile --files 10000 --workers 2 --repeat 5` (p50 6.42 s, ~1,558 files/s incl. correctness projection) and bounded mixed queries via `python3 -m benchmarks.bench_query --files 10000 --repeat 5` (p50 97.5 ms / p95 98.5 ms over 11 bounded queries, verified end-to-end search incl. per-hit trust verification). Existing 5,000-file keys kept unchanged. G10 note: metric keys renamed to what the current suite emits — bench_query reports one mixed aggregate (11 bounded queries) instead of per-shape medians. Correctness flags true on all runs (bench_query, bench_reconcile, 10k variants included)."
 }

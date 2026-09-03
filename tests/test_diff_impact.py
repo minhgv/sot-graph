@@ -237,9 +237,27 @@ class TestGitDeltaExtractor(unittest.TestCase):
         )
         intervals, hunks = self.extractor.parse_unified_diff(diff_text)
         self.assertIn("src/legacy.py", intervals)
-        self.assertEqual(intervals["src/legacy.py"], [(0, 0)])
+        # Deletion-only hunks must map to their OLD-side line interval: the
+        # AST coordinate mapper intersects against the pre-change graph, so
+        # the deleted lines 1-20 (not the empty new-side position 0) are the
+        # impact surface. Regression: this used to be (0, 0), which made a
+        # whole-file deletion invisible to blast-radius analysis.
+        self.assertEqual(intervals["src/legacy.py"], [(1, 20)])
         self.assertEqual(hunks[0].lines_added, 0)
         self.assertEqual(hunks[0].lines_deleted, 20)
+
+    def test_parse_partial_deletion_hunk_uses_old_side_interval(self):
+        diff_text = (
+            "diff --git a/src/service.py b/src/service.py\n"
+            "--- a/src/service.py\n"
+            "+++ b/src/service.py\n"
+            "@@ -5,3 +4,0 @@\n"
+            "-stale_call_one()\n"
+            "-stale_call_two()\n"
+            "-stale_call_three()\n"
+        )
+        intervals, _hunks = self.extractor.parse_unified_diff(diff_text)
+        self.assertEqual(intervals["src/service.py"], [(5, 7)])
 
     def test_parse_binary_file_and_empty(self):
         diff_text = (
@@ -730,6 +748,45 @@ class TestDiffImpactEngine(unittest.TestCase):
         self.assertIn("src/payment_service.py", res.changed_files)
         self.assertEqual(res.target, "--working-tree")
         self.assertIsInstance(res.summary, dict)
+
+    def test_deleted_file_yields_direct_nodes_and_callers(self):
+        """Regression: a whole-file deletion used to report zero impact.
+
+        The deletion hunk `@@ -1,N +0,0 @@` was mapped to the empty interval
+        (0, 0), so no node intersected it and the blast radius collapsed to
+        nothing. The deleted file's OLD-side line span is the impact surface.
+        """
+        target = Path(self.temp_dir) / "src" / "payment_service.py"
+        subprocess.run(["git", "init"], cwd=self.temp_dir, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.name", "Tester"], cwd=self.temp_dir, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=self.temp_dir, check=True)
+        target.parent.mkdir(exist_ok=True)
+        body = "\n".join([
+            "class PaymentService:",
+            "    def charge_card(self):",
+            "        return True",
+        ] + ["    # filler line %d" % i for i in range(12)])
+        target.write_text(body + "\n")
+        subprocess.run(["git", "add", "."], cwd=self.temp_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "add service"], cwd=self.temp_dir, check=True)
+
+        self.conn.execute(
+            "INSERT INTO graph_nodes VALUES "
+            "('n_leaf2', 'src/payment_service.py', 'method', 'charge_card', "
+            "'payment.charge_card', 'charge_card()', 2, 3)"
+        )
+        self.conn.execute(
+            "INSERT INTO graph_edges VALUES ('e_caller', 'n_ctrl', 'n_leaf2', 'calls', 1.0)"
+        )
+        self.conn.commit()
+
+        target.unlink()
+        res = self.engine.analyze_diff_impact(working_tree=True, depth=2)
+        self.assertIn("src/payment_service.py", res.changed_files)
+        direct_symbols = {n.symbol for n in res.direct_nodes}
+        self.assertIn("charge_card", direct_symbols)
+        caller_symbols = {c.symbol for c in res.caller_impacts}
+        self.assertIn("handle_checkout", caller_symbols)
 
 
 class TestFormatters(unittest.TestCase):

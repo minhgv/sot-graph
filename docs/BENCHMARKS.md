@@ -89,6 +89,88 @@ PYTHONPATH=".:src" python3 -m benchmarks.bench_query --files 500 --repeat 5 --js
 
 ---
 
+## 🎯 Accuracy Oracles (R3 evidence hardening)
+
+The 2026-08-28 reassessment (§4.2/§6) flagged evidence gaps: no diff-impact
+oracle, search quality measured with only ~20 probes (ambiguous Hit@5 44.4%),
+zero Rust negative `implements` ground truth, and no scale run beyond 5,000
+files. R3 closes these with two deterministic, offline, gate-wired benchmarks
+and negative ground truth.
+
+### 3. Search Quality (`scripts/bench_search_quality.py` → `benchmarks/search-quality.json`)
+
+48 planted probes across four classes (12 each), every probe with EXACTLY ONE
+known-correct node; runs the real production search path (FTS retrieval →
+per-hit TrustVerifier → P4 ranking) at top-k=10 over a 194-file corpus
+(~363 nodes, incl. 150 seeded filler fixtures):
+
+| Class | Hit@1 | Hit@5 | Hit@10 | MRR |
+| :--- | :---: | :---: | :---: | :---: |
+| **exact** (bare symbol) | 100% | 100% | 100% | 1.00 |
+| **semantic** (natural-language → body) | 75% | 100% | 100% | 0.875 |
+| **ambiguous** (same bare name, 3 modules) | 100% | 100% | 100% | 1.00 |
+| **path_qualified** (path fragment + symbol) | 100% | 100% | 100% | 1.00 |
+| **overall** | 93.8% | 100% | 100% | 0.969 |
+
+CI gates (set once, a step below measured; rationale in the JSON `gates`
+block): exact Hit@1 ≥ 0.85, semantic Hit@5 ≥ 0.90, ambiguous Hit@5 ≥ 0.75,
+path_qualified Hit@1 ≥ 0.90, overall MRR ≥ 0.85. The old 44.4% ambiguous
+weakness was measured on bare-name-only queries; adding module context to the
+query (how agents actually disambiguate) resolves it — the gate keeps a wide
+margin (0.75) on that hostile class so a regression trips it.
+
+```bash
+python3 scripts/bench_search_quality.py --gate      # gates + write JSON
+python3 scripts/bench_search_quality.py --selfcheck # fast offline self-check
+```
+
+### 4. Diff-Impact Oracle (`scripts/bench_diff_impact.py` → `benchmarks/diff-impact-oracle.json`)
+
+Six scripted change scenarios against a synthetic git repo with a planted
+call graph `main_dispatch → handle_request → transform_data → render_payload`,
+an inheritance pair (`EmailNotifier extends Notifier`) and test files named
+per the test-detection conventions. Ground truth is known BY CONSTRUCTION;
+the real `DiffImpactEngine` is scored per scenario (symbols / tests / files)
+with macro P/R/F1:
+
+| Scenario | Symbols P/R/F1 | Tests P/R/F1 | Files |
+| :--- | :---: | :---: | :---: |
+| modify_body | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | exact |
+| rename_symbol | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | exact |
+| delete_file | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | exact |
+| api_signature_change | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | exact |
+| extends_hierarchy | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | exact |
+| test_file_edit | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | exact |
+
+The delete_file row is regression-locked: before R3, a whole-file deletion
+(`@@ -1,N +0,0 @@`) mapped to the empty interval (0,0), so deletions reported
+ZERO impact (measured, then fixed in `src/sot_graph/diff_impact.py` —
+deletion-only hunks now use their old-side line span; regression tests in
+`tests/test_diff_impact.py`). CI gates: macro symbol/test/overall F1 ≥ 0.95,
+changed-file exact rate ≥ 0.95.
+
+### 5. Negative `implements`/`extends` ground truth (Java/Rust)
+
+`sot_evaluator.py`'s corpus gained 14 negative edges (Rust 6, Java 8):
+inherent impl blocks, generic/where bounds, `Impl`-suffix lookalikes,
+commented-out declarations, interface-typed fields, type-parameter bounds and
+forward references to undefined bases. All are correctly abstained —
+`rust implements` tn 1→5, `java implements` tn 1→5, `java extends` tn 0→3,
+**zero new false positives** (committed baseline:
+`benchmarks/oracle/builtin-baseline.json`, corpus digest `23c0e29c…`).
+
+### 6. 10,000-file scale run (2026-09-03, first beyond 5k)
+
+| Metric (10,000 files) | P50 | P95 | Notes |
+| :--- | :---: | :---: | :--- |
+| **Reconcile (2 workers)** | 6,416 ms | 6,477 ms | ~1,558 files/s incl. correctness projection; `--repeat 5` |
+| **Bounded mixed query** | 97.5 ms | 98.5 ms | 11 bounded queries, end-to-end verified search |
+
+Recorded in `benchmarks/performance_baseline.json` (`reconcile_10000_*`,
+`bounded_query_mixed_10000_*`); correctness flags true on both.
+
+---
+
 ## 📦 Context-Cost Benchmark (v3, deterministic)
 
 The LLM-in-the-loop protocol (sub-agent D1 pack vs D2 grep: 18.8k vs 58.6k tokens,
