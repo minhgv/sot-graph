@@ -19,12 +19,14 @@ replacement for verifying against disk.
 - **Verifying disk consistency**: Audit phantom anchors and drift (`sot verify` / `sot_verify`).
 - **Recording knowledge**: Record non-obvious architecture choices or critical bug solutions (`sot insert` / `sot_insert`).
 - **Architecture analysis & reports**: Extract 5 fact bundle files (`sot bundle` / `sot_bundle`), generate visual graphs, community clustering, or health reports (`sot cluster`, `sot report`, `sot viz`, `sot export`).
+- **Git diff & revision blast radius**: Trace upstream callers, breaking API impacts, and affected tests across commits or working tree changes (`sot diff-impact` / `sot_diff_impact`).
+- **Git commit risk analysis**: Inspect commit history with automated risk scoring and impacted symbol tracking (`sot log` / `sot_git_history`).
 - **Database maintenance**: Purge stale records and vacuum freelists (`sot clean`, `sot vacuum`, `sot doctor`).
 
 ## Trust Verdicts
 | Verdict | Meaning | Action |
 | :--- | :--- | :--- |
-| `[STRONG]` | File exists on disk, symbol exists in AST, token coverage verified. | **Proceed directly.** 100% reliable anchor. |
+| `[STRONG]` | File exists on disk, symbol exists in AST, token coverage verified. | **Proceed directly.** Hash-verified anchor — high confidence, not absolute. |
 | `[WEAK]` | Semantic or partial match; low lexical coverage. | **Inspect snippet range** before relying on symbol. |
 | `[REBUILT]` | File moved or renamed; auto-rehomed by reconciler. | **Use updated path** reported in result. |
 | `[REMOVED]` | Node deleted on disk; scheduled for purge. | **Do NOT use.** Symbol no longer exists. |
@@ -58,6 +60,8 @@ replacement for verifying against disk.
 | **Feature Inventory** | `sot solution inventory [module] [-o <file>]` | `sot_solution_inventory` |
 | **Micro-steps Decompose** | `sot solution steps "<method>" [--format table/json]` | `sot_solution_steps` |
 | **Solution Bundle** | `sot solution bundle [module] [-o <file>]` | `sot_solution_bundle` |
+| **Diff Impact** | `sot diff-impact [target] [--staged] [--depth 2]` | `sot_diff_impact` |
+| **Commit History** | `sot log [-n 10] [--author <name>] [--since <date>]` | `sot_git_history` |
 | **Embed Index** | `sot embed [--limit 5000]` | CLI |
 | **File Watcher** | `sot watch [--debounce-ms 200]` | CLI (Daemon) |
 | **Harness Setup** | `sot setup [--harness <name>]` | CLI |
@@ -84,7 +88,8 @@ Before modifying, refactoring, or renaming core functions/classes:
 2. Run `sot usages "<symbol>"` or `sot_usages` to locate all calling sites.
 3. For interfaces or abstract classes, run `sot implementations "<symbol>"` or `sot_implementations`.
 4. For multi-file symbol renames, run `sot rename "<symbol>" --to "<new_name>"` to review staged changes.
-
+5. Before submitting PRs or finalizing diffs, run `sot diff-impact` or `sot_diff_impact` to analyze blast radius, upstream inward callers, API contract impacts, and affected tests.
+6. Inspect commit risk history via `sot log` or `sot_git_history`.
 ### 4. Context Isolation & Subgraph Packaging Protocol
 When delegating code context to subagents or prompt registers:
 1. Run `sot pack "<symbol>" --depth 2 -o .sot/bundle/context.yaml` to extract a token-efficient k-hop subgraph.
@@ -100,7 +105,7 @@ When delegating code context to subagents or prompt registers:
 When requested to review or synthesize architecture documentation:
 1. Run `sot bundle` (or tool `sot_bundle`) to generate 5 high-density fact files in `.sot/bundle/`.
 2. Ingest the 5 fact files (`01_module_inventory.md`, `02_routing_endpoints.md`, `03_workflows_states.md`, `04_dependencies_violations.md`, `05_system_metrics.json`) along with `src/sot_graph/templates/ARCHITECTURE_TEMPLATE.md`.
-3. Output the report with 100% grounded facts, valid diagrams, and prioritized recommendations.
+3. Output the report with facts grounded ONLY in the bundle files — anything beyond them must be marked [INFERENCE]. Valid diagrams, prioritized recommendations.
 
 ### 7. Markdown, LaTeX & Unicode Rendering Rules (Dual-Target: Human & AI)
 1. **Mermaid Diagrams:**
