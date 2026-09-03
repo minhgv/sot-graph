@@ -135,6 +135,7 @@ sot_graph = [
     "templates/*",
     "adapters/*.md",
     "adapters/*.ts",
+    "export/*.js",
 ]
 [tool.pytest.ini_options]
 testpaths = ["tests"]

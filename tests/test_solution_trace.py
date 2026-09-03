@@ -18,6 +18,7 @@ from sot_graph.solution import (
     generate_feature_inventory,
     extract_execution_steps,
     generate_solution_bundle,
+    _resolve_service_symbol,
 )
 from sot_graph.mcp_service import McpService
 
@@ -239,3 +240,42 @@ class TestSolutionAndTraceEngine(unittest.TestCase):
             self.assertIn("bundle_content", bundle_res)
 
         asyncio.run(run_checks())
+
+
+class TestResolveServiceSymbol(unittest.TestCase):
+    """G10: LIKE literal escaping + real GROUP BY for the most-referenced service."""
+
+    def _conn(self):
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE be_execution_steps (service_symbol TEXT)")
+        conn.execute(
+            "CREATE TABLE graph_nodes (id TEXT, path TEXT, kind TEXT, symbol TEXT)"
+        )
+        return conn
+
+    def test_underscore_in_module_matches_literal_only(self):
+        conn = self._conn()
+        conn.executemany(
+            "INSERT INTO be_execution_steps VALUES (?)",
+            [("coreXbase_service",), ("core_base_service",)],
+        )
+        conn.commit()
+        # Unescaped, '_' would wildcard-match coreXbase_service too and
+        # 'coreXbase_service' sorts first — the wrong service.
+        self.assertEqual(_resolve_service_symbol(conn, "core_base"), "core_base_service")
+
+    def test_no_module_picks_most_referenced_service(self):
+        conn = self._conn()
+        rows = [("svc_a",), ("svc_b",), ("svc_b",), ("svc_b",), ("svc_c",)]
+        conn.executemany("INSERT INTO be_execution_steps VALUES (?)", rows)
+        conn.commit()
+        self.assertEqual(_resolve_service_symbol(conn, ""), "svc_b")
+
+    def test_falls_back_to_graph_nodes_literal_like(self):
+        conn = self._conn()
+        conn.execute(
+            "INSERT INTO graph_nodes VALUES ('n1', 'x.py', 'service', 'PaymentService')"
+        )
+        conn.commit()
+        self.assertEqual(_resolve_service_symbol(conn, "Pay%ment"), "")
+        self.assertEqual(_resolve_service_symbol(conn, "Pay"), "PaymentService")

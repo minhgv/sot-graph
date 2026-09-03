@@ -1114,7 +1114,7 @@ class DiffImpactEngine:
 
         # 2. Callers residing in test files
         for c in caller_impacts:
-            if self._is_test_path(c.path) or c.symbol.lower().startswith("test"):
+            if self._is_test_path(c.path) or self._is_test_symbol(c.symbol):
                 key = f"caller:{c.id}"
                 if key not in seen_test_keys:
                     seen_test_keys.add(key)
@@ -1142,7 +1142,7 @@ class DiffImpactEngine:
                 ).fetchall()
                 rows = [r for r in rows
                         if self._is_test_path(r[1])
-                        or (r[2] or "").lower().startswith("test")]
+                        or self._is_test_symbol(r[2])]
                 for r in rows:
                     key = f"db_edge:{r[0]}"
                     if key not in seen_test_keys:
@@ -1166,6 +1166,23 @@ class DiffImpactEngine:
         """Check if a file path belongs to test directories or test naming conventions."""
         norm = path.replace("\\", "/")
         return any(pat.search(norm) for pat in self.TEST_PATTERNS)
+
+    @staticmethod
+    def _is_test_symbol(symbol: str | None) -> bool:
+        """Test-shaped symbol name.
+
+        Leading ``test``/``Test`` covers pytest, Go and JUnit4 conventions;
+        case-sensitive trailing ``Test``/``Tests``/``IT``/``Spec`` recovers
+        JUnit5 suites, Maven failsafe integration tests and RSpec-style
+        specs, which the old ``startswith("test")``-only check silently
+        dropped from affected-test discovery.
+        """
+        if not symbol:
+            return False
+        return symbol.lower().startswith("test") or symbol.endswith(
+            ("Test", "Tests", "IT", "Spec")
+        )
+
     def _compute_summary(
         self,
         changed_files: List[str],

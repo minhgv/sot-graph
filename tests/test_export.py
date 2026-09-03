@@ -51,7 +51,10 @@ class ExportTests(unittest.TestCase):
 
         self.assertIn("<!DOCTYPE html>", html)
         self.assertIn("Test Project Knowledge Graph", html)
-        self.assertIn("d3.v7.min.js", html)
+        # d3 must be inlined from the vendored bundle, never fetched from
+        # the CDN (offline viewers used to get a silently dead page).
+        self.assertIn("Copyright 2010-2023 Mike Bostock", html)
+        self.assertNotIn('<script src="https://d3js.org', html)
         self.assertIn("const DATA = ", html)
         self.assertIn("login", html)
         self.assertIn("handle_request", html)
@@ -79,7 +82,11 @@ class ExportTests(unittest.TestCase):
         )
         self.assertIn(r"\u003c/script\u003e", html)
         self.assertNotIn("<script>alert(", html)
-        self.assertNotIn("innerHTML", html)
+        # The PAGE'S OWN code must never route data through innerHTML. The
+        # inlined d3 library legitimately contains that identifier, so the
+        # assertion is scoped to the app script after the DATA injection.
+        app_script = html.split("const DATA = ", 1)[1]
+        self.assertNotIn("innerHTML", app_script)
 
 
     def test_graphrag_json_export(self) -> None:
@@ -122,6 +129,30 @@ class ExportTests(unittest.TestCase):
         for f in md_files:
             text = f.read_text(encoding="utf-8")
             self.assertIn("---", text)
+
+    def test_obsidian_vault_collision_suffix(self) -> None:
+        """Two node ids sanitizing to the same filename must both survive.
+
+        "a/b/handler" and "a_b_handler" collapse to the same safe name;
+        the second note used to silently overwrite the first and links
+        pointed at the wrong note. G10 adds deterministic -2 suffixes.
+        """
+        graph = AnalyticsGraph()
+        graph.add_node("a/b/handler", label="Handler A", kind="symbol",
+                       path="a/b/handler.py", line_start=1)
+        graph.add_node("a_b_handler", label="Handler B", kind="symbol",
+                       path="c.py", line_start=1)
+        graph.add_edge("a/b/handler", "a_b_handler", relation="calls")
+
+        out_dir = str(self.project_dir / "obsidian_collide")
+        export_obsidian_vault(graph, output_dir=out_dir)
+
+        vault = Path(out_dir)
+        self.assertTrue((vault / "a_b_handler.md").exists())
+        self.assertTrue((vault / "a_b_handler-2.md").exists())
+        # The disambiguated name is what wikilinks must reference.
+        first = (vault / "a_b_handler.md").read_text(encoding="utf-8")
+        self.assertIn("[[a_b_handler-2|Handler B]]", first)
 
     def test_graphml_export(self) -> None:
         graph = AnalyticsGraph.from_database(self.db)

@@ -1091,3 +1091,22 @@ class TestMcpServiceDiffImpact(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestIsTestSymbol(unittest.TestCase):
+    """G10: suffix-convention test symbols must be recalled, not just test*."""
+
+    def test_prefix_and_suffix_conventions(self):
+        f = DiffImpactEngine._is_test_symbol
+        # Leading conventions (pytest, Go, JUnit4).
+        self.assertTrue(f("test_login"))
+        self.assertTrue(f("TestLogin"))
+        # Trailing conventions (JUnit5 suites, failsafe ITs, RSpec specs).
+        self.assertTrue(f("LoginTests"))
+        self.assertTrue(f("LoginServiceSpec"))
+        self.assertTrue(f("FooIT"))
+        # Case-sensitive IT suffix must not swallow ordinary words.
+        self.assertFalse(f("submit"))
+        self.assertFalse(f("validator"))
+        self.assertFalse(f(""))
+        self.assertFalse(f(None))

@@ -109,6 +109,12 @@ def export_obsidian_vault(
     node_to_comm = analysis.community_result.node_to_community
     god_map = {g.node_id: g for g in analysis.god_nodes}
 
+    reserved = {"Index"} | {
+        f"Community_{cid}"
+        for cid in analysis.community_result.community_info
+    }
+    vault_names = _unique_vault_names(graph, reserved)
+
     files_created = 0
 
     # Create an Index MOC (Map of Content)
@@ -154,7 +160,7 @@ def export_obsidian_vault(
         ]
         for nid in c.nodes:
             label = graph.nodes.get(nid, {}).get("label", nid)
-            safe_name = _sanitize_filename(nid)
+            safe_name = vault_names.get(nid, _sanitize_filename(nid))
             comm_lines.append(f"- [[{safe_name}|{label}]]")
 
         (vault_path / f"Community_{cid}.md").write_text(
@@ -164,7 +170,7 @@ def export_obsidian_vault(
 
     # Write individual entity files
     for node_id, data in graph.nodes.items():
-        safe_name = _sanitize_filename(node_id)
+        safe_name = vault_names[node_id]
         label = data.get("label", node_id)
         kind = data.get("kind", "symbol")
         path = data.get("path", "")
@@ -201,14 +207,14 @@ def export_obsidian_vault(
             lines.extend(["", "## Outgoing Dependencies", ""])
             for target_id, rel in outgoing:
                 target_lbl = graph.nodes.get(target_id, {}).get("label", target_id)
-                target_safe = _sanitize_filename(target_id)
+                target_safe = vault_names.get(target_id, _sanitize_filename(target_id))
                 lines.append(f"- `{rel}` -> [[{target_safe}|{target_lbl}]]")
 
         if incoming:
             lines.extend(["", "## Used By (Incoming)", ""])
             for src_id, rel in incoming:
                 src_lbl = graph.nodes.get(src_id, {}).get("label", src_id)
-                src_safe = _sanitize_filename(src_id)
+                src_safe = vault_names.get(src_id, _sanitize_filename(src_id))
                 lines.append(f"- `{rel}` <- [[{src_safe}|{src_lbl}]]")
 
         body = data.get("body", "")
@@ -285,3 +291,29 @@ def _sanitize_filename(name: str) -> str:
     for ch in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
         name = name.replace(ch, '_')
     return name[:120]
+
+
+def _unique_vault_names(
+    graph: "AnalyticsGraph", reserved: "set[str]"
+) -> "dict[str, str]":
+    """Deterministic collision-free vault filenames for every node.
+
+    Two distinct node ids can sanitize to the same filename — illegal
+    characters collapsing into ``_``, or the 120-char truncation chopping
+    the distinguishing suffix. Without disambiguation the second note
+    silently overwrote the first and every ``[[wikilink]]`` pointed at
+    the surviving note. ``-2``, ``-3``, ... suffixes (deterministic in
+    node iteration order) keep files and links consistent.
+    """
+    names: dict[str, str] = {}
+    used: set[str] = set(reserved)
+    for node_id in graph.nodes:
+        base = _sanitize_filename(node_id)
+        name = base
+        n = 2
+        while name in used:
+            name = f"{base}-{n}"
+            n += 1
+        names[node_id] = name
+        used.add(name)
+    return names

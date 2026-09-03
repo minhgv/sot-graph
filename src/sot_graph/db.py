@@ -734,17 +734,53 @@ class Database:
         differ from the journal, or when they match but the content hash no
         longer does (mirrors the reconciler's scan semantics). Paths without
         a journal row are NOT reported stale (never indexed ≠ stale).
+
+        Journal lookup is batched: one snapshot read plus an in-memory
+        ladder replicating :meth:`get_file_journal`'s 7-condition match
+        (4 exact spellings, 3 alias suffixes, first row in table order
+        wins). Per-path SQL would run N queries whose leading-``%`` LIKE
+        fallbacks each force a full table scan — O(N*J) database work for
+        what is O(N+J) of string comparisons here. (Suffix matching is
+        case-sensitive; LIKE's ASCII case folding was never part of the
+        reconciler's journal-key contract.)
         """
         import hashlib as _hashlib
+
+        journals = list(self.get_all_file_journals().items())
+
+        def _journal_for(path: str) -> Optional[Dict[str, Any]]:
+            norm_path = path.replace(os.sep, "/")
+            clean_fwd = path.replace("\\", "/").strip("/")
+            clean_back = path.replace("/", "\\").strip("\\")
+            try:
+                real_path = os.path.realpath(path)
+            except Exception:
+                real_path = path
+            real_fwd = real_path.replace(os.sep, "/")
+            suffix_fwd = "/" + clean_fwd
+            suffix_back = "\\" + clean_back
+            suffix_norm = "/" + norm_path.lstrip("/")
+            for key, row in journals:  # table order, like the SQL scan
+                if (
+                    key == path
+                    or key == norm_path
+                    or key == real_path
+                    or key == real_fwd
+                    or key.endswith(suffix_fwd)
+                    or key.endswith(suffix_back)
+                    or key.endswith(suffix_norm)
+                ):
+                    return row
+            return None
 
         stale: List[str] = []
         for raw in paths:
             if not raw:
                 continue
-            prior = self.get_file_journal(str(raw))
+            prior = _journal_for(str(raw))
             if prior is None and root:
                 candidate_full = os.path.join(root, str(raw))
-                prior = self.get_file_journal(candidate_full)
+                prior = _journal_for(candidate_full)
             if prior is None:
                 continue
             candidate = str(raw)

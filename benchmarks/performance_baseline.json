@@ -1,27 +1,28 @@
 {
-  "timestamp": "2026-08-28T13:30:00Z",
+  "timestamp": "2026-09-03T00:00:00Z",
   "environment": {
     "arch": "arm64",
     "os": "darwin",
-    "python": "3.14.6"
+    "kernel": "25.3.0",
+    "python": "3.14.6",
+    "sqlite": "3.53.3",
+    "cpu_count": 10
   },
   "metrics": {
-    "fts_search_p50_ms": 1.128,
-    "fts_search_p95_ms": 2.433,
-    "explore_depth_1_p50_ms": 0.028,
-    "explore_depth_1_p95_ms": 0.108,
-    "explore_depth_2_p50_ms": 0.201,
-    "explore_depth_2_p95_ms": 0.426,
-    "pack_context_p50_ms": 18.815,
-    "pack_context_p95_ms": 270.744,
-    "monorepo_reconcile_150_files_workers_2_p50_ms": 322.243,
-    "federated_fallback_explore_p50_ms": 0.004
+    "bounded_query_mixed_p50_ms": 48.864,
+    "bounded_query_mixed_p95_ms": 49.862,
+    "bounded_query_mixed_count": 11,
+    "bounded_query_files": 5000,
+    "monorepo_reconcile_150_files_workers_2_p50_ms": 207.2,
+    "monorepo_reconcile_150_files_workers_2_p95_ms": 235.5,
+    "reconcile_median_ms_reported": 207.2
   },
   "context_reduction": {
     "gate_threshold_percent": 60.0,
-    "min_reduction_percent": 84.8,
-    "mean_reduction_percent": 89.1,
-    "max_reduction_percent": 93.5,
+    "min_reduction_percent": 80.6,
+    "mean_reduction_percent": 85.5,
+    "max_reduction_percent": 89.0,
     "gate_passed": true
-  }
+  },
+  "notes": "G10 re-measurement. Metric keys renamed to what the current suite emits: bench_query reports one mixed aggregate (11 bounded queries) instead of per-shape medians, so old per-shape keys were dropped rather than carried forward stale. Correctness flags were true on all runs (bench_query, bench_reconcile, benchmark_accuracy strict P/R/F1 = 1.0)."
 }

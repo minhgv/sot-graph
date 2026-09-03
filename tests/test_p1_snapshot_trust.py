@@ -177,6 +177,23 @@ class TestJournalStalenessAndInvalidation:
         finally:
             db.close()
 
+    def test_stale_journal_files_suffix_alias_ladder(self, clean_repo: Path) -> None:
+        """Aliased journal keys (extra leading prefix) still resolve after
+        the G10 batching: the in-memory ladder must reproduce the old LIKE
+        suffix fallback semantics."""
+        db = _reconciled_db(clean_repo)
+        try:
+            db.conn.execute("UPDATE file_journal SET path = 'workspace/' || path")
+            db.conn.commit()
+            root = str(clean_repo)
+            assert db.stale_journal_files(["mod.py"], root=root) == []
+            (clean_repo / "mod.py").write_text(
+                "def target():\n    return 7\n", encoding="utf-8"
+            )
+            assert db.stale_journal_files(["mod.py"], root=root) == ["mod.py"]
+        finally:
+            db.close()
+
     def test_mark_evidence_stale_marks_never_deletes(self, clean_repo: Path) -> None:
         db = _reconciled_db(clean_repo)
         try:

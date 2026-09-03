@@ -4,11 +4,30 @@ import json
 import html as html_lib
 import os
 import webbrowser
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from sot_graph.analytics.diagnostics import AnalysisResult, analyze_graph
 from sot_graph.analytics.graph import AnalyticsGraph
+
+_D3_BUNDLED_PATH = Path(__file__).resolve().parent / "d3.v7.min.js"
+
+
+@lru_cache(maxsize=1)
+def _bundled_d3_source() -> str:
+    """Vendored d3 v7 (ISC, license header retained) for offline exports.
+
+    The old CDN ``<script src=...>`` silently rendered a dead page whenever
+    the viewer had no network; inlining the bundle makes every export truly
+    self-contained. A read failure degrades to the same offline behavior as
+    before (page shell renders, graph script throws) rather than aborting
+    the export.
+    """
+    try:
+        return _D3_BUNDLED_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return ""
 
 
 def generate_html_visualizer(
@@ -109,14 +128,17 @@ def generate_html_visualizer(
     )
     title_html = html_lib.escape(str(title), quote=True)
 
-    # HTML template with embedded D3.js and responsive UI
+    # HTML template with embedded D3.js and responsive UI. The vendored d3
+    # bundle is interpolated as a VALUE (braces inside it need no escaping);
+    # it contains no "</script>" sequence, verified at vendoring time.
+    d3_source = _bundled_d3_source()
     html_template = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{title_html}</title>
-  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script>{d3_source}</script>
   <style>
     :root {{
       --bg: #0d1117;

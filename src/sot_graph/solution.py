@@ -465,28 +465,46 @@ def extract_execution_steps(db, method_or_service: str, *, format_mode: str = "t
     }
 
 
+def _like_literal(value: str) -> str:
+    # Service/module names are literals: unescaped %/_ would turn the query
+    # into a wildcard pattern ("core_base" matching "coreXbase") and bind
+    # the wrong service.
+    return (
+        value.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+    )
+
+
 def _resolve_service_symbol(conn: Any, module: str) -> str:
     """Pick a service symbol that actually exists in the graph/steps data.
 
     Never fabricates: returns "" (=> NOT_FOUND) when nothing matches.
     """
     try:
-        row = conn.execute(
-            "SELECT DISTINCT service_symbol FROM be_execution_steps "
-            "WHERE service_symbol LIKE ? ORDER BY service_symbol LIMIT 1",
-            (f"%{module}%",),
-        ).fetchone() if module else conn.execute(
-            "SELECT service_symbol FROM be_execution_steps "
-            "ORDER BY COUNT(*) DESC LIMIT 1"
-        ).fetchone()
+        if module:
+            row = conn.execute(
+                "SELECT DISTINCT service_symbol FROM be_execution_steps "
+                "WHERE service_symbol LIKE ? ESCAPE '\\' "
+                "ORDER BY service_symbol LIMIT 1",
+                (f"%{_like_literal(module)}%",),
+            ).fetchone()
+        else:
+            # Most-referenced service: GROUP BY is required for per-symbol
+            # COUNT(*) — the old bare "ORDER BY COUNT(*) DESC" aggregated
+            # the whole table into one meaningless order key.
+            row = conn.execute(
+                "SELECT service_symbol FROM be_execution_steps "
+                "GROUP BY service_symbol "
+                "ORDER BY COUNT(*) DESC, service_symbol LIMIT 1"
+            ).fetchone()
         if row and row[0]:
             return str(row[0])
     except Exception:
         pass
     try:
         row = conn.execute(
-            "SELECT symbol FROM graph_nodes WHERE kind = 'service' AND symbol LIKE ? "
-            "LIMIT 1", (f"%{module}%",),
+            "SELECT symbol FROM graph_nodes WHERE kind = 'service' "
+            "AND symbol LIKE ? ESCAPE '\\' LIMIT 1",
+            (f"%{_like_literal(module)}%",),
         ).fetchone() if module else conn.execute(
             "SELECT symbol FROM graph_nodes WHERE kind = 'service' LIMIT 1"
         ).fetchone()

@@ -140,6 +140,7 @@ class _ConnView:
 
     stale_journal_files = Database.stale_journal_files
     get_file_journal = Database.get_file_journal
+    get_all_file_journals = Database.get_all_file_journals
     get_node_by_symbol = Database.get_node_by_symbol
     explore_node = Database.explore_node
 
