@@ -81,9 +81,39 @@ class TestOMPIntegrationScenarios(unittest.TestCase):
         self.assertTrue("Outward Calls" in res.stdout or "Incoming References" in res.stdout or "Defines" in res.stdout)
 
     def test_scenario_04_verify_drift(self):
-        """Scenario 4: Drift Detection against Disk Reality."""
-        res = self.run_sot(["verify", "--deep"])
-        self.assertIn("ZERO DRIFT", res.stdout)
+        """Scenario 4: Drift Detection against Disk Reality.
+
+        Runs against an isolated fixture repo. Asserting ZERO DRIFT on the
+        live repository is inherently flaky: any repo file that changes
+        between this class's reconcile (scenario 01) and this verify
+        (another test's artifacts, a parallel process, an editor) is GENUINE
+        drift and fails the assertion. Here drift is created deliberately
+        (positive control), detected, then reconciled back to zero.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            app = root / "app.py"
+            app.write_text("def alpha():\n    return 1\n", encoding="utf-8")
+            base = ["--db", str(root / "sot.db"), "--root", str(root)]
+
+            res_add = self.run_sot(base + ["reconcile"])
+            self.assertIn("Reconcile complete", res_add.stdout)
+
+            # Positive control: journaled content changed on disk — deep
+            # verify must report the file as drifted, never bless it with
+            # a ZERO DRIFT verdict.
+            app.write_text("def alpha():\n    return 2\n", encoding="utf-8")
+            res_drift = self.run_sot(base + ["verify", "--deep"], check=False)
+            self.assertEqual(res_drift.returncode, 1)
+            self.assertIn("DRIFT DETECTED", res_drift.stdout)
+            self.assertIn("hash_mismatch", res_drift.stdout)
+            self.assertIn("app.py", res_drift.stdout)
+
+            # Recovery: reconcile converges the graph; verify is zero again.
+            res_fix = self.run_sot(base + ["reconcile"])
+            self.assertIn("Reconcile complete", res_fix.stdout)
+            res_ok = self.run_sot(base + ["verify", "--deep"])
+            self.assertIn("ZERO DRIFT", res_ok.stdout)
 
     def test_scenario_05_self_healing_and_dead_path_autopurge(self):
         """Scenario 5: Self-Healing & Auto-Purging on File Deletion."""

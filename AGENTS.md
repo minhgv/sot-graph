@@ -53,8 +53,8 @@ When delegating code context to subagents or prompt registers:
 2. Feed the compact ContextBundle instead of full raw files to save 60-70% tokens.
 
 ## 5. Self-Healing, Note Preservation & Storage Integrity
-- If you create, move, or delete files, run `sot reconcile` or `sot_reconcile`.
-- Run `sot doctor` or `sot_doctor` to audit database health, schema v5, and page allocations.
+- If you create, move, or delete files, run `sot reconcile`.
+- Run `sot doctor` to audit database health, schema v5, and page allocations.
 - `sot clean --all` purges disposable graph records while permanently preserving user notes (`kind == 'note'`).
 - After completing tricky bugs or complex architectural designs, record knowledge:
   `sot insert --title "..." --body "..." --keywords "..."`.
@@ -74,18 +74,18 @@ When requested to review or synthesize architecture documentation:
 | **Inspect Usages** | `sot usages "<symbol>" [--json]` | `sot_usages` |
 | **Import SCIP Index**| `sot import-scip <path> [--provider-version v1]` | CLI |
 | **Implementations** | `sot implementations "<interface>"` | `sot_implementations` |
-| **Rename Impact** | `sot rename "<symbol>" --to <new_name>` | `sot_rename` |
+| **Rename Impact** | `sot rename "<symbol>" --to <new_name>` | `CLI only` |
 | **Pack Subgraph** | `sot pack "<symbol>" [--tokens 1500] [--json]` | `sot_pack` |
-| **Synchronize DB** | `sot reconcile [--workers 4] [--force]` | `sot_reconcile` |
-| **Audit Drift** | `sot verify [--deep]` | `sot_verify` |
-| **Database Doctor** | `sot doctor [--json]` | `sot_doctor` |
-| **Clean Stale Data**| `sot clean [--all] [--include-notes]` | `sot_clean` |
-| **Vacuum Database** | `sot vacuum [--analyze]` | `sot_vacuum` |
-| **Store Note** | `sot insert --title "..." --body "..."` | `sot_insert` |
-| **Cluster Graph** | `sot cluster [--scope <path>]` | `sot_cluster` |
-| **Architecture Report** | `sot report [-o report.md]` | `sot_report` |
-| **Interactive Viz** | `sot viz [-o graph.html]` | `sot_viz` |
-| **Export Graph** | `sot export -f <graphrag\|obsidian\|scip>` | `sot_export` |
+| **Synchronize DB** | `sot reconcile [--workers 4] [--force]` | `CLI only` |
+| **Audit Drift** | `sot verify [--deep]` | `sot_verify_drift` |
+| **Database Doctor** | `sot doctor [--json]` | `CLI only` |
+| **Clean Stale Data**| `sot clean [--all] [--include-notes]` | `CLI only` |
+| **Vacuum Database** | `sot vacuum [--analyze]` | `CLI only` |
+| **Store Note** | `sot insert --title "..." --body "..."` | `CLI only` |
+| **Cluster Graph** | `sot cluster [--scope <path>]` | `sot_communities` |
+| **Architecture Report** | `sot report [-o report.md]` | `sot_architecture_report` |
+| **Interactive Viz** | `sot viz [-o graph.html]` | `CLI only` |
+| **Export Graph** | `sot export -f <graphrag\|obsidian\|scip>` | `CLI only` |
 | **Fact Bundler** | `sot bundle [-o .sot/bundle/]` | `sot_bundle` |
 | **Full-Stack Trace** | `sot trace "<target>" [--depth 2] [-o <file>]` | `sot_trace` |
 | **UI Decision Tree** | `sot ui-tree "<component>"` | `sot_ui_tree` |
@@ -131,8 +131,8 @@ When delegating code context to subagents or prompt registers:
 2. Feed the compact ContextBundle instead of full raw files to save 60-70% tokens.
 
 ## 5. Self-Healing, Note Preservation & Storage Integrity
-- If you create, move, or delete files, run `sot reconcile` or `sot_reconcile`.
-- Run `sot doctor` or `sot_doctor` to audit database health, schema v5, and page allocations.
+- If you create, move, or delete files, run `sot reconcile`.
+- Run `sot doctor` to audit database health, schema v5, and page allocations.
 - `sot clean --all` purges disposable graph records while permanently preserving user notes (`kind == 'note'`).
 - After completing tricky bugs or complex architectural designs, record knowledge:
   `sot insert --title "..." --body "..." --keywords "..."`.
@@ -152,18 +152,18 @@ When requested to review or synthesize architecture documentation:
 | **Inspect Usages** | `sot usages "<symbol>" [--json]` | `sot_usages` |
 | **Import SCIP Index**| `sot import-scip <path> [--provider-version v1]` | CLI |
 | **Implementations** | `sot implementations "<interface>"` | `sot_implementations` |
-| **Rename Impact** | `sot rename "<symbol>" --to <new_name>` | `sot_rename` |
+| **Rename Impact** | `sot rename "<symbol>" --to <new_name>` | `CLI only` |
 | **Pack Subgraph** | `sot pack "<symbol>" [--tokens 1500] [--json]` | `sot_pack` |
-| **Synchronize DB** | `sot reconcile [--workers 4] [--force]` | `sot_reconcile` |
-| **Audit Drift** | `sot verify [--deep]` | `sot_verify` |
-| **Database Doctor** | `sot doctor [--json]` | `sot_doctor` |
-| **Clean Stale Data**| `sot clean [--all] [--include-notes]` | `sot_clean` |
-| **Vacuum Database** | `sot vacuum [--analyze]` | `sot_vacuum` |
-| **Store Note** | `sot insert --title "..." --body "..."` | `sot_insert` |
-| **Cluster Graph** | `sot cluster [--scope <path>]` | `sot_cluster` |
-| **Architecture Report** | `sot report [-o report.md]` | `sot_report` |
-| **Interactive Viz** | `sot viz [-o graph.html]` | `sot_viz` |
-| **Export Graph** | `sot export -f <graphrag\|obsidian\|scip>` | `sot_export` |
+| **Synchronize DB** | `sot reconcile [--workers 4] [--force]` | `CLI only` |
+| **Audit Drift** | `sot verify [--deep]` | `sot_verify_drift` |
+| **Database Doctor** | `sot doctor [--json]` | `CLI only` |
+| **Clean Stale Data**| `sot clean [--all] [--include-notes]` | `CLI only` |
+| **Vacuum Database** | `sot vacuum [--analyze]` | `CLI only` |
+| **Store Note** | `sot insert --title "..." --body "..."` | `CLI only` |
+| **Cluster Graph** | `sot cluster [--scope <path>]` | `sot_communities` |
+| **Architecture Report** | `sot report [-o report.md]` | `sot_architecture_report` |
+| **Interactive Viz** | `sot viz [-o graph.html]` | `CLI only` |
+| **Export Graph** | `sot export -f <graphrag\|obsidian\|scip>` | `CLI only` |
 | **Fact Bundler** | `sot bundle [-o .sot/bundle/]` | `sot_bundle` |
 | **Full-Stack Trace** | `sot trace "<target>" [--depth 2] [-o <file>]` | `sot_trace` |
 | **UI Decision Tree** | `sot ui-tree "<component>"` | `sot_ui_tree` |
@@ -209,8 +209,8 @@ When delegating code context to subagents or prompt registers:
 2. Feed the compact ContextBundle instead of full raw files to save 60-70% tokens.
 
 ## 5. Self-Healing, Note Preservation & Storage Integrity
-- If you create, move, or delete files, run `sot reconcile` or `sot_reconcile`.
-- Run `sot doctor` or `sot_doctor` to audit database health, schema v5, and page allocations.
+- If you create, move, or delete files, run `sot reconcile`.
+- Run `sot doctor` to audit database health, schema v5, and page allocations.
 - `sot clean --all` purges disposable graph records while permanently preserving user notes (`kind == 'note'`).
 - After completing tricky bugs or complex architectural designs, record knowledge:
   `sot insert --title "..." --body "..." --keywords "..."`.
@@ -230,18 +230,18 @@ When requested to review or synthesize architecture documentation:
 | **Inspect Usages** | `sot usages "<symbol>" [--json]` | `sot_usages` |
 | **Import SCIP Index**| `sot import-scip <path> [--provider-version v1]` | CLI |
 | **Implementations** | `sot implementations "<interface>"` | `sot_implementations` |
-| **Rename Impact** | `sot rename "<symbol>" --to <new_name>` | `sot_rename` |
+| **Rename Impact** | `sot rename "<symbol>" --to <new_name>` | `CLI only` |
 | **Pack Subgraph** | `sot pack "<symbol>" [--tokens 1500] [--json]` | `sot_pack` |
-| **Synchronize DB** | `sot reconcile [--workers 4] [--force]` | `sot_reconcile` |
-| **Audit Drift** | `sot verify [--deep]` | `sot_verify` |
-| **Database Doctor** | `sot doctor [--json]` | `sot_doctor` |
-| **Clean Stale Data**| `sot clean [--all] [--include-notes]` | `sot_clean` |
-| **Vacuum Database** | `sot vacuum [--analyze]` | `sot_vacuum` |
-| **Store Note** | `sot insert --title "..." --body "..."` | `sot_insert` |
-| **Cluster Graph** | `sot cluster [--scope <path>]` | `sot_cluster` |
-| **Architecture Report** | `sot report [-o report.md]` | `sot_report` |
-| **Interactive Viz** | `sot viz [-o graph.html]` | `sot_viz` |
-| **Export Graph** | `sot export -f <graphrag\|obsidian\|scip>` | `sot_export` |
+| **Synchronize DB** | `sot reconcile [--workers 4] [--force]` | `CLI only` |
+| **Audit Drift** | `sot verify [--deep]` | `sot_verify_drift` |
+| **Database Doctor** | `sot doctor [--json]` | `CLI only` |
+| **Clean Stale Data**| `sot clean [--all] [--include-notes]` | `CLI only` |
+| **Vacuum Database** | `sot vacuum [--analyze]` | `CLI only` |
+| **Store Note** | `sot insert --title "..." --body "..."` | `CLI only` |
+| **Cluster Graph** | `sot cluster [--scope <path>]` | `sot_communities` |
+| **Architecture Report** | `sot report [-o report.md]` | `sot_architecture_report` |
+| **Interactive Viz** | `sot viz [-o graph.html]` | `CLI only` |
+| **Export Graph** | `sot export -f <graphrag\|obsidian\|scip>` | `CLI only` |
 | **Fact Bundler** | `sot bundle [-o .sot/bundle/]` | `sot_bundle` |
 | **Full-Stack Trace** | `sot trace "<target>" [--depth 2] [-o <file>]` | `sot_trace` |
 | **UI Decision Tree** | `sot ui-tree "<component>"` | `sot_ui_tree` |

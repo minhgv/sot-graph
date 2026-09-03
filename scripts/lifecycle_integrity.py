@@ -94,7 +94,7 @@ def main() -> int:
             print(f"❌ {f}", file=sys.stderr)
         return 1
     print(f"✅ {args.runs} lifecycle integrity runs passed "
-          f"(digest stable: {(base_digest or "")[:12]}…)")
+          f"(digest stable: {(base_digest or '')[:12]}…)")
     return 0
 
 

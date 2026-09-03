@@ -28,7 +28,6 @@ import hashlib
 import inspect
 import json
 import os
-import shutil
 import sqlite3
 import subprocess
 import sys
@@ -118,6 +117,7 @@ SCOPES: Dict[str, Dict[str, List[str]]] = {
             "test_adapters.py", "test_p3_adapters.py", "test_export.py",
             "test_p4_ranking.py", "test_p4_search_safety.py",
             "test_p4_quality_gate.py", "test_phase6.py",
+            "test_adapter_docs_consistency.py",
         ],
     },
     "assurance": {
@@ -334,6 +334,181 @@ def _probe_tests_to_run_none() -> Tuple[str, str]:
     return "OK", "tests_to_run reads TestImpact.path; no 'test_file' reference"
 
 
+def _probe_polling_deferred_drop() -> Tuple[str, str]:
+    """P1 watcher.py — polling backend drops LockBusy-deferred paths.
+
+    The polling loop advances its disk-state baseline (``current = fresh``)
+    BEFORE reconciling, so a path deferred by LockBusy can never re-enter
+    the changed set via diffing — its bytes do not change a second time.
+    Without an explicit carry-over into the next cycle (the watchfiles
+    backend's ``pending`` contract), a write lock held longer than the
+    0.2s in-loop retry window (CLI migration, provider sync) voids the
+    event until the file happens to change again.
+    """
+    import threading
+
+    from sot_graph import watcher as watcher_mod
+    from sot_graph.locking import LockBusy
+
+    class _FakeReconciler:
+        def __init__(self, app: str) -> None:
+            self.app = app
+            self.locked_until = time.monotonic() + 0.6  # > 0.2s retry window
+            self.published: List[str] = []
+
+        def scan(self, _paths=None):  # polling snapshot() feed
+            return [self.app]
+
+        def reconcile_path(self, path: str) -> str:
+            if time.monotonic() < self.locked_until:
+                raise LockBusy("simulated migration lock")
+            self.published.append(path)
+            return "indexed"
+
+    with tempfile.TemporaryDirectory() as td:
+        app = Path(td, "app.py")
+        app.write_text("def f():\n    return 1\n", encoding="utf-8")
+        fake = _FakeReconciler(str(app))
+        stop = threading.Event()
+        thread = threading.Thread(
+            target=watcher_mod._run_polling,
+            args=(fake, td, 20, lambda message: None),
+            kwargs={"interval_ms": 40, "stop_event": stop},
+            daemon=True,
+        )
+        thread.start()
+        # Touch the file AFTER the loop's initial snapshot so the next
+        # diff actually raises a change event.
+        time.sleep(0.15)
+        app.write_text("def f():\n    return 2\n", encoding="utf-8")
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and not fake.published:
+            time.sleep(0.05)
+        stop.set()
+        thread.join(timeout=2.0)
+        if not fake.published:
+            return "BUG_PRESENT", (
+                "app.py deferred by LockBusy (lock held 0.6s > 0.2s retry "
+                "window) was never re-enqueued — polling advances its "
+                "baseline past the event and the DB stays stale until the "
+                "next disk change"
+            )
+        return "OK", "LockBusy-deferred path re-published via cross-cycle carry-over"
+
+
+def _probe_watchfiles_pending_carryover() -> Tuple[str, str]:
+    """P1 watcher.py — watchfiles backend must carry pending across batches.
+
+    _reconcile_quietly's contract: LockBusy paths are DEFERRED, never
+    dropped, and must be re-enqueued into the next debounce batch. The
+    watchfiles backend honors it by unioning ``pending`` into the next
+    batch and reassigning ``pending`` from the deferred return — this
+    probe guards both halves of that wiring against regression.
+    """
+    import sot_graph.watcher as watcher_mod
+    src = inspect.getsource(watcher_mod._run_watchfiles)
+    unions = "paths |= pending" in src
+    reassigns = "_published, pending = _reconcile_quietly" in src
+    if not (unions and reassigns):
+        return "BUG_PRESENT", (
+            f"watchfiles backend lost the LockBusy pending carry-over "
+            f"(union present: {unions}, reassign present: {reassigns}) — "
+            "deferred events would drop at the next batch"
+        )
+    return "OK", "pending is unioned into the next batch and fed from deferred"
+
+
+def _probe_watcher_unsupported_churn() -> Tuple[str, str]:
+    """P2 reconciler.py:508 — watcher-fed binaries must be excluded, not churned.
+
+    Watcher events can name unsupported/binary files (logos, data blobs).
+    Without the ``_supported()`` gate in reconcile_path they get indexed
+    into FTS (mojibake previews), then the next full reconcile's deletion
+    sweep removes them, then the next touch re-indexes them — an
+    add/delete churn cycle per event.
+    """
+    from sot_graph.db import Database
+    from sot_graph.reconciler import Reconciler
+    from sot_graph.watcher import _reconcile_quietly
+
+    with tempfile.TemporaryDirectory() as td:
+        logo = Path(td, "logo.png")
+        logo.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+        db = Database(os.path.join(td, "t.db"))
+        try:
+            rec = Reconciler(db, td)
+            published, _deferred = _reconcile_quietly(rec, {str(logo)})
+            journaled = db.get_file_journal(str(logo)) is not None
+            rec.reconcile(workers=1)  # full pass must not sweep/re-add either
+            journaled_after = db.get_file_journal(str(logo)) is not None
+        finally:
+            db.close()
+        if published > 0 or journaled or journaled_after:
+            return "BUG_PRESENT", (
+                f"logo.png published={published}, journal row before/after "
+                f"full reconcile: {journaled}/{journaled_after} — unsupported "
+                "binary rides the index/delete churn cycle"
+            )
+        return "OK", "unsupported binary excluded at the gate; never journaled"
+
+
+def _probe_jit_fresh_despite_failed_reconcile() -> Tuple[str, str]:
+    """P1 verifier.py — jit FRESH must track the reconcile outcome.
+
+    verify_evidence(jit_reconcile=True) used to stamp FRESH right after
+    invoking Reconciler, whatever the reconcile achieved: a conflicted or
+    failed commit laundered into a FRESH verdict on content that was
+    never re-indexed. FRESH is only honest when nothing failed AND the
+    post-reconcile journal sha matches the disk hash.
+    """
+    from types import SimpleNamespace
+
+    import sot_graph.reconciler as reconciler_mod
+    from sot_graph.db import Database
+    from sot_graph.reconciler import Reconciler
+    from sot_graph.verifier import FreshnessStatus, TrustVerifier, tokenize
+
+    class _FailingReconciler:
+        def __init__(self, db, root):  # noqa: ARG002 (verifier wiring)
+            pass
+
+        def reconcile(self, paths=None, workers=1):  # noqa: ARG002
+            return SimpleNamespace(failed=1)
+
+    with tempfile.TemporaryDirectory() as td:
+        svc = Path(td, "svc.py")
+        svc.write_text("def alpha():\n    return 42\n", encoding="utf-8")
+        db = Database(os.path.join(td, "t.db"))
+        try:
+            Reconciler(db, td).reconcile(workers=1)
+            node = db.get_node_by_symbol("svc.alpha")
+            if node is None:
+                return "PROBE_ERROR", "fixture broken: svc.alpha not indexed"
+            svc.write_text("def beta():\n    return 100\n", encoding="utf-8")
+            cand = {
+                "id": node["id"], "path": "svc.py", "symbol": "svc.alpha",
+                "line_start": 1, "kind": "function",
+            }
+            real = reconciler_mod.Reconciler
+            reconciler_mod.Reconciler = _FailingReconciler
+            try:
+                evidence = TrustVerifier.verify_evidence(
+                    cand, tokenize("alpha"), td, db=db,
+                    auto_heal=False, jit_reconcile=True,
+                )
+            finally:
+                reconciler_mod.Reconciler = real
+        finally:
+            db.close()
+        if evidence.freshness == FreshnessStatus.FRESH:
+            return "BUG_PRESENT", (
+                "reconcile reported failed=1 and the journal sha predates "
+                "the disk edit, yet jit_reconcile returned FRESH — failed "
+                "commits must not be laundered into FRESH verdicts"
+            )
+        return "OK", f"freshness={evidence.freshness} gated on reconcile outcome"
+
+
 PROBES: Dict[str, List[Tuple[str, str, Callable[[], Tuple[str, str]]]]] = {
     "core-storage": [
         ("journal-like-wildcard", "P1 db.py:676", _probe_journal_like_wildcard),
@@ -353,7 +528,12 @@ PROBES: Dict[str, List[Tuple[str, str, Callable[[], Tuple[str, str]]]]] = {
         ("coverage-mtime-false-stale", "P1 coverage.py:229", _probe_coverage_mtime_false_stale),
         ("tests-to-run-none", "P1 receipts.py:563", _probe_tests_to_run_none),
     ],
-    "sync-healing": [],
+    "sync-healing": [
+        ("polling-deferred-drop", "P1 watcher.py:154", _probe_polling_deferred_drop),
+        ("watchfiles-pending-carryover", "P1 watcher.py:76", _probe_watchfiles_pending_carryover),
+        ("watcher-unsupported-churn", "P2 reconciler.py:508", _probe_watcher_unsupported_churn),
+        ("jit-fresh-despite-failed-reconcile", "P1 verifier.py:416", _probe_jit_fresh_despite_failed_reconcile),
+    ],
 }
 
 
@@ -367,7 +547,7 @@ class ScopeResult:
     ruff: Optional[Dict[str, Any]] = None
     pyright: Optional[Dict[str, Any]] = None
     pytest: Optional[Dict[str, Any]] = None
-    probes: List[Dict[str, str]] = field(default_factory=list)
+    probes: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def gates_pass(self) -> bool:
@@ -480,10 +660,10 @@ def run_tests(results: Dict[str, ScopeResult], skip: set) -> None:
         print(f"== pytest [{scope}] ({len(test_files)} files)")
         proc = _run(["uv", "run", "pytest", "-q", "--strict-markers", "-p", "no:cacheprovider",
                      "--no-header", *test_files])
-        tail = [l for l in proc.stdout.strip().splitlines() if l.strip()][-1] if proc.stdout else ""
+        tail = [ln for ln in proc.stdout.strip().splitlines() if ln.strip()][-1] if proc.stdout else ""
         res.pytest = {
             "pass": proc.returncode == 0,
-            "detail": tail[:200] or proc.stderr.strip().splitlines()[-1][:200],
+            "detail": tail[:200] or (proc.stderr or "").strip().splitlines()[-1][:200],
         }
 
 
@@ -533,7 +713,7 @@ def render_markdown(results: Dict[str, ScopeResult], meta: Dict[str, Any]) -> st
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     ap.add_argument("--scope", action="append", choices=sorted(SCOPES),
                     help="limit evaluation to given scope (repeatable)")
     ap.add_argument("--skip", action="append", default=[],

@@ -140,6 +140,7 @@ def _run_polling(
         return state
 
     current = snapshot()
+    deferred: Set[str] = set()  # LockBusy carry-over into the next cycle
     while True:
         if stop_event and stop_event.is_set():
             break
@@ -152,6 +153,11 @@ def _run_polling(
             if current.get(path) != stamp
         } | {path for path in current if path not in fresh}
         current = fresh
+        # Advancing `current` above is safe only because deferred paths are
+        # re-fed explicitly here: disk-state diffing alone would never see
+        # them again (their bytes did not change a second time).
+        changed |= deferred
+        deferred = set()
         if not changed:
             continue
         # Fold bursty edits: wait until quiet for debounce_ms.
@@ -177,6 +183,10 @@ def _run_polling(
         while deferred and time.monotonic() < retry_at:
             time.sleep(0.05)
             _published, deferred = _reconcile_quietly(reconciler, deferred)
+        # Anything still deferred past the retry window is NOT dropped: it
+        # rides `deferred` into the next cycle's changed set (the contract
+        # _reconcile_quietly documents), mirroring the watchfiles backend's
+        # pending carry-over.
 
 
 def run_watch(
