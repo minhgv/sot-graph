@@ -1,0 +1,46 @@
+name: diff-impact
+
+# Dogfood: run the SOT-Graph CI-native blast-radius bot on our own PRs,
+# via the reusable composite action in .github/actions/diff-impact/.
+# Other repositories: copy this workflow or consume the action directly
+# (see docs/CI_INTEGRATION.md).
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'Git revision to diff against (default: previous commit)'
+        required: false
+        default: 'HEAD~1'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  diff-impact:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history so the PR merge base is local)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve base revision
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # PRs check out the merge commit; the PR's base sha is the
+            # correct comparison target for the blast radius.
+            echo "SOT_DIFF_BASE=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_ENV"
+          else
+            echo "SOT_DIFF_BASE=${{ inputs.base || 'HEAD~1' }}" >> "$GITHUB_ENV"
+          fi
+
+      - name: SOT-Graph Diff Impact
+        uses: ./.github/actions/diff-impact
+        with:
+          base: ${{ env.SOT_DIFF_BASE }}
+          format: github

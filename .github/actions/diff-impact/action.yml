@@ -1,0 +1,98 @@
+name: 'SOT-Graph Diff Impact'
+description: >
+  CI-native blast-radius bot: runs `sot reconcile` + `sot diff-impact <base>`
+  and posts/updates one idempotent PR comment (GitHub format, collapsed
+  sections). Outside a pull_request context it writes the report to
+  $GITHUB_STEP_SUMMARY instead. Checkout is the caller's job; ensure the
+  `base` revision is fetchable (a full or merge-capable checkout).
+inputs:
+  base:
+    description: 'Git revision to diff against (e.g. a PR merge base sha or HEAD~1)'
+    required: false
+    default: 'HEAD~1'
+  format:
+    description: 'Renderer format passed to sot diff-impact (github | markdown)'
+    required: false
+    default: 'github'
+  install-extra:
+    description: 'Comma-separated pip extras when falling back to installing from this repo (e.g. "mcp")'
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: 'Install sot-graph (PyPI, fallback to this repository)'
+      id: install
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v uv >/dev/null 2>&1 && uv tool install sot-graph >/dev/null 2>&1; then
+          echo "source=pypi-uv" >> "$GITHUB_OUTPUT"
+        elif pip install --quiet sot-graph >/dev/null 2>&1; then
+          echo "source=pypi-pip" >> "$GITHUB_OUTPUT"
+        else
+          # PyPI unavailable (or lagging this repo): install straight from
+          # the repository that invoked the action.
+          REPO_URL="${{ github.server_url }}/${{ github.repository }}.git"
+          EXTRA="${{ inputs.install-extra }}"
+          if [ -n "$EXTRA" ]; then
+            pip install --quiet "git+${REPO_URL}[${EXTRA}]"
+          else
+            pip install --quiet "git+${REPO_URL}"
+          fi
+          echo "source=repo" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: 'Reconcile graph index'
+      shell: bash
+      run: |
+        set -euo pipefail
+        # The engine only trusts a reconciled index; the Action is the write
+        # path, the report generation below stays read-only.
+        sot reconcile --workers 4
+
+    - name: 'Render diff-impact report'
+      id: analyze
+      shell: bash
+      run: |
+        set -euo pipefail
+        BASE="${{ inputs.base }}"
+        # Shallow PR checkouts may not contain the base revision yet.
+        if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null 2>&1; then
+          git fetch --no-tags --depth=1 origin "${BASE}" || true
+        fi
+        sot diff-impact "${BASE}" --format "${{ inputs.format }}" > sot-diff-impact-comment.md
+        {
+          echo '### SOT-Graph Diff Impact'
+          echo ''
+          cat sot-diff-impact-comment.md
+        } > /tmp/sot-step-summary.md
+
+    - name: 'Post or update PR comment (writes step summary off-PR)'
+      # Tolerant by design: a rendered report must not fail the job because
+      # comment posting hit a permission hiccup. The engine steps above are
+      # the fail-closed part.
+      continue-on-error: true
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        COMMENT_FILE="sot-diff-impact-comment.md"
+        MARKER='<!-- sot-diff-impact -->'
+        PR_NUMBER="${{ github.event.pull_request.number }}"
+        if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
+          echo "Not a pull_request context — writing ${{ inputs.format }} report to GITHUB_STEP_SUMMARY."
+          cat /tmp/sot-step-summary.md >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+          exit 0
+        fi
+        BODY="$(printf '%s\n\n%s' "$MARKER" "$(cat "$COMMENT_FILE")")"
+        COMMENT_ID="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+          --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" | head -n1 || true)"
+        if [ -n "$COMMENT_ID" ]; then
+          gh api --method PATCH "repos/${{ github.repository }}/issues/comments/${COMMENT_ID}" -f body="$BODY" >/dev/null
+          echo "Updated existing diff-impact comment ${COMMENT_ID} on PR #${PR_NUMBER}."
+        else
+          gh pr comment "$PR_NUMBER" --body "$BODY" >/dev/null
+          echo "Posted new diff-impact comment on PR #${PR_NUMBER}."
+        fi

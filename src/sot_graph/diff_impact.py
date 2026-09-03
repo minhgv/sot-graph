@@ -34,6 +34,7 @@ __all__ = [
     "analyze_diff_impact",
     "analyze_commit_history",
     "format_diff_impact_markdown",
+    "format_diff_impact_github",
     "format_diff_impact_json",
     "format_commit_history_markdown",
     "format_commit_history_json",
@@ -1381,6 +1382,173 @@ def format_diff_impact_markdown(result: DiffImpactResult) -> str:
 def format_diff_impact_json(result: DiffImpactResult, indent: int = 2) -> str:
     """Serialize DiffImpactResult into formatted JSON."""
     return json.dumps(result.to_dict(), indent=indent, ensure_ascii=False)
+
+
+# --- PR-safe GitHub comment renderer -----------------------------------------
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+#: HTML comment marker anchoring idempotent PR-comment updates (the GitHub
+#: Action edits the previous comment carrying this marker instead of spamming).
+GITHUB_COMMENT_MARKER = "<!-- sot-diff-impact -->"
+
+
+def _strip_ansi(text: Any) -> str:
+    """Remove ANSI escape sequences; GitHub comments render them as noise."""
+    if text is None:
+        return ""
+    return _ANSI_ESCAPE_RE.sub("", str(text))
+
+
+def _repo_relative(raw: Any, repo_root: Optional[str]) -> str:
+    """Cite a path repo-relative (POSIX separators) or verbatim when outside.
+
+    Constraint: PR comments must never leak runner-absolute local paths.
+    """
+    text = _strip_ansi(raw)
+    if not text or not repo_root:
+        return text
+    root_abs = os.path.abspath(repo_root)
+    candidate = text if os.path.isabs(text) else os.path.join(root_abs, text)
+    candidate_abs = os.path.normpath(os.path.abspath(candidate))
+    try:
+        rel = os.path.relpath(candidate_abs, root_abs)
+    except ValueError:
+        return text
+    if rel == ".." or rel.startswith(".." + os.sep):
+        return text
+    return rel.replace(os.sep, "/")
+
+
+def _details_block(title: str, body_lines: List[str]) -> List[str]:
+    """One collapsed <details> section; blank lines keep the inner Markdown live."""
+    return ["<details>", f"<summary><strong>{title}</strong></summary>", "", *body_lines, "", "</details>", ""]
+
+
+def format_diff_impact_github(result: DiffImpactResult, repo_root: Optional[str] = None) -> str:
+    """Render DiffImpactResult as a PR-comment-optimized Markdown body.
+
+    Constraints (R4): top-line risk verdict (emoji + score), collapsed
+    <details> sections for blast radius / callers / affected tests, zero
+    ANSI escape codes, repo-relative paths only, and deterministic
+    ordering of every row. Reuses the engine's computed data — no impact
+    is recomputed here.
+    """
+    summary = result.summary
+    risk_level = _strip_ansi(summary.get("risk_level", "LOW")).upper() or "LOW"
+    risk_icon = "🔴" if risk_level == "HIGH" else "🟡" if risk_level == "MEDIUM" else "🟢"
+    target = _strip_ansi(result.target)
+    changed = sorted({_repo_relative(f, repo_root) for f in (result.changed_files or [])})
+
+    lines: List[str] = [GITHUB_COMMENT_MARKER, ""]
+    lines.append(
+        f"## {risk_icon} SOT-Graph Diff Impact: **{risk_level}** "
+        f"(risk score {summary.get('risk_score', 0)}/100)"
+    )
+    lines.append("")
+    lines.append(
+        f"**Target:** `{target}` · "
+        f"{summary.get('total_changed_files', 0)} changed files · "
+        f"{summary.get('total_direct_nodes', 0)} modified symbols · "
+        f"{summary.get('total_callers', 0)} callers · "
+        f"{summary.get('total_tests', 0)} tests to re-run"
+    )
+    lines.append("")
+
+    if changed:
+        lines.append("**Changed files:** " + " · ".join(f"`{c}`" for c in changed))
+        lines.append("")
+
+    # 1. Directly modified symbols.
+    direct_nodes = sorted(
+        result.direct_nodes or [],
+        key=lambda n: (_repo_relative(n.path, repo_root), _strip_ansi(n.symbol or n.label)),
+    )
+    direct_lines: List[str] = []
+    if direct_nodes:
+        direct_lines.append("| Symbol | Kind | File | Lines | Change |")
+        direct_lines.append("| :--- | :--- | :--- | :--- | :--- |")
+        for n in direct_nodes:
+            sym = _strip_ansi(n.symbol or n.label).replace("|", "\\|")
+            path = _repo_relative(n.path, repo_root).replace("|", "\\|")
+            kind = _strip_ansi(n.kind).replace("|", "\\|")
+            chg = _strip_ansi(n.change_type).replace("|", "\\|")
+            direct_lines.append(f"| `{sym}` | `{kind}` | `{path}` | L{n.line_start}-L{n.line_end} | **{chg}** |")
+    else:
+        direct_lines.append("_No matching AST nodes in the knowledge graph for the modified line intervals._")
+    lines.extend(_details_block(
+        f"🎯 Directly modified symbols ({len(direct_nodes)})", direct_lines,
+    ))
+
+    # 2. Blast radius: upstream inward callers.
+    callers = sorted(
+        result.caller_impacts or [],
+        key=lambda c: (c.depth, _repo_relative(c.path, repo_root), _strip_ansi(c.symbol or c.label)),
+    )
+    caller_lines: List[str] = []
+    if callers:
+        caller_lines.append("| Hop | Caller | File : Line | Relation | Callee |")
+        caller_lines.append("| :--- | :--- | :--- | :--- | :--- |")
+        for c in callers:
+            sym = _strip_ansi(c.symbol or c.label).replace("|", "\\|")
+            path = _repo_relative(c.path, repo_root).replace("|", "\\|")
+            rel = _strip_ansi(c.via_relation).replace("|", "\\|")
+            callee = _strip_ansi(c.callee_symbol).replace("|", "\\|")
+            caller_lines.append(f"| {c.depth} | `{sym}` | `{path}:{c.line_start}` | `{rel}` | `{callee}` |")
+    else:
+        caller_lines.append("_Zero inward caller dependencies detected (low ripple effect)._")
+    lines.extend(_details_block(
+        f"💥 Blast radius — upstream callers ({len(callers)})", caller_lines,
+    ))
+
+    # 3. Cross-stack API endpoints.
+    apis = sorted(
+        result.api_impacts or [],
+        key=lambda a: (_strip_ansi(a.http_method), _strip_ansi(a.normalized_uri)),
+    )
+    api_lines: List[str] = []
+    if apis:
+        api_lines.append("| Method | URI | Frontend caller | Backend controller | Source |")
+        api_lines.append("| :--- | :--- | :--- | :--- | :--- |")
+        for a in apis:
+            uri = _strip_ansi(a.normalized_uri).replace("|", "\\|")
+            fe = _strip_ansi(a.fe_caller_symbol).replace("|", "\\|")
+            be = _strip_ansi(a.be_controller_symbol).replace("|", "\\|")
+            src = _strip_ansi(a.impact_source).replace("|", "\\|")
+            api_lines.append(f"| **{_strip_ansi(a.http_method)}** | `{uri}` | `{fe}` | `{be}` | `{src}` |")
+    else:
+        api_lines.append("_No direct or indirect API contract bindings affected._")
+    lines.extend(_details_block(
+        f"🌐 Affected API endpoints ({len(apis)})", api_lines,
+    ))
+
+    # 4. Recommended test verification.
+    tests = sorted(
+        result.test_impacts or [],
+        key=lambda t: (_repo_relative(t.path, repo_root), _strip_ansi(t.symbol or t.path)),
+    )
+    test_lines: List[str] = []
+    if tests:
+        test_lines.append("| Test target | Kind | File | Reason |")
+        test_lines.append("| :--- | :--- | :--- | :--- |")
+        for t in tests:
+            tgt = _strip_ansi(t.symbol or t.path).replace("|", "\\|")
+            kind = _strip_ansi(t.kind).replace("|", "\\|")
+            path = _repo_relative(t.path, repo_root).replace("|", "\\|")
+            reason = _strip_ansi(t.impact_reason).replace("|", "\\|")
+            test_lines.append(f"| `{tgt}` | `{kind}` | `{path}` | `{reason}` |")
+    else:
+        test_lines.append("_No existing test suites mapped to the modified symbols. Consider adding coverage._")
+    lines.extend(_details_block(
+        f"🧪 Recommended test verification ({len(tests)})", test_lines,
+    ))
+
+    lines.append(
+        f"<sub>Generated by sot-graph · engine execution {summary.get('execution_time_ms', 0)}ms · "
+        "evidence bounded by the reconciled knowledge-graph index</sub>"
+    )
+    lines.append("")
+    return "\n".join(lines)
 
 
 def format_commit_history_markdown(result: CommitHistoryResult) -> str:

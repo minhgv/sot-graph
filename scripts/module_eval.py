@@ -113,10 +113,13 @@ SCOPES: Dict[str, Dict[str, List[str]]] = {
         "files": [
             f"{SRC}/cli.py", f"{SRC}/mcp_server.py", f"{SRC}/mcp_service.py",
             f"{SRC}/adapters/", f"{SRC}/export/",
+            f"{SRC}/providers/cross_check.py",
         ],
         "tests": [
             "test_cli_smoke.py", "test_cli_provider_wiring.py", "test_mcp.py",
             "test_mcp_modern.py", "test_mcp_receipt_tools.py",
+            "test_mcp_prompts.py", "test_providers_cross_check.py",
+            "test_diff_impact_github.py",
             "test_adapters.py", "test_p3_adapters.py", "test_export.py",
             "test_p4_ranking.py", "test_p4_search_safety.py",
             "test_p4_quality_gate.py", "test_phase6.py",

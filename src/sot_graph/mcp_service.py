@@ -1077,6 +1077,7 @@ class McpService:
         max_hops: int = 2,
         max_nodes: int = 50,
         max_bytes: int = 65_536,
+        max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Build a k-hop ContextBundle (read-only) for agent prompt registers."""
         from sot_graph.pack import PackError, build_bundle, render_yaml
@@ -1086,6 +1087,7 @@ class McpService:
                 bundle = build_bundle(
                     _ConnView(conn), self.project_root, target,
                     max_hops=max_hops, max_nodes=max_nodes, max_bytes=max_bytes,
+                    max_tokens=max_tokens,
                 )
             except PackError as exc:
                 return {
@@ -1246,6 +1248,7 @@ class McpService:
         """Analyze blast radius, upstream inward callers, API contract impacts, and affected tests for git diff."""
         from sot_graph.diff_impact import (
             DiffImpactEngine,
+            format_diff_impact_github,
             format_diff_impact_markdown,
         )
         reconcile_result = (
@@ -1292,8 +1295,13 @@ class McpService:
                     else {}
                 ),
             }
-            if format.lower() == "markdown":
+            rendered = str(format).lower()
+            if rendered == "markdown":
                 payload["markdown"] = format_diff_impact_markdown(res)
+            elif rendered == "github":
+                payload["markdown"] = format_diff_impact_github(
+                    res, repo_root=self.project_root,
+                )
             return self._fits_response(payload)
         return self._run(op)
 

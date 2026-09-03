@@ -1117,6 +1117,45 @@ def cmd_providers(args: argparse.Namespace, root: str,
     if sub == "sync":
         return cmd_providers_sync(args, root, db_path=db_path)
 
+    if sub == "cross-check":
+        # Read-only evidence reconciliation: unlike the registry reads above
+        # this DOES touch the database (graph_edges vs provider_evidence),
+        # so it opens the resolved --db target read-only.
+        from sot_graph.db import Database
+        from sot_graph.providers.cross_check import cross_check
+
+        if not db_path:
+            print("❌ No --db target resolved for cross-check.", file=sys.stderr)
+            return 1
+        try:
+            xc_db = Database(db_path, read_only=True)
+        except FileNotFoundError:
+            print(f"❌ No index database at {db_path}; run `sot reconcile` first.", file=sys.stderr)
+            return 1
+        try:
+            report = cross_check(xc_db, provider=getattr(args, "provider", None))
+            if getattr(args, "json", False):
+                print(json.dumps(wrap_envelope(report, db=xc_db), indent=2, default=str))
+                return 0
+            totals = report["totals"]
+            print("\n🔍 Provider cross-check (builtin AST vs external evidence):")
+            print(f"  builtin pairs (graph_edges)     : {report['builtin_pair_count']}")
+            print(f"  external pairs (provider_evidence): {report['external_pair_count']}")
+            print(f"  agreements (both claim)         : {totals['agreements']}")
+            print(f"  builtin-only (AST found)        : {totals['builtin_only']}")
+            print(f"  external-only (review these)    : {totals['external_only']}")
+            if totals["unmapped_external_relations"]:
+                print(f"  unmapped external relation rows : {totals['unmapped_external_relations']}")
+            if report["provider_counts"]:
+                print("  external evidence rows per provider:")
+                for name, count in report["provider_counts"].items():
+                    print(f"    • {name}: {count}")
+            print("\n  external-only pairs are candidate hallucinations OR builtin parser gaps — verify each before acting.")
+            return 0
+        finally:
+            xc_db.close()
+
+
     if sub == "lifecycle":
         from sot_graph.providers.lifecycle import lifecycle_manifest
 
@@ -1414,7 +1453,11 @@ def cmd_scope_receipt(args: argparse.Namespace, db: Database, root: str) -> int:
 
 
 def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
-    from sot_graph.diff_impact import GitDeltaExtractor, format_diff_impact_markdown
+    from sot_graph.diff_impact import (
+        GitDeltaExtractor,
+        format_diff_impact_github,
+        format_diff_impact_markdown,
+    )
 
     from sot_graph.assurance.receipts import diff_impact_receipt
     from sot_graph.snapshot import capture_worktree_snapshot
@@ -1489,7 +1532,13 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
     if fed is not None:
         payload["external_candidates"] = fed["candidates"]
 
-    if getattr(args, "json", False):
+    # --format (R4): github = PR-safe renderer; text = legacy CLI output;
+    # markdown = pure report body; json = envelope. Default (None) keeps the
+    # historical behavior: --json wins, otherwise text.
+    fmt = getattr(args, "format", None) or ("json" if getattr(args, "json", False) else "text")
+    fmt = str(fmt).lower()
+
+    if fmt == "json":
         if fed is not None:
             _print_fed_warnings(fed)
         envelope = wrap_envelope(payload, db=db)
@@ -1506,11 +1555,12 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
             _print_federation_notes(fed)
         return 0
 
-    print(
-        f"_Snapshot: pre {pre_snapshot.descriptor_digest[:19]} "
-        f"(dirty={pre_snapshot.dirty}) → post {post_snapshot['descriptor_digest'][:19]} "
-        f"(dirty={post_snapshot['dirty']})_"
-    )
+    if fmt == "text":
+        print(
+            f"_Snapshot: pre {pre_snapshot.descriptor_digest[:19]} "
+            f"(dirty={pre_snapshot.dirty}) → post {post_snapshot['descriptor_digest'][:19]} "
+            f"(dirty={post_snapshot['dirty']})_"
+        )
 
     def _ns(value: Any) -> Any:
         if isinstance(value, dict):
@@ -1530,7 +1580,10 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
         api_impacts=_ns(receipt["api_impacts"]),
         test_impacts=_ns(receipt["test_impacts"]),
     )
-    md = format_diff_impact_markdown(engine)
+    if fmt == "github":
+        md = format_diff_impact_github(engine, repo_root=root)
+    else:
+        md = format_diff_impact_markdown(engine)
     if getattr(args, "output", None):
         out_path = os.path.abspath(os.path.join(root, args.output)) if not os.path.isabs(args.output) else args.output
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -1539,7 +1592,10 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
         print(f"📊 Diff impact report written to: {out_path}")
     else:
         print(md)
-    _print_federation_notes(fed)
+    # Notes print to stdout in text mode only; markdown/github output must
+    # stay redirect-safe for CI piping (warnings already go to stderr).
+    if fmt == "text":
+        _print_federation_notes(fed)
     return 0
 
 
@@ -2122,6 +2178,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_prov_lifecycle = prov_subs.add_parser("lifecycle", help="Provider lifecycle manifest + 8-step update process (roadmap §8.1/§8.2)")
     p_prov_lifecycle.add_argument("--format", default="text", choices=["text", "json"], help="Output format (default: text)")
+
+    p_prov_xc = prov_subs.add_parser(
+        "cross-check",
+        help="Read-only reconciliation: builtin AST evidence vs external provider evidence (R4)",
+    )
+    p_prov_xc.add_argument("--json", action="store_true", help="Output the read-only envelope as JSON")
+    p_prov_xc.add_argument("--provider", default=None, help="Restrict the external side to one provider name (default: all)")
     p_prov_sync = prov_subs.add_parser(
         "sync",
         help="Explicit index sync for one provider (own timeout, lock, receipt)",
@@ -2140,6 +2203,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_diff.add_argument("--auto-reconcile", action="store_true", help="Reconcile knowledge graph before analyzing impact")
     p_diff.add_argument("-o", "--output", default=None, help="Output markdown file path")
     p_diff.add_argument("--json", action="store_true", help="Output raw JSON format")
+    p_diff.add_argument("--format", default=None,
+                        choices=["text", "markdown", "json", "github"],
+                        help="Output format: text (legacy CLI report), markdown (pure report body), json (envelope), github (PR-comment-safe collapsed sections; R4). Default: text, or json with --json")
     p_diff.add_argument("--provider", default="builtin",
                         help="External evidence providers: builtin | auto | prefer:<name> | require:<name> | all (default: builtin)")
 

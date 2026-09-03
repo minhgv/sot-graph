@@ -261,13 +261,18 @@ sot diff-impact HEAD~1 --auto-reconcile --json
 
 # Inspect recent commit history with automated risk scoring and impacted symbols
 sot log -n 10 --author "developer"
+
+# PR-comment-safe rendering for CI bots (collapsed sections, repo-relative paths)
+sot diff-impact HEAD~1 --format github
 ```
+
+> CI-native usage: post/update this report as an idempotent PR comment with the reusable composite action — see [docs/CI_INTEGRATION.md](docs/CI_INTEGRATION.md).
 
 ---
 
 ## Model Context Protocol (MCP) Server
 
-`sot-graph` exposes 22 structured MCP tools and resources over standard I/O for AI coding agents:
+`sot-graph` exposes 22 structured MCP tools, 2 reusable prompts, and resources over standard I/O for AI coding agents:
 
 ```bash
 # Start MCP server over stdio
@@ -286,14 +291,14 @@ sot mcp
 | `sot_verify_drift` | Non-destructive filesystem vs database drift check | — | `deep` (bool), `limit` (int) |
 | `sot_architecture_report` | Architectural analysis with god nodes and modularity metrics | — | `scope` (str), `min_size` (int), `sigma` (float) |
 | `sot_communities` | Louvain / Label Propagation community detection with cohesion scores | — | `scope` (str), `min_size` (int) |
-| `sot_pack` | ContextBundle (YAML/JSON) with 1-hop contracts and 2-hop signature stubs | `target` (str) | `max_hops` (int, 1-3), `max_nodes` (int), `max_bytes` (int) |
+| `sot_pack` | ContextBundle (YAML/JSON) with 1-hop contracts and 2-hop signature stubs | `target` (str) | `max_hops` (int, 1-3), `max_nodes` (int), `max_bytes` (int), `max_tokens` (int) |
 | `sot_map` | Token-budgeted repository map ranked by personalized PageRank | — | `focus` (str), `max_tokens` (int, default 1024) |
 | `sot_notes` | Persisted architectural knowledge notes query | — | `query` (str), `limit` (int, default 50) |
 | `sot_trace` | Execution path trace, UI decision branches, and Mermaid diagrams | `target` (str) | `depth` (int, 1-5, default 2) |
 | `sot_ui_tree` | Frontend UI decision tree, validation rules, button triggers, modals | `component` (str) | — |
 | `sot_backend_flow` | Backend service micro-steps, multi-datasources, exception branches | `service` (str) | — |
 | `sot_solution_steps` | Stage 2 Micro-step decomposition (4-column table) for manpower effort | `method` (str) | — |
-| `sot_diff_impact` | Analyze git diff blast radius, inward callers, API contract impacts, and affected tests | — | `target` (str, default 'HEAD~1'), `depth` (int, default 2), `staged` (bool), `working_tree` (bool), `auto_reconcile` (bool), `format` ('markdown'\|'json') |
+| `sot_diff_impact` | Analyze git diff blast radius, inward callers, API contract impacts, and affected tests | — | `target` (str, default 'HEAD~1'), `depth` (int, default 2), `staged` (bool), `working_tree` (bool), `auto_reconcile` (bool), `format` ('markdown'\|'json'\|'github') |
 | `sot_git_history` | Inspect git commit history with automated risk scoring and impacted symbol detection | — | `limit` (int, default 10), `author` (str), `since` (str), `with_impact` (bool, default true), `format` ('markdown'\|'json') |
 | `sot_scope_receipt` | PRE-change bounded impact scope receipt (P7.1) with snapshot binding and risk assessment | `target` (str) | `kind_of_change` ('local-body'\|'rename'\|'delete'\|'public-api'), `touches_auth` (bool), `dynamic_heavy` (bool), `depth` (int) |
 | `sot_diff_impact_receipt` | POST-change diff-impact receipt (P7.2) with post-change snapshot and closure verification | — | `target` (str), `depth` (int, 1-5), `staged` (bool), `working_tree` (bool) |
