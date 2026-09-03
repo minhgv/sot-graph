@@ -136,6 +136,60 @@ def _db_of(repo: Path):
     return Database(str(repo / ".sot" / "sot.db"))
 
 
+class TestLedgerAppendOnly:
+    """G8: the ledger is append-only history — duplicates are loud.
+
+    INSERT OR REPLACE silently erased the prior row (and its evidence
+    linkage) when a caller re-recorded an existing id; a trust ledger
+    must reject that instead.
+    """
+
+    def test_duplicate_run_id_rejected_and_original_intact(self, ledger_repo):
+        db = _db_of(ledger_repo)
+        try:
+            rid = db.record_provider_run(
+                "scip", run_id="run_dup_g8", status="ok", duration_ms=11,
+            )
+            assert rid == "run_dup_g8"
+            with pytest.raises(ValueError, match="already exists"):
+                db.record_provider_run(
+                    "scip", run_id="run_dup_g8", status="rerun", duration_ms=22,
+                )
+            row = db.conn.execute(
+                "SELECT status, duration_ms FROM provider_runs "
+                "WHERE id = 'run_dup_g8'"
+            ).fetchone()
+            assert row == ("ok", 11)  # original row untouched
+        finally:
+            db.close()
+
+    def test_duplicate_evidence_id_rejected(self, ledger_repo):
+        db = _db_of(ledger_repo)
+        try:
+            rid = db.record_provider_run("scip")
+            items = [{
+                "id": "ev_dup_g8", "path": "app.py", "symbol": "run",
+                "relation": "call:callees", "src_symbol": "run",
+                "dst_symbol": "helper", "line_start": 1, "line_end": 1,
+            }]
+            assert db.record_provider_evidence(rid, items) == 1
+            with pytest.raises(ValueError, match="duplicate provider_evidence"):
+                db.record_provider_evidence(rid, items)
+        finally:
+            db.close()
+
+    def test_ledger_commit_restores_normal_sync_level(self, ledger_repo):
+        # FULL is raised only around the ledger commit (fsync durability);
+        # the writer profile must come back to NORMAL afterwards.
+        db = _db_of(ledger_repo)
+        try:
+            db.record_provider_run("scip")
+            level = db.conn.execute("PRAGMA synchronous").fetchone()[0]
+            assert level == 1  # 1 = NORMAL
+        finally:
+            db.close()
+
+
 class TestCliQueryPersistsLedger:
     def test_usages_writes_run_and_evidence(self, ledger_repo):
         out = subprocess.run(

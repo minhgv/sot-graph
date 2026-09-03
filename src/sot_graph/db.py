@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from contextlib import contextmanager
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 from urllib.parse import quote
 
@@ -2459,6 +2460,25 @@ class Database:
             "nodes": nodes,
             "created_at": row[5],
         }
+    @contextmanager
+    def _ledger_durability(self):
+        """Raise WAL sync safety around a trust-ledger commit.
+
+        The writer profile runs ``synchronous = NORMAL`` (fsync only at
+        checkpoints) for throughput; that is fine for cacheable graph
+        rows but not for the append-only provider ledger: a power loss
+        must not erase recorded runs/evidence. FULL forces an fsync of
+        the WAL at the wrapped commit. Pragmas are set outside any
+        transaction (SQLite forbids changing the safety level mid-
+        transaction), so this must wrap the caller's ``with self.conn:``
+        block, not sit inside it.
+        """
+        self.conn.execute("PRAGMA synchronous = FULL")
+        try:
+            yield
+        finally:
+            self.conn.execute("PRAGMA synchronous = NORMAL")
+
     def record_provider_run(
         self,
         provider_name: str,
@@ -2480,22 +2500,23 @@ class Database:
         The whole INSERT runs in a single implicit transaction; a failure
         anywhere before commit leaves ``provider_runs`` untouched.
         """
-        with self.conn:
-            return self._insert_run_row(
-                provider_name,
-                provider_version=provider_version,
-                capability=capability,
-                snapshot_hash=snapshot_hash,
-                project_root=project_root,
-                position_encoding=position_encoding,
-                arguments_json=arguments_json,
-                run_id=run_id,
-                status=status,
-                exit_code=exit_code,
-                duration_ms=duration_ms,
-                command_digest=command_digest,
-                snapshot_id=snapshot_id,
-            )
+        with self._ledger_durability():
+            with self.conn:
+                return self._insert_run_row(
+                    provider_name,
+                    provider_version=provider_version,
+                    capability=capability,
+                    snapshot_hash=snapshot_hash,
+                    project_root=project_root,
+                    position_encoding=position_encoding,
+                    arguments_json=arguments_json,
+                    run_id=run_id,
+                    status=status,
+                    exit_code=exit_code,
+                    duration_ms=duration_ms,
+                    command_digest=command_digest,
+                    snapshot_id=snapshot_id,
+                )
 
     def _insert_run_row(
         self,
@@ -2524,29 +2545,38 @@ class Database:
         rid = run_id or f"run_{int(time.time())}_{uuid.uuid4().hex[:8]}"
         now = int(time.time())
         canonical_project_root = os.path.realpath(project_root) if project_root else None
-        self.conn.execute(
-            "INSERT OR REPLACE INTO provider_runs "
-            "(id, provider_name, provider_version, capability, snapshot_hash, "
-            "project_root, position_encoding, arguments_json, status, exit_code, "
-            "duration_ms, command_digest, created_at, snapshot_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                rid,
-                provider_name,
-                provider_version,
-                capability,
-                snapshot_hash,
-                canonical_project_root,
-                position_encoding,
-                arguments_json,
-                status,
-                exit_code,
-                duration_ms,
-                command_digest,
-                now,
-                snapshot_id,
-            ),
-        )
+        try:
+            self.conn.execute(
+                "INSERT INTO provider_runs "
+                "(id, provider_name, provider_version, capability, snapshot_hash, "
+                "project_root, position_encoding, arguments_json, status, exit_code, "
+                "duration_ms, command_digest, created_at, snapshot_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    rid,
+                    provider_name,
+                    provider_version,
+                    capability,
+                    snapshot_hash,
+                    canonical_project_root,
+                    position_encoding,
+                    arguments_json,
+                    status,
+                    exit_code,
+                    duration_ms,
+                    command_digest,
+                    now,
+                    snapshot_id,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            # The ledger is append-only history: re-recording an existing
+            # run id must be loud, never a silent overwrite (INSERT OR
+            # REPLACE erased the prior row — and its evidence linkage).
+            raise ValueError(
+                f"provider run id '{rid}' already exists in the ledger; "
+                "use a fresh run_id instead of re-recording"
+            ) from exc
         return rid
 
     def record_provider_binding(
@@ -2659,11 +2689,12 @@ class Database:
         Returns:
             The provider run id.
         """
-        with self.conn:
-            rid = self._insert_run_row(**run)
-            if binding is not None:
-                self._upsert_binding_row(**binding)
-            self._insert_evidence_rows(rid, evidence)
+        with self._ledger_durability():
+            with self.conn:
+                rid = self._insert_run_row(**run)
+                if binding is not None:
+                    self._upsert_binding_row(**binding)
+                self._insert_evidence_rows(rid, evidence)
         return rid
 
     def invalidate_provider_evidence(
@@ -2679,12 +2710,13 @@ class Database:
         if not ids:
             return 0
         now = int(_time.time())
-        with self.conn:
-            cur = self.conn.executemany(
-                "UPDATE provider_evidence SET invalidated_at = ? "
-                "WHERE id = ? AND invalidated_at IS NULL",
-                [(now, eid) for eid in ids],
-            )
+        with self._ledger_durability():
+            with self.conn:
+                cur = self.conn.executemany(
+                    "UPDATE provider_evidence SET invalidated_at = ? "
+                    "WHERE id = ? AND invalidated_at IS NULL",
+                    [(now, eid) for eid in ids],
+                )
         return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
 
     def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
@@ -2709,8 +2741,9 @@ class Database:
         evidence_items: Sequence[Dict[str, Any]],
     ) -> int:
         """Batch insert provider evidence items."""
-        with self.conn:
-            return self._insert_evidence_rows(run_id, evidence_items)
+        with self._ledger_durability():
+            with self.conn:
+                return self._insert_evidence_rows(run_id, evidence_items)
 
     def _insert_evidence_rows(
         self,
@@ -2759,12 +2792,20 @@ class Database:
                 line_start, line_end, col_start, col_end,
                 syntax_kind, documentation, confidence, meta, snap, now, now
             ))
-        self.conn.executemany(
-            "INSERT OR REPLACE INTO provider_evidence "
-            "(id, run_id, provider_name, file_path, path, symbol, src_symbol, target_symbol, dst_symbol, role, relation, line_start, line_end, col_start, col_end, syntax_kind, documentation, confidence, metadata_json, snapshot_hash, recorded_at, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            rows,
-        )
+        try:
+            self.conn.executemany(
+                "INSERT INTO provider_evidence "
+                "(id, run_id, provider_name, file_path, path, symbol, src_symbol, target_symbol, dst_symbol, role, relation, line_start, line_end, col_start, col_end, syntax_kind, documentation, confidence, metadata_json, snapshot_hash, recorded_at, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+        except sqlite3.IntegrityError as exc:
+            # Same append-only contract as provider_runs: an evidence id
+            # collision must surface, not silently replace prior evidence.
+            raise ValueError(
+                "duplicate provider_evidence id in batch; evidence ids are "
+                "unique forever — drop explicit ids to auto-generate fresh ones"
+            ) from exc
         return len(rows)
 
     insert_provider_evidence = record_provider_evidence

@@ -276,6 +276,62 @@ class TestDiffReceipt:
         assert post["closure_decision"] in ("open", "closed")
 
 
+class TestClosureDecision:
+    """G8: closure_decision must be reachable, not dead logic.
+
+    stale_files used to be hardcoded to the full changed-file list, so
+    decide() could never return ASSURED_WITHIN_SCOPE and closure was
+    constant "open". Staleness is now MEASURED against the journal: a
+    reconciled change closes the receipt; an unreconciled one stays open.
+    """
+
+    def _repo_with_change(self, tmp_path, *, reconcile_after_change: bool) -> Path:
+        repo = tmp_path / ("crepo" if reconcile_after_change else "urepo")
+        repo.mkdir()
+        (repo / "app.py").write_text("def run():\n    return 1\n", encoding="utf-8")
+        _git(repo, "init", "-q")
+        _git(repo, "add", "-A")
+        _git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "c1")
+        subprocess.run(
+            [sys.executable, "-m", "sot_graph.cli", "--root", str(repo), "reconcile"],
+            check=True, cwd=repo, capture_output=True,
+        )
+        (repo / "app.py").write_text("def run():\n    return 2\n", encoding="utf-8")
+        _git(repo, "add", "-A")
+        _git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "c2")
+        if reconcile_after_change:
+            subprocess.run(
+                [sys.executable, "-m", "sot_graph.cli", "--root", str(repo),
+                 "reconcile"],
+                check=True, cwd=repo, capture_output=True,
+            )
+        return repo
+
+    def test_reconciled_change_closes_receipt(self, tmp_path):
+        repo = self._repo_with_change(tmp_path, reconcile_after_change=True)
+        db = _db_of(repo)
+        try:
+            post = diff_impact_receipt(db, str(repo), target="HEAD")
+        finally:
+            db.close()
+        assert post["changed_files"], "fixture broken: empty diff"
+        assert post["assurance"]["status"] == "ASSURED_WITHIN_SCOPE"
+        assert post["closure_decision"] == "closed"
+        assert post["remaining_gaps"] == []
+
+    def test_unreconciled_change_stays_open(self, tmp_path):
+        repo = self._repo_with_change(tmp_path, reconcile_after_change=False)
+        db = _db_of(repo)
+        try:
+            post = diff_impact_receipt(db, str(repo), target="HEAD")
+        finally:
+            db.close()
+        assert post["changed_files"], "fixture broken: empty diff"
+        assert post["assurance"]["status"] == "STALE"
+        assert "stale_sources" in post["assurance"]["reason_codes"]
+        assert post["closure_decision"] == "open"
+
+
 class TestCliSurface:
     def test_scope_receipt_command(self, receipt_repo):
         out = subprocess.run(

@@ -83,6 +83,17 @@ class McpModernTests(unittest.TestCase):
         anyio.run(runner)
         return received
 
+    def test_explore_cancel_check_stops_walk(self):
+        # G8: on timeout _async sets the cancel event and injects
+        # cancel_check; the explore BFS loop must honor it instead of
+        # issuing further query roundtrips after the client already saw
+        # its timeout error.
+        from sot_graph.mcp_service import McpServiceError
+
+        with self.assertRaises(McpServiceError) as ctx:
+            self.service.explore("fetch", cancel_check=lambda: True)
+        self.assertEqual(ctx.exception.code, "cancelled")
+
     def test_tools_advertise_output_schemas(self):
         async def case(client, received):
             await client.initialize()

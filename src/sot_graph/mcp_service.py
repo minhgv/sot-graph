@@ -603,7 +603,8 @@ class McpService:
             })
         return self._run(op)
 
-    def explore(self, node_id: str, *, depth: int = 2, limit: int = 100) -> Dict[str, Any]:
+    def explore(self, node_id: str, *, depth: int = 2, limit: int = 100,
+                cancel_check: Optional[Callable[[], bool]] = None) -> Dict[str, Any]:
         if not isinstance(node_id, str) or not node_id.strip():
             raise McpServiceError("invalid_argument", "node_id must not be empty")
         if len(node_id) > 512:
@@ -630,6 +631,14 @@ class McpService:
                 "ORDER BY dir DESC, n.id"
             )
             while queue and len(relations) < limit:
+                # Cooperative cancellation between SQL roundtrips: the
+                # connection-level progress handler interrupts any single
+                # over-deadline QUERY, but this Python loop would keep
+                # issuing new ones until the node budget drains.
+                if cancel_check and cancel_check():
+                    raise OperationCancelledError(
+                        "explore cancelled by client"
+                    )
                 current, current_depth, via_id, via_label, via_path = queue.pop(0)
                 if current_depth >= depth:
                     continue

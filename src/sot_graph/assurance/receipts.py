@@ -455,6 +455,38 @@ def _jsonable(value: Any) -> Any:
     return to_dict() if callable(to_dict) else value
 
 
+def _post_change_stale_files(
+    db: Any, repo_root: str, changed_files: List[str]
+) -> List[str]:
+    """Changed files whose disk bytes still differ from the journal.
+
+    Post-change staleness is measured, not assumed: once ``sot reconcile``
+    (or diff-impact's --auto-reconcile) has re-indexed the change, the
+    journal matches disk and nothing is stale — which is exactly what
+    lets ``closure_decision`` reach "closed" instead of being dead logic.
+    Unmeasurable or never-indexed files count as stale: the receipt must
+    fail closed, never bless content it could not compare.
+    """
+    import hashlib
+    import os as _os
+
+    stale: List[str] = []
+    for path in changed_files[:200]:
+        try:
+            disk_path = path if _os.path.isabs(path) else _os.path.join(repo_root, path)
+            prior = db.get_file_journal(disk_path) or db.get_file_journal(path)
+            if prior is None or not prior.get("sha256"):
+                stale.append(path)  # added by the diff, not yet indexed
+                continue
+            with open(disk_path, "rb") as handle:
+                digest = hashlib.sha256(handle.read()).hexdigest()
+            if digest != prior["sha256"]:
+                stale.append(path)
+        except Exception:  # noqa: BLE001 — unreadable/deleted => stale
+            stale.append(path)
+    return stale
+
+
 def diff_impact_receipt(
     db: Any,
     repo_root: str,
@@ -528,9 +560,19 @@ def diff_impact_receipt(
     facts = AssuranceFacts(
         identity_status="UNIQUE",  # diff target is a revision, not a symbol
         snapshot_bound=snapshot_bound,
-        stale_files=list(changed_files),  # post-change: cited disk state vs journal
+        # Post-change staleness is MEASURED against the journal (see
+        # _post_change_stale_files): reconciled changes leave nothing
+        # stale, so ASSURED_WITHIN_SCOPE / closure "closed" is reachable.
+        stale_files=_post_change_stale_files(db, repo_root, changed_files),
         coverage_measured=False,  # coverage is a pre-change scope concept
         coverage_fraction=None,
+        # This receipt claims the post-change state of the CITED changed
+        # files (snapshot-digest bound, per-file staleness measured), not
+        # an absence claim over the whole graph — "absence" would demand
+        # a coverage floor that is only measurable pre-change and make
+        # closure permanently dead logic. Enumeration limits still
+        # degrade the decision via truncated/unresolved facts.
+        claim_profile="scoped",
         parser_failures=manifest_parser_failures,
         unresolved_count=len(invalidated),
         unresolved_budget=0,
