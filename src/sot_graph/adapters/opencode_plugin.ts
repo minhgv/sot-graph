@@ -183,26 +183,39 @@ export function resolveSotBinary(cwd: string = process.cwd(), platform: NodeJS.P
 export default async function SotGraphOpenCodePlugin(ctx: PluginContext) {
   const workspaceRoot = ctx?.directory || process.cwd();
 
-  // 1. Session start auto-indexing if database is missing
-  if (ctx?.event?.on) {
-    ctx.event.on("session.created", async () => {
-      try {
-        const dbPath = join(workspaceRoot, ".sot", "sot.db");
-        if (!existsSync(dbPath)) {
-          await runSot(["reconcile"], workspaceRoot);
-        }
-      } catch (err) {
-        console.error("[sot-graph] Auto-reconciliation failed:", err);
+  const handleSessionCreated = async () => {
+    try {
+      const dbPath = join(workspaceRoot, ".sot", "sot.db");
+      if (!existsSync(dbPath)) {
+        await runSot(["reconcile"], workspaceRoot);
       }
-    });
+    } catch (err) {
+      console.error("[sot-graph] Auto-reconciliation failed:", err);
+    }
+  };
 
-    // 2. File write/edit triggers background incremental reconcile
-    ctx.event.on("file.edited", async () => {
-      try {
-        await runSot(["reconcile", "--workers", "1"], workspaceRoot);
-      } catch {
-        // Non-blocking background sync
-      }
-    });
+  const handleFileEdited = async () => {
+    try {
+      await runSot(["reconcile", "--workers", "1"], workspaceRoot);
+    } catch {
+      // Non-blocking background sync
+    }
+  };
+
+  // 1. Support harness / test event emitter if provided
+  if (ctx?.event?.on) {
+    ctx.event.on("session.created", handleSessionCreated);
+    ctx.event.on("file.edited", handleFileEdited);
   }
+
+  // 2. Return native OpenCode plugin hook object
+  return {
+    event: async ({ event }: { event?: { id?: string; type?: string; properties?: Record<string, unknown> } }) => {
+      if (event?.type === "session.created") {
+        await handleSessionCreated();
+      } else if (event?.type === "file.edited") {
+        await handleFileEdited();
+      }
+    },
+  };
 }
