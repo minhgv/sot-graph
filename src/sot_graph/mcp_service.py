@@ -405,77 +405,130 @@ class McpService:
     def _fits_response(self, value: Any) -> Any:
         # Keep the API JSON-ready while enforcing a hard response ceiling.  A
         # deterministic truncation is preferable to returning an oversized body.
+        #
+        # R5: the trimmer used to re-serialize the ENTIRE payload after every
+        # single mutation (O(n²) full json.dumps calls while refilling lists
+        # item by item). It now encodes each list item exactly once and does
+        # exact incremental byte accounting: with separators=(",", ":") a
+        # list's encoding is "[" + ",".join(items) + "]", so replacing one
+        # list's bytes only changes that span and the payload length is the
+        # skeleton length plus the per-list contributions. The emitted value
+        # (which lists get emptied, how many items are refilled, the final
+        # digest) is byte-for-byte identical to the old whole-dump greedy
+        # algorithm — only the work to find it changed.
         value = sanitize_transport_value(value)
         encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         if len(encoded) <= self.limits.response_bytes:
             return value
-        if isinstance(value, dict):
-            import copy
-            from sot_graph.assurance.receipts import receipt_digest
+        if not isinstance(value, dict):
+            raise McpServiceError("response_too_large", "response exceeds configured size limit")
 
-            value = copy.deepcopy(value)
-            # 1. Truncate oversized raw text / markdown fields if present
-            for text_key in ("markdown", "text", "raw"):
-                if isinstance(value.get(text_key), str) and len(value[text_key]) > 8000:
-                    value[text_key] = value[text_key][:4000] + "\n\n... [truncated to fit response limit]"
-                    value["truncated"] = True
-                    if "digest" in value:
-                        value["digest"] = receipt_digest({k: v for k, v in value.items() if k != "digest"})
-                    encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-                    if len(encoded) <= self.limits.response_bytes:
-                        return value
+        import copy
+        from sot_graph.assurance.receipts import receipt_digest
 
-            list_keys = [
-                "caller_impacts", "test_impacts", "direct_nodes", "api_impacts",
-                "invalidated_evidence", "results", "drift", "relations",
-                "nodes", "edges", "changed_files", "commits", "timeline",
-                "impacted", "affected_tests", "affected_files", "candidate_tests",
-                "callers", "callees", "transitive", "runs", "hunks", "stale_files",
-                "quarantined_files", "unsupported_constructs", "parser_error_files"
-            ]
+        budget = self.limits.response_bytes
+        value = copy.deepcopy(value)
 
-            # Inspect top-level dict and nested containers like 'result'
-            dicts_to_inspect = [value]
-            if isinstance(value.get("result"), dict):
-                dicts_to_inspect.append(value["result"])
-
-            # Phase 1: Progressive list emptying until base envelope fits
-            stored_items: Dict[Tuple[int, str], Tuple[Dict[str, Any], str, List[Any]]] = {}
-            for d in dicts_to_inspect:
-                for k in list_keys:
-                    if isinstance(d.get(k), list) and d[k]:
-                        stored_items[(id(d), k)] = (d, k, list(d[k]))
-                        d[k] = []
-                        value["truncated"] = True
-                        if "digest" in value:
-                            value["digest"] = receipt_digest({k2: v2 for k2, v2 in value.items() if k2 != "digest"})
-                        enc = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-                        if len(enc) <= self.limits.response_bytes:
-                            break
-                if len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= self.limits.response_bytes:
-                    break
-
-            # Phase 2: Refill items progressively under the byte ceiling
-            for (d_id, k), (d, key, items) in stored_items.items():
-                for it in items:
-                    d[key].append(it)
-                    if "digest" in value:
-                        value["digest"] = receipt_digest({k2: v2 for k2, v2 in value.items() if k2 != "digest"})
-                    if len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > self.limits.response_bytes:
-                        d[key].pop()
-                        if "digest" in value:
-                            value["digest"] = receipt_digest({k2: v2 for k2, v2 in value.items() if k2 != "digest"})
-                        break
-
-            if "results" in value and isinstance(value.get("results"), list) and "returned" in value:
-                value["returned"] = len(value["results"])
-
+        def _refresh_digest() -> None:
             if "digest" in value:
-                value["digest"] = receipt_digest({k: v for k, v in value.items() if k != "digest"})
+                value["digest"] = receipt_digest(
+                    {k: v for k, v in value.items() if k != "digest"}
+                )
 
-            encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-            if len(encoded) <= self.limits.response_bytes:
-                return value
+        # 1. Truncate oversized raw text / markdown fields if present
+        for text_key in ("markdown", "text", "raw"):
+            if isinstance(value.get(text_key), str) and len(value[text_key]) > 8000:
+                value[text_key] = value[text_key][:4000] + "\n\n... [truncated to fit response limit]"
+                value["truncated"] = True
+                _refresh_digest()
+                encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                if len(encoded) <= budget:
+                    return value
+
+        list_keys = [
+            "caller_impacts", "test_impacts", "direct_nodes", "api_impacts",
+            "invalidated_evidence", "results", "drift", "relations",
+            "nodes", "edges", "changed_files", "commits", "timeline",
+            "impacted", "affected_tests", "affected_files", "candidate_tests",
+            "callers", "callees", "transitive", "runs", "hunks", "stale_files",
+            "quarantined_files", "unsupported_constructs", "parser_error_files"
+        ]
+
+        # Inspect top-level dict and nested containers like 'result'
+        dicts_to_inspect = [value]
+        if isinstance(value.get("result"), dict):
+            dicts_to_inspect.append(value["result"])
+
+        # Byte accounting: total = skeleton + sum(list_bytes - 2) where
+        # list_bytes is the encoded size of one target list ("[]" = 2).
+        def _list_bytes(items: List[Any]) -> int:
+            if not items:
+                return 2
+            # "[" + items + ","-joined + "]" == sum(items) + count + 1
+            return 2 + sum(
+                len(json.dumps(it, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+                for it in items
+            ) + (len(items) - 1)
+
+        total = len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        if "digest" in value:
+            # Every _refresh_digest() below stores a 64-char hex digest; if
+            # the incoming digest has a different length, the first refresh
+            # shifts the encoding by exactly this delta (fake/short digests
+            # in synthetic payloads otherwise skew the accounting).
+            digest = value["digest"]
+            if isinstance(digest, str):
+                total += 64 - len(digest)
+
+        # Phase 1: Progressive list emptying until base envelope fits.
+        # Previously-emptied lists stay emptied; stop as soon as it fits.
+        stored_items: List[Tuple[Dict[str, Any], str, List[Any]]] = []
+        had_truncated = "truncated" in value
+        flag_bytes = len(',"truncated":true'.encode("utf-8"))
+        for d in dicts_to_inspect:
+            for k in list_keys:
+                if isinstance(d.get(k), list) and d[k]:
+                    if not had_truncated:
+                        # First emptied list also inserts the flag key into
+                        # the encoding (append + ',"truncated":true').
+                        had_truncated = True
+                        total += flag_bytes
+                    items = list(d[k])
+                    stored_items.append((d, k, items))
+                    total += 2 - _list_bytes(items)
+                    d[k] = []
+                    value["truncated"] = True
+                    if total <= budget:
+                        break
+            if total <= budget:
+                break
+
+        # Phase 2: Refill items progressively under the byte ceiling. Each
+        # item is encoded exactly once; committing an item only swaps its
+        # bytes into the list span, so no full re-serialization is needed.
+        for d, key, items in stored_items:
+            current = 2  # empty list encoding
+            count = 0
+            for it in items:
+                item_bytes = len(json.dumps(it, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+                grown = current + item_bytes + (1 if count else 0)
+                if total - current + grown > budget:
+                    break
+                total = total - current + grown
+                current = grown
+                count += 1
+                d[key].append(it)
+            # keep digest in sync once per list after its refill attempt
+            _refresh_digest()
+
+        if "results" in value and isinstance(value.get("results"), list) and "returned" in value:
+            value["returned"] = len(value["results"])
+
+        _refresh_digest()
+
+        encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(encoded) <= budget:
+            return value
 
         raise McpServiceError("response_too_large", "response exceeds configured size limit")
     def search(self, query: str, *, limit: int = 6, scope: Optional[str] = None,
@@ -886,12 +939,21 @@ class McpService:
             return self._fits_response(res)
         return self._run(op)
 
-    def verify_drift(self, *, deep: bool = False, limit: int = 100) -> Dict[str, Any]:
+    def verify_drift(self, *, deep: bool = False, limit: int = 100,
+                     cancel_check: Optional[Callable[[], bool]] = None) -> Dict[str, Any]:
         limit = self._bounded(limit, self.limits.drift)
         def op(conn: sqlite3.Connection) -> Dict[str, Any]:
             rows = conn.execute("SELECT path,sha256,size,mtime_ms FROM file_journal ORDER BY path LIMIT ?", (limit + 1,)).fetchall()
             drift: List[Dict[str, Any]] = []
             for row in rows:
+                # Cooperative cancellation between per-file stat/hash syscalls:
+                # deep mode hashes up to `drift` (default 1k) files, so without
+                # this check the loop keeps doing disk work long after the
+                # client has timed out (same contract as explore's BFS loop).
+                if cancel_check and cancel_check():
+                    raise OperationCancelledError(
+                        "verify_drift cancelled by client"
+                    )
                 rel = self._relative_path(row["path"])
                 if rel is None:
                     drift.append({"path": None, "why": "outside_root"})

@@ -45,8 +45,16 @@ __all__ = [
     "CANONICAL_STATUSES",
     "resolve_symbol_identity",
     "RECEIPT_SCHEMA_VERSION",
+    "RECEIPT_CITED_FILE_CAP",
 ]
-RECEIPT_SCHEMA_VERSION = "1.1"  # minor bump: canonical status vocabulary (P0)
+RECEIPT_SCHEMA_VERSION = "1.2"  # minor bump: 1.1 added canonical status vocabulary (P0); 1.2 added changed_files_total/changed_files_truncated (R5)
+
+#: Bounded-work cap on how many changed files a post-change receipt will
+#: measure (journal staleness, evidence invalidation, snapshot citation).
+#: The cap itself is fine; hiding it was not — receipts above the cap now
+#: carry ``changed_files_total`` / ``changed_files_truncated`` so the
+#: partial closure evidence is visible instead of silently assumed whole.
+RECEIPT_CITED_FILE_CAP = 200
 
 
 _RELATION_FAMILIES = {
@@ -515,14 +523,20 @@ def diff_impact_receipt(
         staged=staged, working_tree=working_tree,
     )
     changed_files = [str(p) for p in (getattr(result, "changed_files", None) or [])]
+    changed_files_total = len(changed_files)
+    changed_files_truncated = changed_files_total > RECEIPT_CITED_FILE_CAP
+    # Bounded measurement scope: the cap keeps staleness hashing, evidence
+    # invalidation and snapshot citation O(cap). Truncation is reported,
+    # never silent (R5).
+    cited_files = changed_files[:RECEIPT_CITED_FILE_CAP]
     post_snapshot = capture_worktree_snapshot(
         repo_root, role="post_change",
-        cited_paths=changed_files[:200] or None,
+        cited_paths=cited_files or None,
     )
     # Evidence invalidated by the diff: rows bound to changed paths.
     invalidated: List[Dict[str, Any]] = []
     try:
-        for path in changed_files[:200]:
+        for path in cited_files:
             norm_fwd = path.replace("\\", "/")
             norm_back = path.replace("/", "\\")
             rows = db.conn.execute(
@@ -563,7 +577,7 @@ def diff_impact_receipt(
         # Post-change staleness is MEASURED against the journal (see
         # _post_change_stale_files): reconciled changes leave nothing
         # stale, so ASSURED_WITHIN_SCOPE / closure "closed" is reachable.
-        stale_files=_post_change_stale_files(db, repo_root, changed_files),
+        stale_files=_post_change_stale_files(db, repo_root, cited_files),
         coverage_measured=False,  # coverage is a pre-change scope concept
         coverage_fraction=None,
         # This receipt claims the post-change state of the CITED changed
@@ -571,13 +585,15 @@ def diff_impact_receipt(
         # an absence claim over the whole graph — "absence" would demand
         # a coverage floor that is only measurable pre-change and make
         # closure permanently dead logic. Enumeration limits still
-        # degrade the decision via truncated/unresolved facts.
+        # degrade the decision via truncated/unresolved facts: a diff
+        # larger than RECEIPT_CITED_FILE_CAP is measured only on its
+        # newest-claimed 200 paths, so `truncated` degrades to PARTIAL.
         claim_profile="scoped",
         parser_failures=manifest_parser_failures,
         unresolved_count=len(invalidated),
         unresolved_budget=0,
         open_conflicts=0,
-        truncated=False,
+        truncated=changed_files_truncated,
         provider_capability_ok=provider_capability_ok,
         absence_claim=False,
         gate_blocked=False,
@@ -598,6 +614,12 @@ def diff_impact_receipt(
     if open_omp:
         remaining_gaps.append(f"{len(open_omp)} OMP confirmation(s) still open")
     closure = "closed" if decision["status"] == "ASSURED_WITHIN_SCOPE" else "open"
+    warnings: List[str] = []
+    if changed_files_truncated:
+        warnings.append(
+            f"measured closure covers {len(cited_files)} of "
+            f"{changed_files_total} changed files; closure evidence is partial"
+        )
     payload: Dict[str, Any] = {
         "schema_version": RECEIPT_SCHEMA_VERSION,
         "kind": "diff_impact",
@@ -606,6 +628,8 @@ def diff_impact_receipt(
             "target": target, "staged": staged, "working_tree": working_tree,
         },
         "changed_files": changed_files,
+        "changed_files_total": changed_files_total,
+        "changed_files_truncated": changed_files_truncated,
         "direct_nodes": [_jsonable(n) for n in
                          (getattr(result, "direct_nodes", None) or [])],
         "caller_impacts": [_jsonable(c) for c in
@@ -633,6 +657,7 @@ def diff_impact_receipt(
             _strip_volatile(pre_snapshot) if pre_snapshot else None
         ),
         "remaining_gaps": remaining_gaps,
+        "warnings": warnings,
         "closure_decision": closure,
         "omp_confirmations_remaining": open_omp,
         "assurance_facts": asdict(facts),

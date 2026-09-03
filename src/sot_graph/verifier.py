@@ -35,6 +35,59 @@ STOP_WORDS: Set[str] = {
 
 IGNORED_DIRS: Set[str] = set(DEFAULT_IGNORED_DIRS)
 
+#: Rehome basename index (R5): the auto-heal path used to run a full
+#: ``os.walk`` of the repo root PER missing file — O(missing x repo) disk
+#: traversal for one heal pass over several moved files. The index caches
+#: one bounded walk (10k-file cap preserved) per project root so multiple
+#: missing files in the same pass share a single walk.
+#:
+#: Tightest safe scope, deliberately:
+#: - keyed by resolved root, small bound on roots retained;
+#: - only UNIQUE candidate paths are served from cache, and every cached
+#:   path is existence-checked at use time — a stale path invalidates the
+#:   whole root index and triggers exactly one rebuild before answering;
+#: - "absent" and "ambiguous" basenames are never served from cache: they
+#:   force one fresh rebuild, so a purge decision (basename nowhere in the
+#:   tree) is always based on a current walk, never on stale bookkeeping.
+_REHOME_INDEX: Dict[str, Dict[str, str]] = {}
+_REHOME_INDEX_MAX_ROOTS = 8
+
+
+def _reset_rehome_index() -> None:
+    """Drop all cached rehome indexes (test/admin hook)."""
+    _REHOME_INDEX.clear()
+
+
+def _store_rehome_index(root: str, index: Dict[str, str]) -> None:
+    _REHOME_INDEX.pop(root, None)
+    _REHOME_INDEX[root] = index
+    while len(_REHOME_INDEX) > _REHOME_INDEX_MAX_ROOTS:
+        _REHOME_INDEX.pop(next(iter(_REHOME_INDEX)))
+
+
+def _build_rehome_index(root: str, max_scanned_files: int) -> Dict[str, str]:
+    """One bounded ``os.walk`` mapping basename -> unique candidate path.
+
+    Mirrors the original per-call scan: ignored dirs are pruned, the scan
+    stops after ``max_scanned_files`` files, and a basename seen more than
+    once is dropped (ambiguous — never guessed).
+    """
+    index: Dict[str, str] = {}
+    ambiguous: Set[str] = set()
+    scanned = 0
+    for dirpath, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in IGNORED_DIRS]
+        scanned += len(files)
+        for name in files:
+            if name in ambiguous or name in index:
+                ambiguous.add(name)
+                index.pop(name, None)
+                continue
+            index[name] = os.path.abspath(os.path.join(dirpath, name))
+        if scanned >= max_scanned_files:
+            break
+    return index
+
 
 def tokenize(text: str) -> Set[str]:
     """Tokenizes text into normalized alphanumeric keywords >= 3 chars."""
@@ -86,19 +139,27 @@ class TrustVerifier:
         """
         Scans project_root for a single unambiguous file with the given basename.
         Used to heal moved/renamed files automatically.
+
+        Served from a per-root basename index (one bounded walk, shared
+        across the missing-file lookups of a heal pass — R5). Cached paths
+        are existence-checked at use time; a stale path rebuilds the index
+        once and re-answers. Absent or ambiguous basenames always force a
+        fresh rebuild so purge/ambiguity decisions never ride stale state.
         """
-        cands = []
-        scanned = 0
-        for root, dirs, files in os.walk(project_root):
-            dirs[:] = [d for d in dirs if d not in IGNORED_DIRS]
-            scanned += len(files)
-            if basename in files:
-                cands.append(os.path.abspath(os.path.join(root, basename)))
-                if len(cands) > 1:
-                    return None  # Ambiguous match, do not guess
-            if scanned >= max_scanned_files:
-                break
-        return cands[0] if len(cands) == 1 else None
+        root = os.path.abspath(project_root)
+        for _attempt in (0, 1):
+            index = _REHOME_INDEX.get(root)
+            if index is None:
+                index = _build_rehome_index(root, max_scanned_files)
+                _store_rehome_index(root, index)
+            candidate = index.get(basename)
+            if candidate is not None and os.path.isfile(candidate):
+                return candidate
+            # Absent from the scanned tree, ambiguous (dropped at build
+            # time), or a stale cached path: rebuild exactly once and
+            # answer from the fresh walk instead.
+            _REHOME_INDEX.pop(root, None)
+        return None
 
     @staticmethod
     def _verify_ast_declaration(

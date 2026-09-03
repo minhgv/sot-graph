@@ -1,13 +1,15 @@
 # Module-Scope Evaluation Report
 
-Generated: 2026-09-04 04:03:15  |  commit: `85fd9dd`
+Generated: 2026-09-04 04:44:11  |  commit: `1a758c2`
 
 | Scope | ruff | pyright | pytest | probes (bugs) | gate |
 |---|---|---|---|---|---|
-| surfaces | ✅ | ✅ | — | 1 (0) | PASS |
+| assurance | ✅ | ✅ | — | 2 (0) | PASS |
 
 **Probes: 0 bug(s) still present, 0 probe error(s).**
 
-## Probes — surfaces
-- ✅ `cli-hybrid-scope-ignored` — P1 cli.py:210 — OK (75ms)
-  - hybrid search honors scope (or rejects the combination)
+## Probes — assurance
+- ✅ `coverage-mtime-false-stale` — P1 coverage.py:229 — OK (34ms)
+  - state=unknown (sha-based staleness consistent)
+- ✅ `tests-to-run-none` — P1 receipts.py:563 — OK (8ms)
+  - tests_to_run reads TestImpact.path; no 'test_file' reference

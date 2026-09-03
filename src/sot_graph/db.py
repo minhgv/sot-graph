@@ -23,6 +23,12 @@ from urllib.parse import quote
 
 SCHEMA_VERSION = 8
 
+#: BFS level fetches in :meth:`Database.explore_node` bind each node twice
+#: (outward ``e.src IN`` + inward ``e.dst IN``), so 250 nodes per chunk
+#: means 500 parameters — safely under SQLite's legacy 999-variable default
+#: regardless of build flags (R5).
+_EXPLORE_CHUNK = 250
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS file_journal (
     path TEXT PRIMARY KEY, sha256 TEXT NOT NULL, size INTEGER NOT NULL,
@@ -2169,51 +2175,105 @@ class Database:
         return {(r[0], r[1] or ""): int(r[2]) for r in rows}
 
     def explore_node(self, node_id: str, depth: int = 1, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """BFS around ``node_id`` over non-``defines`` edges (outward + inward).
+
+        R5: each BFS LEVEL is fetched with chunked ``IN (?,?,...)`` queries
+        (250 nodes -> 500 bound parameters per chunk, safely under SQLite's
+        legacy 999-variable default) instead of one query PER NODE per hop;
+        a 10k-node fan-out used to cost 10k roundtrips. Output semantics are
+        unchanged: rows appear in FIFO expansion order (parents in
+        first-enqueue order per level; each parent's edges outward-first
+        then inward, each group ordered by target node id). As before, a
+        node is expanded at most once (at its first/highest BFS level) and
+        edges back to already-visited nodes still emit rows — only the
+        relative order of edge ties (same direction, same target id) was
+        and remains unspecified. ``limit`` truncates the flat result exactly
+        as before and ``None`` stays unbounded.
+        """
         if depth < 0 or (limit is not None and limit <= 0):
             return []
         visited: Set[str] = set()
         result: List[Dict[str, Any]] = []
-        # queue stores (node_id, current_depth, via_id, via_label, via_path)
-        queue: List[Tuple[str, int, Optional[str], Optional[str], Optional[str]]] = [(node_id, 0, None, None, None)]
+        # Pending entries: (node_id, hop, via_id, via_label, via_path) where
+        # hop is the depth at which the node was reached; its edges are
+        # emitted at hop + 1. The FIFO expansion order of the previous
+        # per-node loop is preserved level-for-level.
+        level: List[Tuple[str, int, Optional[str], Optional[str], Optional[str]]] = [(node_id, 0, None, None, None)]
         sql = (
-            "SELECT 'outward' AS dir, e.relation, n.id, n.label, n.path, n.line_start, n.kind "
+            "SELECT 'outward' AS dir, e.src AS anchor, e.relation, n.id, n.label, n.path, n.line_start, n.kind "
             "FROM graph_edges e JOIN graph_nodes n ON e.dst=n.id "
-            "WHERE e.src=? AND e.relation != 'defines' "
+            "WHERE e.src IN ({ph}) AND e.relation != 'defines' "
             "UNION ALL "
-            "SELECT 'inward' AS dir, e.relation, n.id, n.label, n.path, n.line_start, n.kind "
+            "SELECT 'inward' AS dir, e.dst AS anchor, e.relation, n.id, n.label, n.path, n.line_start, n.kind "
             "FROM graph_edges e JOIN graph_nodes n ON e.src=n.id "
-            "WHERE e.dst=? AND e.relation != 'defines' "
-            "ORDER BY dir DESC, n.id"
+            "WHERE e.dst IN ({ph}) AND e.relation != 'defines' "
         )
-        while queue and (limit is None or len(result) < limit):
-            current, current_depth, via_id, via_label, via_path = queue.pop(0)
-            if current in visited or current_depth >= depth:
-                continue
-            visited.add(current)
-            rows = self.conn.execute(sql, (current, current)).fetchall()
-            for direction, rel, target, label, path, line, kind in rows:
-                if target == node_id:  # avoid trivial direct loopback to root
+        while level and (limit is None or len(result) < limit):
+            # First-occurrence dedupe of the pending queue: the old loop
+            # skipped already-visited nodes at dequeue time, so a node
+            # reached via two parents expanded exactly once, at its first
+            # queue position. Marking the whole batch visited up front is
+            # equivalent — no node expands twice, and edges pointing at
+            # already-seen nodes still emit rows (except the root loopback).
+            batch: List[Tuple[str, int, Optional[str], Optional[str], Optional[str]]] = []
+            seen: Set[str] = set()
+            for entry in level:
+                if entry[0] in visited or entry[0] in seen:
                     continue
-                rel_label = rel if direction == "outward" else f"used_by ({rel})"
-                hop_num = current_depth + 1
-                result.append({
-                    "direction": direction,
-                    "relation": rel_label,
-                    "target_id": target,
-                    "label": label,
-                    "path": path,
-                    "line": line,
-                    "kind": kind,
-                    "depth": hop_num,
-                    "hop": hop_num,
-                    "via_id": via_id if hop_num > 1 else None,
-                    "via_label": via_label if hop_num > 1 else None,
-                    "via_path": via_path if hop_num > 1 else None,
-                })
-                if target not in visited and hop_num < depth:
-                    queue.append((target, hop_num, target, label, path))
+                seen.add(entry[0])
+                batch.append(entry)
+            if not batch:
+                break
+            for entry in batch:
+                visited.add(entry[0])
+            batch_hop = batch[0][1]
+            if batch_hop >= depth:
+                break  # only reachable for the root at depth == 0
+            # Fetch the whole level in chunked IN queries, grouped by the
+            # expanded node ("anchor": e.src for outward, e.dst for inward).
+            rows_by_anchor: Dict[str, List[Tuple[Any, ...]]] = {}
+            for start in range(0, len(batch), _EXPLORE_CHUNK):
+                chunk = batch[start:start + _EXPLORE_CHUNK]
+                ids = [entry[0] for entry in chunk]
+                placeholders = ",".join("?" * len(ids))
+                for row in self.conn.execute(
+                    sql.format(ph=placeholders), (*ids, *ids)
+                ).fetchall():
+                    rows_by_anchor.setdefault(row[1], []).append(row)
+            next_level: List[Tuple[str, int, Optional[str], Optional[str], Optional[str]]] = []
+            for current, current_depth, via_id, via_label, via_path in batch:
                 if limit is not None and len(result) >= limit:
                     break
+                rows = rows_by_anchor.get(current, [])
+                # Per-node edge order as the old per-node query returned it:
+                # outward rows first, then inward, each by target node id
+                # (stable sort keeps equal-key ties in scan order, matching
+                # the old unspecified tie behavior).
+                rows.sort(key=lambda r: (0 if r[0] == "outward" else 1, r[3]))
+                for direction, _anchor, rel, target, label, path, line, kind in rows:
+                    if target == node_id:  # avoid trivial direct loopback to root
+                        continue
+                    rel_label = rel if direction == "outward" else f"used_by ({rel})"
+                    hop_num = current_depth + 1
+                    result.append({
+                        "direction": direction,
+                        "relation": rel_label,
+                        "target_id": target,
+                        "label": label,
+                        "path": path,
+                        "line": line,
+                        "kind": kind,
+                        "depth": hop_num,
+                        "hop": hop_num,
+                        "via_id": via_id if hop_num > 1 else None,
+                        "via_label": via_label if hop_num > 1 else None,
+                        "via_path": via_path if hop_num > 1 else None,
+                    })
+                    if target not in visited and hop_num < depth:
+                        next_level.append((target, hop_num, target, label, path))
+                    if limit is not None and len(result) >= limit:
+                        break
+            level = next_level
         return result
 
     def usages(self, node_id: str, symbol: str) -> Dict[str, Any]:

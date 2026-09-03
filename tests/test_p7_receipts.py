@@ -82,7 +82,7 @@ class TestScopeReceipt:
             payload = scope_receipt(db, str(receipt_repo), "run")
         finally:
             db.close()
-        assert payload["schema_version"] == RECEIPT_SCHEMA_VERSION == "1.1"
+        assert payload["schema_version"] == RECEIPT_SCHEMA_VERSION == "1.2"
         assert payload["proof_scope"] == "pre_change_only"
         assert payload["request"]["target"] == "run"
         assert payload["identity"]["selected"]["symbol"] == "run"
@@ -330,6 +330,79 @@ class TestClosureDecision:
         assert post["assurance"]["status"] == "STALE"
         assert "stale_sources" in post["assurance"]["reason_codes"]
         assert post["closure_decision"] == "open"
+
+
+class TestReceiptTruncationHonesty:
+    """R5: the 200-changed-file measurement cap must be visible, not silent.
+
+    The receipt keeps its bounded-work cap but now reports
+    ``changed_files_total`` / ``changed_files_truncated``, degrades the
+    assurance decision, and carries an explicit human-readable warning.
+    """
+
+    @staticmethod
+    def _repo_with_many_changes(tmp_path: Path, n_changed: int) -> Path:
+        from sot_graph.reconciler import Reconciler
+
+        repo = tmp_path / "big_repo"
+        repo.mkdir()
+        (repo / "app.py").write_text("def run():\n    return 1\n", encoding="utf-8")
+        _git(repo, "init", "-q")
+        _git(repo, "add", "-A")
+        _git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "c1")
+        db = _db_of(repo)
+        try:
+            Reconciler(db, str(repo)).reconcile(workers=1)
+        finally:
+            db.close()
+        # Change app.py and add n_changed extra files.
+        (repo / "app.py").write_text("def run():\n    return 2\n", encoding="utf-8")
+        for i in range(n_changed):
+            (repo / f"mod_{i:03d}.py").write_text(
+                f"x{i} = {i}\n", encoding="utf-8"
+            )
+        _git(repo, "add", "-A")
+        _git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "c2")
+        db = _db_of(repo)
+        try:
+            Reconciler(db, str(repo)).reconcile(workers=1)
+        finally:
+            db.close()
+        return repo
+
+    def test_over_cap_reports_total_truncated_and_warning(self, tmp_path):
+        repo = self._repo_with_many_changes(tmp_path, 205)
+        db = _db_of(repo)
+        try:
+            post = diff_impact_receipt(db, str(repo), target="HEAD")
+        finally:
+            db.close()
+        assert post["changed_files_total"] == 206
+        assert post["changed_files_truncated"] is True
+        assert len(post["changed_files"]) == 206  # full list stays in payload
+        # Machine-visible warning with the exact human wording.
+        assert post["warnings"], "truncation must never be silent"
+        assert (
+            "measured closure covers 200 of 206 changed files; "
+            "closure evidence is partial" in post["warnings"][0]
+        )
+        # Enumeration limits degrade the decision (R5 honesty contract).
+        assert post["assurance"]["status"] == "PARTIAL"
+        assert "transitive_truncated" in post["assurance"]["reason_codes"]
+        assert post["closure_decision"] == "open"
+        assert post["assurance_facts"]["truncated"] is True
+
+    def test_under_cap_reports_no_truncation(self, tmp_path):
+        repo = self._repo_with_many_changes(tmp_path, 3)
+        db = _db_of(repo)
+        try:
+            post = diff_impact_receipt(db, str(repo), target="HEAD")
+        finally:
+            db.close()
+        assert post["changed_files_total"] == 4
+        assert post["changed_files_truncated"] is False
+        assert post["warnings"] == []
+        assert post["assurance_facts"]["truncated"] is False
 
 
 class TestCliSurface:

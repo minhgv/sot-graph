@@ -167,7 +167,7 @@ def calculate_fee(amount: int) -> int:
             receipt = diff_impact_receipt(db, repo_root=str(root), working_tree=True)
 
             assert receipt["assurance"]["status"] in ("ASSURED_WITHIN_SCOPE", "PARTIAL", "STALE")
-            assert receipt["schema_version"] in ("1.1", "2.0")
+            assert receipt["schema_version"] in ("1.1", "1.2", "2.0")
             assert "post_change_snapshot" in receipt
             assert receipt["post_change_snapshot"]["scope_digest"] is not None
             assert len(receipt["post_change_snapshot"]["content_digests"]) >= 1

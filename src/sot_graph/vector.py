@@ -10,11 +10,21 @@ from __future__ import annotations
 
 import hashlib
 import math
+import sys
+import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 RRF_K = 60  # standard reciprocal-rank-fusion constant
 DEFAULT_DIM = 256
 _TABLE = "graph_vec"
+#: Bookkeeping for incremental embedding (R5): the hash of the text each
+#: node was embedded from. Owned by vector.py, created lazily next to the
+#: vec0 table and only ever touched when the extension is active.
+_STATE_TABLE = "vector_index_state"
+#: Embedding subset cap. Applied to the NEWEST nodes by ``updated_at``
+#: (reconcile rewrites touched nodes with a fresh timestamp), never
+#: silently: exceeding it sets ``truncated`` in the stats and warns.
+DEFAULT_EMBED_CAP = 5000
 
 try:  # pragma: no cover - depends on optional extra
     import sqlite_vec  # type: ignore
@@ -80,44 +90,138 @@ def load_extension(conn) -> bool:
 
 
 def ensure_table(conn, dim: int = DEFAULT_DIM) -> bool:
-    """Create the vec0 virtual table if the extension is usable."""
+    """Create the vec0 virtual table if the extension is usable.
+
+    Also creates the ``vector_index_state`` bookkeeping table (R5) in the
+    same gate: it is only ever written when the vec extension is active,
+    so a sqlite-vec-free install never grows schema baggage.
+    """
     if not load_extension(conn):
         return False
     conn.execute(
         f"CREATE VIRTUAL TABLE IF NOT EXISTS {_TABLE} USING vec0("
         f"node_id TEXT PRIMARY KEY, embedding float[{dim}])"
     )
+    conn.execute(
+        f"CREATE TABLE IF NOT EXISTS {_STATE_TABLE} ("
+        "node_id TEXT PRIMARY KEY, embedded_hash TEXT NOT NULL, "
+        "embedded_at INTEGER NOT NULL)"
+    )
     conn.commit()
     return True
 
 
-def index_nodes(conn, embedder: Optional[HashEmbedder] = None, *, limit: int = 5000) -> int:
-    """(Re)embed graph nodes into the vector table; returns embedded count.
+def _embedding_text(row: Sequence[Any]) -> str:
+    """The exact text a node is embedded from (hash input, R5)."""
+    label, symbol, keywords, body = row[1], row[2], row[3], row[4]
+    return f"{label} {symbol or ''} {keywords or ''} {body[:512]}"
 
-    The subset is ordered by id so repeated runs embed the same nodes:
-    without an ORDER BY SQLite returns rows in scan order and a graph
-    larger than ``limit`` silently rotates its embedding set between runs.
+
+def _chunked(seq: List[Any], size: int = 500) -> "List[List[Any]]":
+    return [seq[i:i + size] for i in range(0, len(seq), size)]
+
+
+def index_nodes(conn, embedder: Optional[HashEmbedder] = None, *,
+                cap: Optional[int] = None) -> Dict[str, Any]:
+    """Incrementally (re)embed graph nodes into the vector table (R5).
+
+    Returns a stats dict: ``embedded`` (nodes embedded by this call),
+    ``unchanged`` (skipped — vector + bookkeeping hash already current),
+    ``pruned`` (vectors dropped for vanished/rotated-out nodes),
+    ``total_nodes`` (all embeddable non-file nodes), ``cap``,
+    ``truncated``.
+
+    Incremental contract: a node is re-embedded only when the hash of its
+    embedding text changed (or its vector/bookkeeping row is missing);
+    nodes that vanished — or fell out of the capped selection — have their
+    vector and bookkeeping rows dropped. The cap selects the NEWEST nodes
+    by ``updated_at`` (``id`` as deterministic tiebreak), replacing the old
+    ``ORDER BY id`` subset that silently rotated for repos bigger than the
+    cap. Exceeding the cap is never silent: ``truncated`` is set in the
+    returned stats and a warning goes to stderr.
+
+    Staleness contract: reconcile only prunes orphaned vector rows (see
+    :func:`prune_orphans`); it deliberately does NOT re-embed, because
+    auto-embedding on every reconcile would balloon reconcile latency.
+    Embedding refresh stays explicit via ``sot embed`` — which this
+    incremental path makes cheap: after a small change, re-running embed
+    costs O(changed) embedder calls instead of a full DELETE+INSERT
+    rebuild.
     """
     embedder = embedder or HashEmbedder()
+    empty_stats = {"embedded": 0, "unchanged": 0, "pruned": 0,
+                   "total_nodes": 0, "cap": 0, "truncated": False}
     if not ensure_table(conn, embedder.dim):
-        return 0
+        return empty_stats
+    effective_cap = int(cap) if cap is not None else DEFAULT_EMBED_CAP
+    total_nodes = int(conn.execute(
+        "SELECT COUNT(*) FROM graph_nodes WHERE kind != 'file'"
+    ).fetchone()[0])
     rows = conn.execute(
         "SELECT id, label, symbol, keywords, COALESCE(body, '') FROM graph_nodes "
-        "WHERE kind != 'file' ORDER BY id LIMIT ?", (limit,)
+        "WHERE kind != 'file' ORDER BY updated_at DESC, id LIMIT ?",
+        (effective_cap,),
     ).fetchall()
-    texts = [f"{label} {symbol or ''} {keywords or ''} {body[:512]}"
-             for _, label, symbol, keywords, body in rows]
-    vectors = embedder.embed(texts)
+    truncated = total_nodes > len(rows)
+    desired = {
+        row[0]: hashlib.sha256(_embedding_text(row).encode("utf-8")).hexdigest()
+        for row in rows
+    }
+    state = {
+        str(r[0]): str(r[1]) for r in conn.execute(
+            f"SELECT node_id, embedded_hash FROM {_STATE_TABLE}"
+        ).fetchall()
+    }
+    embedded_ids = {
+        str(r[0]) for r in conn.execute(f"SELECT node_id FROM {_TABLE}").fetchall()
+    }
+    # Vanished nodes plus nodes rotated out of the capped selection.
+    stale_ids = sorted((set(state) | embedded_ids) - set(desired))
+    # Re-embed only changed content or rows missing their vector.
+    to_embed = [
+        row for row in rows
+        if desired[row[0]] != state.get(row[0]) or row[0] not in embedded_ids
+    ]
+    vectors = embedder.embed([_embedding_text(row) for row in to_embed])
+    now = int(time.time())
     with conn:
-        # Full rebuild — even an empty result must clear stale vectors
-        # left behind by deleted nodes.
-        conn.execute(f"DELETE FROM {_TABLE}")
-        if rows:
+        for chunk in _chunked(stale_ids):
+            marks = ",".join("?" * len(chunk))
+            conn.execute(f"DELETE FROM {_TABLE} WHERE node_id IN ({marks})", chunk)
+            conn.execute(
+                f"DELETE FROM {_STATE_TABLE} WHERE node_id IN ({marks})", chunk
+            )
+        if to_embed:
+            # vec0 virtual tables reject INSERT OR REPLACE on an existing
+            # primary key, so changed nodes are deleted before re-insert.
+            reembed_ids = [row[0] for row in to_embed]
+            for chunk in _chunked(reembed_ids):
+                marks = ",".join("?" * len(chunk))
+                conn.execute(f"DELETE FROM {_TABLE} WHERE node_id IN ({marks})", chunk)
             conn.executemany(
                 f"INSERT INTO {_TABLE}(node_id, embedding) VALUES (?, ?)",
-                [(rows[i][0], _vec_blob(vectors[i])) for i in range(len(rows))],
+                [(row[0], _vec_blob(vectors[i])) for i, row in enumerate(to_embed)],
             )
-    return len(rows)
+            conn.executemany(
+                f"INSERT OR REPLACE INTO {_STATE_TABLE}"
+                "(node_id, embedded_hash, embedded_at) VALUES (?, ?, ?)",
+                [(row[0], desired[row[0]], now) for row in to_embed],
+            )
+    if truncated:
+        print(
+            f"sot embed: vector index truncated to {len(rows)} of "
+            f"{total_nodes} nodes (newest kept by updated_at); raise the "
+            "cap to cover the rest",
+            file=sys.stderr,
+        )
+    return {
+        "embedded": len(to_embed),
+        "unchanged": len(rows) - len(to_embed),
+        "pruned": len(stale_ids),
+        "total_nodes": total_nodes,
+        "cap": effective_cap,
+        "truncated": truncated,
+    }
 
 
 def prune_orphans(conn) -> int:
@@ -126,14 +230,22 @@ def prune_orphans(conn) -> int:
     Reconcile deletes and renames nodes without knowing about the optional
     vector table, so deleted ids keep answering vector queries until the
     next full re-embed. Read paths filter unresolvable ids, but the rows
-    should not rot between embeds either.
+    should not rot between embeds either. The incremental-embedding
+    bookkeeping table (R5) is pruned by the same pass so stale hashes
+    cannot outlive their nodes.
     """
     try:
+        pruned = 0
         with conn:
             cur = conn.execute(
                 f"DELETE FROM {_TABLE} WHERE node_id NOT IN (SELECT id FROM graph_nodes)"
             )
-        return cur.rowcount or 0
+            pruned += cur.rowcount or 0
+            conn.execute(
+                f"DELETE FROM {_STATE_TABLE} WHERE node_id NOT IN "
+                "(SELECT id FROM graph_nodes)"
+            )
+        return pruned
     except Exception:
         # sqlite-vec not installed / table absent / read-only DB: nothing to do.
         return 0

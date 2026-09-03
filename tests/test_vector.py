@@ -1,4 +1,6 @@
 """Phase 4: optional hybrid retrieval — sqlite-vec + RRF fusion."""
+import contextlib
+import io
 import os
 import shutil
 import tempfile
@@ -38,7 +40,10 @@ class HashEmbedderTests(unittest.TestCase):
         q = emb.embed_query("retry backoff")
         near = emb.embed_query("retry_with_backoff retry backoff")
         far = emb.embed_query("fetch key store")
-        cos = lambda u, v: sum(x * y for x, y in zip(u, v))
+
+        def cos(u, v):
+            return sum(x * y for x, y in zip(u, v))
+
         self.assertGreater(cos(q, near), cos(q, far))
 
 
@@ -61,8 +66,8 @@ class HybridSearchTests(unittest.TestCase):
             target.write_text(content, encoding="utf-8")
         self.db = Database(os.path.join(self.test_dir, ".sot", "test.db"))
         Reconciler(self.db, self.test_dir).reconcile(workers=1)
-        self.indexed = index_nodes(self.db.conn)
-        if not self.indexed:
+        self.index_stats = index_nodes(self.db.conn)
+        if not self.index_stats["embedded"]:
             self.skipTest("vec0 table unavailable")
 
     def tearDown(self):
@@ -70,7 +75,7 @@ class HybridSearchTests(unittest.TestCase):
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_index_and_vector_search(self):
-        self.assertGreaterEqual(self.indexed, 3)
+        self.assertGreaterEqual(self.index_stats["embedded"], 3)
         hits = vector_search(self.db.conn, "backoff")
         self.assertTrue(hits, "expected at least one vector hit")
         top_id = hits[0][0]
@@ -97,18 +102,27 @@ class HybridSearchTests(unittest.TestCase):
         self.assertEqual(res["results"][0]["sources"], ["bm25"])
 
     def test_index_nodes_is_deterministic_subset(self):
-        """With limit below the node count, two runs embed the same ids."""
-        first = index_nodes(self.db.conn, limit=2)
+        """With cap below the node count, the same capped ids are kept."""
+        first = index_nodes(self.db.conn, cap=2)
         ids_first = {
             r[0] for r in self.db.conn.execute("SELECT node_id FROM graph_vec")
         }
-        index_nodes(self.db.conn, limit=2)
+        second = index_nodes(self.db.conn, cap=2)
         ids_second = {
             r[0] for r in self.db.conn.execute("SELECT node_id FROM graph_vec")
         }
-        self.assertEqual(first, 2)
+        self.assertEqual(len(ids_first), 2)
+        # setUp already embedded these nodes; incremental keeps them as-is
+        # and prunes everything rotated out of the capped selection.
+        self.assertEqual(first["unchanged"], 2)
+        self.assertGreaterEqual(first["pruned"], 1)
+        # R5: the second call must be a no-op re-embed (incremental).
+        self.assertEqual(second["embedded"], 0)
+        self.assertEqual(second["unchanged"], 2)
+        self.assertTrue(second["truncated"],
+                        "3 embeddable nodes under cap=2 must report truncated")
         self.assertEqual(ids_first, ids_second,
-                         "same limit must select the same deterministic subset")
+                         "same cap must select the same deterministic subset")
 
     def test_reconcile_prunes_orphaned_vector_rows(self):
         """Deleting a source file and reconciling must drop its embeddings."""
@@ -143,10 +157,117 @@ class HybridSearchTests(unittest.TestCase):
         # used to leave stale rows behind forever).
         with self.db.conn:
             self.db.conn.execute("DELETE FROM graph_nodes WHERE kind != 'note'")
-        count = index_nodes(self.db.conn)
+        stats = index_nodes(self.db.conn)
         left = self.db.conn.execute("SELECT COUNT(*) FROM graph_vec").fetchone()[0]
-        self.assertEqual(count, 0)
+        self.assertEqual(stats["embedded"], 0)
         self.assertEqual(left, 0)
+
+
+class _CountingEmbedder(HashEmbedder):
+    """Spy embedder recording every embed() batch (R5 incremental checks)."""
+
+    def __init__(self, dim: int = 64):
+        super().__init__(dim=dim)
+        self.batches: list = []
+
+    def embed(self, texts):
+        self.batches.append(list(texts))
+        return super().embed(texts)
+
+    @property
+    def embedded_count(self):
+        return sum(len(b) for b in self.batches)
+
+
+@unittest.skipUnless(HAVE_VEC, "sqlite-vec extra not installed")
+class IncrementalEmbedTests(unittest.TestCase):
+    """R5: index_nodes is incremental, prunes vanished nodes, warns on cap."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.test_dir, ignore_errors=True)
+        self.db = Database(os.path.join(self.test_dir, "test.db"))
+
+    def _insert_node(self, node_id, label, body, updated_at):
+        self.db.conn.execute(
+            "INSERT INTO graph_nodes (id, path, kind, symbol, label, body, "
+            "keywords, line_start, updated_at) VALUES (?, ?, 'function', ?, ?, ?, '', 1, ?)",
+            (node_id, f"{node_id}.py", node_id, label, body, updated_at),
+        )
+        self.db.conn.commit()
+
+    def test_second_call_reembeds_only_changed_node(self):
+        for i in range(3):
+            self._insert_node(f"n{i}", f"label{i}", f"body {i}", i)
+        first = index_nodes(self.db.conn, cap=100)
+        self.assertEqual(first["embedded"], 3)
+        self.assertEqual(first["unchanged"], 0)
+        self.assertFalse(first["truncated"])
+
+        spy = _CountingEmbedder(dim=256)
+        unchanged_call = index_nodes(self.db.conn, embedder=spy, cap=100)
+        self.assertEqual(unchanged_call["embedded"], 0)
+        self.assertEqual(unchanged_call["unchanged"], 3)
+        self.assertEqual(spy.embedded_count, 0, "unchanged nodes must not be re-embedded")
+
+        # Change exactly one node's content (and touch updated_at).
+        self.db.conn.execute(
+            "UPDATE graph_nodes SET body = 'brand new body', updated_at = 99 "
+            "WHERE id = 'n1'"
+        )
+        self.db.conn.commit()
+        spy2 = _CountingEmbedder(dim=256)
+        second = index_nodes(self.db.conn, embedder=spy2, cap=100)
+        self.assertEqual(second["embedded"], 1, "only the changed node re-embeds")
+        self.assertEqual(second["unchanged"], 2)
+        self.assertEqual(spy2.embedded_count, 1)
+        vec_ids = {r[0] for r in self.db.conn.execute("SELECT node_id FROM graph_vec")}
+        self.assertEqual(vec_ids, {"n0", "n1", "n2"})
+
+    def test_vanished_nodes_are_pruned_from_vec_and_state(self):
+        for i in range(3):
+            self._insert_node(f"n{i}", f"label{i}", f"body {i}", i)
+        index_nodes(self.db.conn)
+        with self.db.conn:
+            self.db.conn.execute("DELETE FROM graph_nodes WHERE id = 'n1'")
+        stats = index_nodes(self.db.conn)
+        self.assertGreaterEqual(stats["pruned"], 1)
+        vec_ids = {r[0] for r in self.db.conn.execute("SELECT node_id FROM graph_vec")}
+        state_ids = {r[0] for r in self.db.conn.execute("SELECT node_id FROM vector_index_state")}
+        self.assertNotIn("n1", vec_ids)
+        self.assertNotIn("n1", state_ids)
+
+    def test_cap_sets_truncated_flag_and_warns_on_stderr(self):
+        for i in range(5):
+            self._insert_node(f"n{i}", f"label{i}", f"body {i}", i)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            stats = index_nodes(self.db.conn, cap=3)
+        self.assertTrue(stats["truncated"])
+        self.assertEqual(stats["embedded"], 3)
+        self.assertEqual(stats["total_nodes"], 5)
+        self.assertEqual(stats["cap"], 3)
+        self.assertIn("truncated", err.getvalue())
+        self.assertIn("3 of 5", err.getvalue())
+        vec_count = self.db.conn.execute("SELECT COUNT(*) FROM graph_vec").fetchone()[0]
+        self.assertEqual(vec_count, 3)
+
+        # Under the cap the flag stays off and nothing is warned.
+        err2 = io.StringIO()
+        with contextlib.redirect_stderr(err2):
+            stats2 = index_nodes(self.db.conn, cap=10)
+        self.assertFalse(stats2["truncated"])
+        self.assertEqual(stats2["total_nodes"], 5)
+        self.assertEqual(err2.getvalue(), "")
+
+    def test_cap_keeps_newest_nodes_by_updated_at(self):
+        for i in range(4):
+            self._insert_node(f"old{i}", f"label{i}", f"body {i}", i)
+        self._insert_node("new", "fresh label", "newest body", 1000)
+        stats = index_nodes(self.db.conn, cap=2)
+        self.assertTrue(stats["truncated"])
+        vec_ids = {r[0] for r in self.db.conn.execute("SELECT node_id FROM graph_vec")}
+        self.assertEqual(vec_ids, {"new", "old3"}, "cap must keep the newest nodes")
 
 
 if __name__ == "__main__":

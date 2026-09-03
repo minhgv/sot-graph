@@ -686,11 +686,20 @@ def cmd_embed(args: argparse.Namespace, db: Database) -> int:
         return 2
     try:
         with db.write_lock():
-            count = index_nodes(db.conn, limit=getattr(args, "limit", 5000))
+            stats = index_nodes(db.conn, cap=getattr(args, "limit", 5000))
     except (LockBusy, RuntimeError) as exc:
         print(f"❌ embed failed: {exc}", file=sys.stderr)
         return 1
-    print(f"✅ Embedded {count} graph nodes into the vector index (dim=256, HashEmbedder).")
+    print(
+        f"✅ Embedded {stats['embedded']} graph nodes into the vector index "
+        f"({stats['unchanged']} unchanged, {stats['pruned']} pruned; "
+        "dim=256, HashEmbedder)."
+    )
+    if stats["truncated"]:
+        print(
+            f"   ⚠️  truncated: {stats['total_nodes']} embeddable nodes exceed "
+            f"the cap ({stats['cap']}); the newest nodes are covered first."
+        )
     print("   Plug a neural embedder via sot_graph.vector for semantic recall.")
     return 0
 
@@ -1561,6 +1570,11 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
             f"(dirty={pre_snapshot.dirty}) → post {post_snapshot['descriptor_digest'][:19]} "
             f"(dirty={post_snapshot['dirty']})_"
         )
+        # R5: bounded measurement must never be silent — surface receipt
+        # warnings (e.g. partial closure over >RECEIPT_CITED_FILE_CAP diffs)
+        # on stderr so text/CI output cannot bless partial evidence as whole.
+        for warning in receipt.get("warnings") or []:
+            print(f"⚠️  {warning}", file=sys.stderr)
 
     def _ns(value: Any) -> Any:
         if isinstance(value, dict):

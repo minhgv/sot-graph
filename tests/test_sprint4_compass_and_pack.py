@@ -8,6 +8,7 @@ import argparse
 import contextlib
 import io
 import json
+import math
 import os
 import shutil
 import tempfile
@@ -15,7 +16,7 @@ import unittest
 from pathlib import Path
 
 from sot_graph.cli import cmd_explore
-from sot_graph.db import Database
+from sot_graph.db import Database, _EXPLORE_CHUNK
 from sot_graph.mcp_service import McpService
 from sot_graph.pack import PackError, build_bundle
 from sot_graph.reconciler import Reconciler
@@ -25,6 +26,183 @@ from sot_graph.tokenizer import (
     fit_lines_to_token_budget,
     truncate_to_token_budget,
 )
+
+
+def _reference_explore_node(db, node_id, depth=1, limit=None):
+    """Differential oracle: the pre-R5 per-node BFS, kept verbatim.
+
+    explore_node must produce byte-identical output to this one-query-per-
+    node loop (R5 batched the fetch per LEVEL without changing semantics).
+    Note: edge ties with identical (direction, target id) have unspecified
+    order in both implementations, so test graphs use at most one edge per
+    (src, dst) pair.
+    """
+    if depth < 0 or (limit is not None and limit <= 0):
+        return []
+    visited = set()
+    result = []
+    queue = [(node_id, 0, None, None, None)]
+    sql = (
+        "SELECT 'outward' AS dir, e.relation, n.id, n.label, n.path, n.line_start, n.kind "
+        "FROM graph_edges e JOIN graph_nodes n ON e.dst=n.id "
+        "WHERE e.src=? AND e.relation != 'defines' "
+        "UNION ALL "
+        "SELECT 'inward' AS dir, e.relation, n.id, n.label, n.path, n.line_start, n.kind "
+        "FROM graph_edges e JOIN graph_nodes n ON e.src=n.id "
+        "WHERE e.dst=? AND e.relation != 'defines' "
+        "ORDER BY dir DESC, n.id"
+    )
+    while queue and (limit is None or len(result) < limit):
+        current, current_depth, via_id, via_label, via_path = queue.pop(0)
+        if current in visited or current_depth >= depth:
+            continue
+        visited.add(current)
+        rows = db.conn.execute(sql, (current, current)).fetchall()
+        for direction, rel, target, label, path, line, kind in rows:
+            if target == node_id:
+                continue
+            rel_label = rel if direction == "outward" else f"used_by ({rel})"
+            hop_num = current_depth + 1
+            result.append({
+                "direction": direction,
+                "relation": rel_label,
+                "target_id": target,
+                "label": label,
+                "path": path,
+                "line": line,
+                "kind": kind,
+                "depth": hop_num,
+                "hop": hop_num,
+                "via_id": via_id if hop_num > 1 else None,
+                "via_label": via_label if hop_num > 1 else None,
+                "via_path": via_path if hop_num > 1 else None,
+            })
+            if target not in visited and hop_num < depth:
+                queue.append((target, hop_num, target, label, path))
+            if limit is not None and len(result) >= limit:
+                break
+    return result
+
+
+class ExploreNodeLevelBatchTests(unittest.TestCase):
+    """R5: level-batched BFS must exactly match the per-node reference."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp(prefix="sot-explore-batch-")
+        self.addCleanup(shutil.rmtree, self.test_dir, ignore_errors=True)
+        self.db = Database(os.path.join(self.test_dir, "test.db"))
+        self.addCleanup(self.db.close)
+
+    def _add_node(self, node_id, updated_at=0):
+        self.db.conn.execute(
+            "INSERT INTO graph_nodes (id, path, kind, symbol, label, body, "
+            "keywords, line_start, updated_at) "
+            "VALUES (?, ?, 'function', ?, ?, '', '', 1, ?)",
+            (node_id, f"{node_id.lower()}.py", node_id, node_id, updated_at),
+        )
+
+    def _add_edge(self, src, dst, relation="calls", line=1):
+        self.db.conn.execute(
+            "INSERT INTO graph_edges (path, src, dst, relation, line) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (f"{src.lower()}.py", src, dst, relation, line),
+        )
+
+    def _commit(self):
+        self.db.conn.commit()
+
+    def test_deep_chain_matches_reference(self):
+        for node in ("A", "B", "C", "D", "E"):
+            self._add_node(node)
+        for src, dst in (("A", "B"), ("B", "C"), ("C", "D"), ("D", "E")):
+            self._add_edge(src, dst)
+        self._commit()
+        for depth in (1, 2, 3, 4, 6):
+            with self.subTest(depth=depth):
+                self.assertEqual(
+                    self.db.explore_node("A", depth=depth),
+                    _reference_explore_node(self.db, "A", depth=depth),
+                )
+
+    def test_wide_fanout_across_chunks_matches_reference(self):
+        # root -> 600 children (spans 3 chunks of 250), each child -> leaf.
+        self._add_node("root")
+        children = [f"C{i:03d}" for i in range(600)]
+        for i, child in enumerate(children):
+            self._add_node(child, updated_at=i)
+            self._add_node(f"L{i:03d}", updated_at=i)
+            self._add_edge(child, f"L{i:03d}")
+        for child in children:
+            self._add_edge("root", child)
+        self._commit()
+        explored = self.db.explore_node("root", depth=2)
+        reference = _reference_explore_node(self.db, "root", depth=2)
+        self.assertEqual(len(explored), 1200)
+        self.assertEqual(explored, reference)
+        # Level batching: 1 node at hop 0 + 600 nodes at hop 1 across
+        # ceil(600 / chunk) chunks => exactly that many chunked IN queries.
+        class _CountingConn:
+            def __init__(self, conn):
+                self._conn = conn
+                self.queries = []
+
+            def execute(self, sql, *args):
+                self.queries.append(sql)
+                return self._conn.execute(sql, *args)
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+        counting = _CountingConn(self.db.conn)
+        original_conn = self.db.conn
+        self.db.conn = counting
+        try:
+            self.db.explore_node("root", depth=2)
+        finally:
+            self.db.conn = original_conn
+        in_queries = [s for s in counting.queries if " IN (" in s]
+        self.assertEqual(len(in_queries), 1 + math.ceil(600 / _EXPLORE_CHUNK))
+
+    def test_random_graphs_match_reference_across_depths_and_limits(self):
+        import random
+
+        rng = random.Random(20260903)
+        nodes = [f"n{i:02d}" for i in range(80)]
+        for node in nodes:
+            self._add_node(node)
+        # One edge max per (src, dst) pair: tie order is unspecified in
+        # both implementations, so differential graphs avoid ties.
+        pairs = {(s, d) for s in nodes for d in nodes if s != d}
+        chosen = rng.sample(sorted(pairs), 200)
+        for src, dst in chosen:
+            self._add_edge(src, dst, relation=rng.choice(["calls", "imports"]))
+        self._commit()
+        for start in ("n00", "n17", "n63", "missing_node"):
+            for depth in (0, 1, 2, 3):
+                for limit in (None, 1, 7, 500):
+                    with self.subTest(start=start, depth=depth, limit=limit):
+                        self.assertEqual(
+                            self.db.explore_node(start, depth=depth, limit=limit),
+                            _reference_explore_node(self.db, start, depth=depth, limit=limit),
+                        )
+
+    def test_hop_bound_and_limit_respected(self):
+        for node in ("A", "B", "C", "D", "E"):
+            self._add_node(node)
+        for src, dst in (("A", "B"), ("B", "C"), ("C", "D"), ("D", "E")):
+            self._add_edge(src, dst)
+        self._commit()
+        bounded = self.db.explore_node("A", depth=2)
+        self.assertTrue(bounded)
+        self.assertTrue(all(r["hop"] <= 2 for r in bounded))
+        truncated = self.db.explore_node("A", depth=4, limit=2)
+        self.assertEqual(len(truncated), 2)
+        self.assertEqual(truncated, _reference_explore_node(self.db, "A", depth=4, limit=2))
+        # Unbounded default (limit=None) still drains the whole component —
+        # identical to the per-node reference at any depth.
+        unbounded = self.db.explore_node("A", depth=10)
+        self.assertEqual(unbounded, _reference_explore_node(self.db, "A", depth=10))
+        self.assertGreater(len(unbounded), len(bounded))
 
 
 class Sprint4CompassAndPackTests(unittest.TestCase):
