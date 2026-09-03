@@ -7,7 +7,7 @@
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](pyproject.toml)
 [![SQLite: WAL + FTS5](https://img.shields.io/badge/SQLite-FTS5%20%2B%20WAL-orange.svg)](src/sot_graph/db.py)
 [![Schema: v8 Multi-Provider](https://img.shields.io/badge/Schema-v8%20Multi--Provider-purple.svg)](src/sot_graph/db.py)
-[![Tests: 963 collected](https://img.shields.io/badge/Tests-963%20collected-brightgreen.svg)](tests/)
+[![Tests: 1014 collected](https://img.shields.io/badge/Tests-1014%20collected-brightgreen.svg)](tests/)
 [![Quality Gates: Passing](https://img.shields.io/badge/Quality%20Gates-Passing%20(87%25%20Core%20%7C%2091%25%20Receipts)-success.svg)](scripts/quality_gates.sh)
 [![Architecture: Zero-Daemon](https://img.shields.io/badge/Architecture-Zero--Daemon-purple.svg)](#database-architecture--durability)
 [![Tree-Sitter: 10 Grammars](https://img.shields.io/badge/Tree--Sitter-10%20Grammars-success.svg)](src/sot_graph/ts_extract.py)
@@ -358,10 +358,10 @@ pip install -e ".[all,dev]"
 
 ## Verification & Test Suite
 
-The test suite includes **963 collected tests** covering unit functionality, multi-OS file locking, stateful Hypothesis property testing, fault injection (WAL crash simulation, disk-full ENOSPC simulation, mid-batch connection drops), cross-language AST extractions, and multi-provider trust chain boundary enforcement:
+The test suite includes **1014 collected tests** covering unit functionality, multi-OS file locking, stateful Hypothesis property testing, fault injection (WAL crash simulation, disk-full ENOSPC simulation, mid-batch connection drops), cross-language AST extractions, and multi-provider trust chain boundary enforcement:
 
 ```bash
-# Run full test suite with pytest (963 collected; 2 win32-only tests skip on macOS/Linux)
+# Run full test suite with pytest (1014 collected; 2 win32-only tests skip on macOS/Linux)
 pytest tests/ -v --strict-markers
 
 # Run end-to-end quality gates script (Ruff + Pyright + Bandit + Pip-Audit + Coverage)
