@@ -157,7 +157,10 @@ def build_scip_index(db, project_root: str) -> bytes:
             entry = doc["symbols"][node_id]
             sym_info = _string(1, entry["symbol"])
             if entry["doc"]:
-                sym_info += _string(3, entry["doc"])
+                # Field 2 is documentation; field 3 is repeated Relationship
+                # (a doc string at field 3 would be decoded as a Relationship
+                # message — silently mangled under the old tolerant decoder).
+                sym_info += _string(2, entry["doc"])
             sym_info += b"".join(entry["rels"])
             doc_msg += _message(3, sym_info)
         index += _message(2, doc_msg)

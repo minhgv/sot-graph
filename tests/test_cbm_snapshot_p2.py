@@ -545,7 +545,7 @@ class TestRunPersistenceRobustness:
         db = open_db(tmp_path)
         try:
             real = db._conn
-            db.conn = ExplodingConn(real, "INSERT OR REPLACE INTO provider_runs")
+            db.conn = ExplodingConn(real, "INSERT INTO provider_runs")
             with pytest.raises(sqlite3.OperationalError):
                 db.record_provider_run(PROVIDER_NAME, run_id="run_boom")
             db.conn = real  # restore via the documented test seam

@@ -3,6 +3,8 @@ sot_graph.importer.scip — SCIP Index Importer & Evidence Ingestion Engine.
 
 Supports SCIP (Sourcegraph Code Intelligence Protocol) indices in both Protobuf
 binary (.scip) and JSON (.json) formats, with zero mandatory external dependencies.
+Corrupt or truncated binary payloads raise :class:`ScipTruncationError` with
+byte counts instead of silently importing a partial graph.
 """
 
 from __future__ import annotations
@@ -20,6 +22,28 @@ ROLE_DEFINITION = 0x1
 ROLE_IMPORT = 0x2
 ROLE_WRITE_ACCESS = 0x4
 ROLE_READ_ACCESS = 0x8
+
+
+class ScipTruncationError(ValueError):
+    """A SCIP protobuf payload ended mid-frame or used an invalid wire type.
+
+    Carries the counts needed to locate the damage: byte ``offset`` where
+    decoding stopped, ``remaining`` bytes left in the enclosing message,
+    and the protobuf ``field_number`` being decoded (``-1`` when the frame
+    tag itself was unreadable). A truncated index must fail loudly —
+    silently importing a partial graph as if it were complete is worse
+    than refusing the import.
+    """
+
+    def __init__(self, reason: str, offset: int, remaining: int, field_number: int) -> None:
+        super().__init__(
+            f"truncated/corrupt SCIP protobuf: {reason} "
+            f"(field {field_number}, offset {offset}, {remaining} byte(s) remaining)"
+        )
+        self.reason = reason
+        self.offset = offset
+        self.remaining = remaining
+        self.field_number = field_number
 
 
 # -----------------------------------------------------------------------------
@@ -61,36 +85,68 @@ def _decode_packed_varints(payload: bytes) -> List[int]:
 
 
 def _decode_raw_message(buffer: bytes, offset: int = 0, length: Optional[int] = None) -> List[Tuple[int, int, Any]]:
-    """Decode a message into a list of (field_number, wire_type, raw_value)."""
+    """Decode a message into a list of (field_number, wire_type, raw_value).
+
+    Raises :class:`ScipTruncationError` (a ValueError) with byte counts when
+    a frame overruns the buffer, a varint runs off the end, or the wire type
+    is unsupported — corrupt input never silently decodes as a partial
+    message.
+    """
     end = len(buffer) if length is None else offset + length
     fields: List[Tuple[int, int, Any]] = []
     while offset < end:
-        field_number, wire_type, offset = _decode_tag(buffer, offset)
+        try:
+            field_number, wire_type, offset = _decode_tag(buffer, offset)
+        except ValueError as exc:
+            raise ScipTruncationError(
+                f"frame tag decode failed: {exc}", offset, end - offset, -1
+            ) from exc
         if wire_type == 0:  # Varint
-            val, offset = _decode_varint(buffer, offset)
+            try:
+                val, offset = _decode_varint(buffer, offset)
+            except ValueError as exc:
+                raise ScipTruncationError(
+                    f"varint value decode failed: {exc}",
+                    offset, end - offset, field_number,
+                ) from exc
             fields.append((field_number, wire_type, val))
         elif wire_type == 1:  # 64-bit
             if offset + 8 > end:
-                break
+                raise ScipTruncationError(
+                    "64-bit field needs 8 bytes", offset, end - offset, field_number
+                )
             val = struct.unpack("<Q", buffer[offset:offset+8])[0]
             offset += 8
             fields.append((field_number, wire_type, val))
         elif wire_type == 2:  # Length-delimited
-            length_val, offset = _decode_varint(buffer, offset)
+            try:
+                length_val, offset = _decode_varint(buffer, offset)
+            except ValueError as exc:
+                raise ScipTruncationError(
+                    f"length varint decode failed: {exc}",
+                    offset, end - offset, field_number,
+                ) from exc
             if offset + length_val > end:
-                break
+                raise ScipTruncationError(
+                    f"length-delimited field declares {length_val} byte(s) "
+                    f"but only {end - offset} remain",
+                    offset, end - offset, field_number,
+                )
             payload = buffer[offset:offset+length_val]
             offset += length_val
             fields.append((field_number, wire_type, payload))
         elif wire_type == 5:  # 32-bit
             if offset + 4 > end:
-                break
+                raise ScipTruncationError(
+                    "32-bit field needs 4 bytes", offset, end - offset, field_number
+                )
             val = struct.unpack("<I", buffer[offset:offset+4])[0]
             offset += 4
             fields.append((field_number, wire_type, val))
         else:
-            # Unsupported wire type or corrupt data
-            break
+            raise ScipTruncationError(
+                f"unsupported wire type {wire_type}", offset, end - offset, field_number
+            )
     return fields
 
 

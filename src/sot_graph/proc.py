@@ -6,9 +6,11 @@ and always returns a :class:`RunResult`; spawn failures and timeouts are
 reported as data instead of raised exceptions, so provider adapters can treat
 "command did not work" uniformly.
 
-- ``timeout_seconds`` kills the whole process group on deadline
-  (``timed_out=True``); the child is spawned in its own session so
-  grandchildren never outlive the deadline.
+- ``timeout_seconds`` kills the child's whole process TREE on deadline
+  (``timed_out=True``): the child is spawned in its own session and the
+  group is SIGKILLed (POSIX), or assigned to a Job Object created with
+  ``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`` and terminated as one unit
+  (Windows). Grandchildren never outlive the deadline on either platform.
 - Output is drained incrementally from both pipes with a hard per-stream
   byte cap: the moment a stream exceeds ``max_output_bytes`` the process
   group is SIGKILLed mid-stream (``truncated=True``). Memory stays bounded
@@ -16,9 +18,11 @@ reported as data instead of raised exceptions, so provider adapters can treat
 """
 from __future__ import annotations
 
+import ctypes
 import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -36,6 +40,123 @@ _POLL_INTERVAL_SECONDS = 0.01
 
 #: Grace period to join reader threads after the child died (pipes EOF).
 _JOIN_TIMEOUT_SECONDS = 5.0
+
+_WIN32 = sys.platform == "win32"
+
+# Windows has no killpg: instead the child is assigned to a Job Object
+# created with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, so terminating (or
+# closing the handle of) the job reaps every grandchild at once — the
+# moral equivalent of SIGKILLing the POSIX session. Outside win32 (or on
+# any plumbing failure) the helpers no-op / return None so the kill path
+# falls back instead of crashing the supervisor.
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9
+
+
+class _IO_COUNTERS(ctypes.Structure):
+    _fields_ = [
+        (name, ctypes.c_ulonglong)
+        for name in (
+            "ReadOperationCount",
+            "WriteOperationCount",
+            "OtherOperationCount",
+            "ReadTransferCount",
+            "WriteTransferCount",
+            "OtherTransferCount",
+        )
+    ]
+
+
+class _JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+    _fields_ = [
+        ("PerProcessUserTimeLimit", ctypes.c_longlong),
+        ("PerJobUserTimeLimit", ctypes.c_longlong),
+        ("LimitFlags", ctypes.c_uint32),
+        ("MinimumWorkingSetSize", ctypes.c_size_t),
+        ("MaximumWorkingSetSize", ctypes.c_size_t),
+        ("ActiveProcessLimit", ctypes.c_uint32),
+        ("Affinity", ctypes.c_size_t),  # ULONG_PTR
+        ("PriorityClass", ctypes.c_uint32),
+        ("SchedulingClass", ctypes.c_uint32),
+    ]
+
+
+class _JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+    _fields_ = [
+        ("BasicLimitInformation", _JOBOBJECT_BASIC_LIMIT_INFORMATION),
+        ("IoInfo", _IO_COUNTERS),
+        ("ProcessMemoryLimit", ctypes.c_size_t),
+        ("JobMemoryLimit", ctypes.c_size_t),
+        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+        ("PeakJobMemoryUsed", ctypes.c_size_t),
+    ]
+
+
+def _kernel32():
+    windll = getattr(ctypes, "windll", None)
+    return getattr(windll, "kernel32", None) if windll is not None else None
+
+
+def _open_kill_on_close_job() -> int | None:
+    """Create a Job Object whose members die with the handle, or None."""
+    if not _WIN32:
+        return None
+    kernel32 = _kernel32()
+    if kernel32 is None:
+        return None
+    try:
+        job = kernel32.CreateJobObjectW(None, None)
+        if not job:
+            return None
+        info = _JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+        info.BasicLimitInformation.LimitFlags = (
+            _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        )
+        ok = kernel32.SetInformationJobObject(
+            job,
+            _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+        )
+        if not ok:
+            kernel32.CloseHandle(job)
+            return None
+        return int(job)
+    except Exception:
+        return None
+
+
+def _assign_job(job: int, proc: subprocess.Popen) -> bool:
+    kernel32 = _kernel32()
+    if kernel32 is None:
+        return False
+    try:
+        handle = getattr(proc, "_handle", None)
+        if not handle:
+            return False
+        return bool(kernel32.AssignProcessToJobObject(job, handle))
+    except Exception:
+        return False
+
+
+def _terminate_job(job: int) -> bool:
+    kernel32 = _kernel32()
+    if kernel32 is None:
+        return False
+    try:
+        return bool(kernel32.TerminateJobObject(job, 1))
+    except Exception:
+        return False
+
+
+def _close_job_handle(job: int) -> None:
+    kernel32 = _kernel32()
+    if kernel32 is None:
+        return
+    try:
+        kernel32.CloseHandle(job)
+    except Exception:
+        pass
 
 
 @dataclass(frozen=True)
@@ -57,14 +178,34 @@ def _short_error(exc: BaseException) -> str:
     return f"{name}: {text}" if text else name
 
 
-def _kill_process_group(proc: subprocess.Popen) -> None:
-    """SIGKILL the child's entire process group, falling back to the child."""
+def _kill_process_group(
+    proc: subprocess.Popen, job: int | None = None
+) -> None:
+    """Terminate the child's whole process tree, best effort on every platform.
+
+    Preference order: Windows Job Object terminate → POSIX group SIGKILL →
+    Windows ``taskkill /T`` fallback (job denied or assignment failed) →
+    bare child kill.
+    """
+    if job is not None and _terminate_job(job):
+        return
     if hasattr(os, "killpg") and hasattr(os, "getpgid"):
         try:
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             return
         except (ProcessLookupError, PermissionError, OSError):
             pass  # already gone or unreachable; fall through to proc.kill()
+    if _WIN32 and proc.poll() is None:
+        try:
+            subprocess.run(  # noqa: S603,S607 - builtin taskkill, caller-controlled PID
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+            return
+        except OSError:
+            pass
     proc.kill()
 
 
@@ -149,18 +290,22 @@ def run_command(
         env = dict(os.environ)
         env.update(env_extra)
 
+    job = _open_kill_on_close_job()
     try:
         # start_new_session detaches the child into its own process group so a
-        # timeout/cap kill can SIGKILL grandchildren too (no orphaned helpers).
+        # timeout/cap kill can SIGKILL grandchildren too (no orphaned helpers);
+        # on Windows the Job Object below provides the equivalent tree kill.
         proc = subprocess.Popen(  # noqa: S603 - argv is caller-controlled, shell is never used
             list(frozen_argv),
             cwd=None if cwd is None else os.fspath(cwd),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=env,
-            start_new_session=True,
+            start_new_session=not _WIN32,
         )
     except (FileNotFoundError, OSError) as exc:
+        if job is not None:
+            _close_job_handle(job)
         return RunResult(
             argv=frozen_argv,
             returncode=None,
@@ -170,6 +315,12 @@ def run_command(
             truncated=False,
             error=_short_error(exc),
         )
+    if job is not None:
+        # A grandchild spawned between Popen and this assignment escapes the
+        # job (closing that window would need a CREATE_SUSPENDED spawn plus a
+        # thread handle); the window is microseconds and KILL_ON_JOB_CLOSE
+        # still bounds everything that did get assigned.
+        _assign_job(job, proc)
 
     overflow = threading.Event()
     stdout_reader = _StreamReader(proc.stdout, max_output_bytes, overflow)
@@ -184,18 +335,18 @@ def run_command(
         while proc.poll() is None:
             if time.monotonic() >= deadline:
                 timed_out = True
-                _kill_process_group(proc)
+                _kill_process_group(proc, job)
                 break
             if overflow.is_set():
                 truncated = True
-                _kill_process_group(proc)
+                _kill_process_group(proc, job)
                 break
             time.sleep(_POLL_INTERVAL_SECONDS)
     finally:
         try:
             proc.wait(timeout=_JOIN_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:  # pragma: no cover - pathological reaper hang
-            _kill_process_group(proc)
+            _kill_process_group(proc, job)
             proc.wait(timeout=_JOIN_TIMEOUT_SECONDS)
         stdout_thread.join(timeout=_JOIN_TIMEOUT_SECONDS)
         stderr_thread.join(timeout=_JOIN_TIMEOUT_SECONDS)
@@ -206,6 +357,11 @@ def run_command(
                 stream.close()
             except OSError:
                 pass
+        if job is not None:
+            # KILL_ON_JOB_CLOSE: closing the handle terminates any grandchild
+            # that raced past assignment/termination; after a clean wait() the
+            # job is empty and this is a no-op.
+            _close_job_handle(job)
 
     truncated = truncated or stdout_reader.exceeded_cap or stderr_reader.exceeded_cap
 

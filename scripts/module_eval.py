@@ -53,7 +53,7 @@ SCOPES: Dict[str, Dict[str, List[str]]] = {
         "tests": [
             "test_storage_integrity.py", "test_config_loader.py",
             "test_proc_runner.py", "test_proc_process_group.py",
-            "test_proc_streaming_cap.py", "test_vector.py",
+            "test_proc_streaming_cap.py", "test_proc_windows_job.py", "test_vector.py",
             "test_p9_chaos_migration.py", "test_v2_upgrade.py",
             "test_maintenance.py", "test_optimizations.py",
             "test_core_safety_fixes.py",
@@ -78,6 +78,7 @@ SCOPES: Dict[str, Dict[str, List[str]]] = {
             "test_cbm_adapter.py", "test_cbm_golden.py",
             "test_cbm_normalization.py", "test_cbm_snapshot_p2.py",
             "test_cbm_verification.py", "test_scip_provider.py",
+            "test_scip_truncation.py",
             "test_phase1_scip_and_schema_v5.py", "test_p3_scip_binding.py",
             "test_provider_contract.py", "test_p3_plugin_contract.py",
             "test_providers_registry.py", "test_p3_builtin_recall.py",

@@ -345,7 +345,7 @@ class TestAtomicProviderOutcome:
         try:
             real = db.conn
             db.conn = ExplodingConn(
-                real, "INSERT OR REPLACE INTO provider_evidence"
+                real, "INSERT INTO provider_evidence"
             )
             run, binding, evidence = self._outcome_args()
             with pytest.raises(sqlite3.OperationalError):

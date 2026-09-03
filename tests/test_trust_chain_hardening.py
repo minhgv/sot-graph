@@ -171,7 +171,9 @@ def test_scip_usages_routing_and_require_mode(tmp_path: Path):
     (dot_sot / "config.toml").write_text("allow_external = true\n")
 
     scip_file = repo / "index.scip"
-    scip_file.write_bytes(b"dummy scip bytes")
+    # Valid (empty) protobuf index — an empty message is zero bytes. Garbage
+    # bytes would now be honestly rejected as corrupt (ScipTruncationError).
+    scip_file.write_bytes(b"")
 
     provider = ScipProvider(index_path=str(scip_file))
     st = provider.probe(str(repo))
