@@ -434,7 +434,7 @@ def create_server(service: McpService) -> Any:
             }),
             types.Tool(name="sot_diff_impact", description="Analyze git diff blast radius, upstream inward callers, API contract impacts, and affected tests.", inputSchema={
                 "type": "object", "properties": {
-                    "target": {"type": "string", "description": "Git revision target (e.g. 'HEAD~1', 'main...HEAD', commit hash). Default: 'HEAD~1'"},
+                    "target": {"type": "string", "description": "Git revision target (e.g. 'HEAD~1', 'main...HEAD', commit hash). Default: 'HEAD'"},
                     "depth": {"type": "integer", "minimum": 1, "maximum": 5, "description": "Reverse call graph traversal depth (default: 2)"},
                     "staged": {"type": "boolean", "description": "Analyze staged changes (--cached)"},
                     "working_tree": {"type": "boolean", "description": "Analyze unstaged working tree changes"},
@@ -534,7 +534,7 @@ def create_server(service: McpService) -> Any:
                 result = await service.asolution_bundle(args.get("module", ""), output_file=args.get("output_file"))
             elif name == "sot_diff_impact":
                 result = await service.adiff_impact(
-                    target=args.get("target", "HEAD~1"),
+                    target=args.get("target", "HEAD"),
                     depth=args.get("depth", 2),
                     staged=args.get("staged", False),
                     working_tree=args.get("working_tree", False),
@@ -564,7 +564,7 @@ def create_server(service: McpService) -> Any:
                 )
             elif name == "sot_diff_impact_receipt":
                 result = await service.adiff_impact_receipt(
-                    target=args.get("target", "HEAD~1"),
+                    target=args.get("target", "HEAD"),
                     depth=args.get("depth", 2),
                     staged=args.get("staged", False),
                     working_tree=args.get("working_tree", False),

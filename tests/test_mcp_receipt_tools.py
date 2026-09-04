@@ -136,6 +136,59 @@ class McpReceiptToolsTests(unittest.TestCase):
             )
         self._run(case)
 
+    def test_diff_impact_tools_default_to_head(self):
+        """CLI/MCP parity: omitting target must analyze HEAD, not HEAD~1."""
+        import unittest.mock
+
+        from sot_graph.mcp_service import McpService
+
+        captured = {}
+
+        def fake_diff_impact(self, **kwargs):
+            captured["diff_impact"] = kwargs
+            return {"ok": True, "status": "success", "target": kwargs.get("target")}
+
+        def fake_diff_impact_receipt(self, **kwargs):
+            captured["receipt"] = kwargs
+            return {
+                "ok": True,
+                "digest": "a" * 64,
+                "closure_decision": "open",
+                "assurance_facts": {},
+                "assurance": {"status": "PARTIAL", "reason_codes": [], "decision": {}},
+            }
+
+        async def case(client):
+            r1 = await client.call_tool("sot_diff_impact", {})
+            self.assertFalse(r1.isError)
+            r2 = await client.call_tool("sot_diff_impact_receipt", {})
+            self.assertFalse(r2.isError)
+
+        with unittest.mock.patch.object(
+            McpService, "diff_impact", fake_diff_impact
+        ), unittest.mock.patch.object(
+            McpService, "diff_impact_receipt", fake_diff_impact_receipt
+        ):
+            self._run(case)
+
+        self.assertEqual(captured["diff_impact"]["target"], "HEAD")
+        self.assertEqual(captured["receipt"]["target"], "HEAD")
+
+    def test_diff_impact_service_default_signature_is_head(self):
+        """McpService defaults match the CLI diff-impact default (HEAD)."""
+        import inspect
+
+        from sot_graph.mcp_service import McpService
+
+        self.assertEqual(
+            inspect.signature(McpService.diff_impact).parameters["target"].default,
+            "HEAD",
+        )
+        self.assertEqual(
+            inspect.signature(McpService.diff_impact_receipt).parameters["target"].default,
+            "HEAD",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

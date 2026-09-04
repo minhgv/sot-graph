@@ -947,6 +947,180 @@ def test_mcp_diff_impact_receipt_fits_response_truncation(tmp_path: Path):
     assert len(encoded) <= 2048
 
 
+def _assurance_receipt_payload(caller_count: int) -> dict:
+    """Fabricate a diff-impact receipt whose verdict is ASSURED_WITHIN_SCOPE."""
+    from dataclasses import asdict
+
+    from sot_graph.assurance.state import AssuranceFacts, decide
+
+    facts = AssuranceFacts(
+        identity_status="UNIQUE",
+        snapshot_bound=True,
+        claim_profile="scoped",
+        absence_claim=False,
+    )
+    decision = decide(facts)
+    assert decision["status"] == "ASSURED_WITHIN_SCOPE"  # counterexample precondition
+    return {
+        "schema_version": "1.0.0",
+        "kind": "diff_impact",
+        "digest": "a" * 64,
+        "closure_decision": "closed",
+        "caller_impacts": [
+            {"caller": f"fn_{i}", "path": f"mod_{i}.py", "depth": 1,
+             "relation": "direct", "symbols": [f"sym_{i}"]}
+            for i in range(caller_count)
+        ],
+        "assurance_facts": asdict(facts),
+        "assurance": {
+            "status": decision["status"],
+            "reason_codes": decision["reason_codes"],
+            "decision": decision,
+        },
+    }
+
+
+def test_mcp_transport_truncation_degrades_assurance(tmp_path: Path):
+    """SG-104 invariant: returned < enumerated must degrade the verdict.
+
+    Reproduces the assessment counterexample: 120 caller_impacts under a
+    small response budget trim to a handful, yet the embedded assurance
+    verdict used to stay ASSURED_WITHIN_SCOPE / closure 'closed'.
+    """
+    from sot_graph.db import Database
+    from sot_graph.assurance.receipts import receipt_digest
+    from sot_graph.assurance.state import ReceiptStatus
+    from sot_graph.mcp_service import McpService, ServiceLimits
+
+    db_file = tmp_path / "sot.db"
+    db = Database(str(db_file))
+    db.close()
+
+    service = McpService(
+        db_path=str(db_file), project_root=str(tmp_path),
+        limits=ServiceLimits(response_bytes=1800),
+    )
+    try:
+        payload = _assurance_receipt_payload(caller_count=120)
+        fitted = service._fits_response(payload)
+
+        # transport layer reports the trim...
+        assert fitted.get("truncated") is True
+        block = fitted.get("transport_truncation")
+        assert isinstance(block, dict) and block["collections"]
+        entry = next(
+            c for c in block["collections"] if c["key"] == "caller_impacts"
+        )
+        assert entry["enumerated_count"] == 120
+        assert 0 < entry["returned_count"] < 120
+        # ...the embedded facts are marked truncated...
+        assert fitted["assurance_facts"]["truncated"] is True
+        # ...and the verdict is re-decided by the state machine, never
+        # ASSURED_WITHIN_SCOPE while evidence was dropped.
+        assert fitted["assurance"]["status"] != ReceiptStatus.ASSURED_WITHIN_SCOPE
+        assert fitted["assurance"]["status"] == ReceiptStatus.PARTIAL
+        assert "transitive_truncated" in fitted["assurance"]["reason_codes"]
+        assert fitted["assurance"]["decision"]["status"] == ReceiptStatus.PARTIAL
+        assert fitted["closure_decision"] == "open"
+        # digest must cover the FINAL (degraded) payload
+        assert fitted["digest"] == receipt_digest(
+            {k: v for k, v in fitted.items() if k != "digest"}
+        )
+        encoded = json.dumps(fitted, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        assert len(encoded) <= 1800
+    finally:
+        service.close()
+
+
+def test_mcp_small_receipt_payload_assurance_untouched(tmp_path: Path):
+    """No-trim case: the trim path must not touch assurance facts/verdict."""
+    from sot_graph.db import Database
+    from sot_graph.mcp_service import McpService, ServiceLimits
+
+    db_file = tmp_path / "sot.db"
+    db = Database(str(db_file))
+    db.close()
+
+    service = McpService(
+        db_path=str(db_file), project_root=str(tmp_path),
+        limits=ServiceLimits(response_bytes=64 * 1024),
+    )
+    try:
+        payload = _assurance_receipt_payload(caller_count=3)
+        fitted = service._fits_response(payload)
+        assert "truncated" not in fitted
+        assert "transport_truncation" not in fitted
+        assert fitted["assurance"]["status"] == "ASSURED_WITHIN_SCOPE"
+        assert fitted["assurance_facts"]["truncated"] is False
+        assert fitted["closure_decision"] == "closed"
+        assert fitted["caller_impacts"] == payload["caller_impacts"]
+    finally:
+        service.close()
+
+
+def test_mcp_diff_impact_default_target_is_head(tmp_path: Path):
+    """CLI/MCP parity: McpService.diff_impact without target analyzes HEAD."""
+    from unittest.mock import patch
+
+    from sot_graph.db import Database
+    from sot_graph.mcp_service import McpService
+
+    db_file = tmp_path / "sot.db"
+    db = Database(str(db_file))
+    db.close()
+    service = McpService(db_path=str(db_file), project_root=str(tmp_path))
+    try:
+        captured = {}
+
+        def fake_analyze(self, **kwargs):
+            captured.update(kwargs)
+
+            class _FakeResult:
+                def to_dict(self):
+                    return {"summary": {}, "changed_files": [],
+                            "impacted": [], "affected_tests": []}
+
+            return _FakeResult()
+
+        with patch(
+            "sot_graph.diff_impact.DiffImpactEngine.analyze_diff_impact",
+            fake_analyze,
+        ):
+            res = service.diff_impact(format="json")
+        assert captured.get("target") == "HEAD"
+        assert res["target"] == "HEAD"
+    finally:
+        service.close()
+
+
+def test_mcp_diff_impact_receipt_default_target_is_head(tmp_path: Path):
+    """CLI/MCP parity: McpService.diff_impact_receipt without target uses HEAD."""
+    from unittest.mock import patch
+
+    from sot_graph.db import Database
+    from sot_graph.mcp_service import McpService
+
+    db_file = tmp_path / "sot.db"
+    db = Database(str(db_file))
+    db.close()
+    service = McpService(db_path=str(db_file), project_root=str(tmp_path))
+    try:
+        captured = {}
+
+        def fake_receipt(db, repo_root, *, target, depth, staged, working_tree):
+            captured["target"] = target
+            return {"ok": True, "kind": "diff_impact", "digest": "a" * 64}
+
+        with patch(
+            "sot_graph.assurance.receipts.diff_impact_receipt", fake_receipt
+        ):
+            res = service.diff_impact_receipt()
+        assert captured["target"] == "HEAD"
+        assert res["digest"] == "a" * 64
+    finally:
+        service.close()
+
+
 def test_atomic_replacement_snapshot_regression(tmp_path: Path):
     """Atomic replacement via os.replace must produce a new snapshot digest and not collide."""
     from sot_graph.snapshot import capture_worktree_snapshot

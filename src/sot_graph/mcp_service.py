@@ -429,6 +429,13 @@ class McpService:
         budget = self.limits.response_bytes
         value = copy.deepcopy(value)
 
+        # SG-104: transport trimming must degrade the embedded assurance
+        # verdict of receipt payloads (see _degrade_assurance_after_trim).
+        # trimmed_collections records per-collection input/returned counts
+        # in lockstep with stored_items below.
+        trimmed_collections: List[Dict[str, Any]] = []
+        text_truncated = False
+
         def _refresh_digest() -> None:
             if "digest" in value:
                 value["digest"] = receipt_digest(
@@ -440,6 +447,8 @@ class McpService:
             if isinstance(value.get(text_key), str) and len(value[text_key]) > 8000:
                 value[text_key] = value[text_key][:4000] + "\n\n... [truncated to fit response limit]"
                 value["truncated"] = True
+                text_truncated = True
+                self._degrade_assurance_after_trim(value, text_truncated, trimmed_collections)
                 _refresh_digest()
                 encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
                 if len(encoded) <= budget:
@@ -495,6 +504,12 @@ class McpService:
                         total += flag_bytes
                     items = list(d[k])
                     stored_items.append((d, k, items))
+                    trimmed_collections.append({
+                        "container": "result" if d is not value else "root",
+                        "key": k,
+                        "enumerated_count": len(items),
+                        "returned_count": 0,
+                    })
                     total += 2 - _list_bytes(items)
                     d[k] = []
                     value["truncated"] = True
@@ -506,7 +521,7 @@ class McpService:
         # Phase 2: Refill items progressively under the byte ceiling. Each
         # item is encoded exactly once; committing an item only swaps its
         # bytes into the list span, so no full re-serialization is needed.
-        for d, key, items in stored_items:
+        for idx, (d, key, items) in enumerate(stored_items):
             current = 2  # empty list encoding
             count = 0
             for it in items:
@@ -518,11 +533,45 @@ class McpService:
                 current = grown
                 count += 1
                 d[key].append(it)
+            trimmed_collections[idx]["returned_count"] = count
             # keep digest in sync once per list after its refill attempt
             _refresh_digest()
 
         if "results" in value and isinstance(value.get("results"), list) and "returned" in value:
             value["returned"] = len(value["results"])
+
+        # SG-104 invariant: any collection returned below its enumerated
+        # count must degrade the embedded assurance verdict. Re-decide via
+        # the canonical state machine BEFORE the final digest refresh so
+        # the digest covers the degraded payload.
+        self._degrade_assurance_after_trim(value, text_truncated, trimmed_collections)
+
+        # The degraded verdict + transport_truncation block are appended
+        # after the greedy refill; if their bytes push the payload past the
+        # ceiling, evict tail items from the reduced collections (the
+        # block's returned counts stay honest) until it fits.
+        encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if isinstance(value.get("transport_truncation"), dict):
+            entries = value["transport_truncation"].get("collections") or []
+            pos = len(entries) - 1
+            while len(encoded) > budget and pos >= 0:
+                entry = entries[pos]
+                container = (
+                    value["result"]
+                    if entry.get("container") == "result" and isinstance(value.get("result"), dict)
+                    else value
+                )
+                target_list = container.get(entry["key"])
+                if (
+                    isinstance(target_list, list)
+                    and target_list
+                    and entry.get("returned_count", 0) > 0
+                ):
+                    target_list.pop()
+                    entry["returned_count"] -= 1
+                    encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                else:
+                    pos -= 1
 
         _refresh_digest()
 
@@ -531,6 +580,67 @@ class McpService:
             return value
 
         raise McpServiceError("response_too_large", "response exceeds configured size limit")
+
+    def _degrade_assurance_after_trim(
+        self,
+        value: Dict[str, Any],
+        text_truncated: bool,
+        trimmed_collections: List[Dict[str, Any]],
+    ) -> None:
+        """SG-104: re-decide the embedded assurance verdict after transport trimming.
+
+        Receipt payloads (``assurance_facts`` + ``assurance`` blocks) carry a
+        verdict computed over the FULL evidence collections, i.e. pre-trim.
+        When the transport trimmer actually reduced any collection
+        (``returned_count < enumerated_count``) or cut a text field, the
+        facts no longer match the payload: set ``facts.truncated=True`` and
+        re-run the canonical state machine (``assurance.state.decide``) so
+        the invariant ``returned_count < enumerated_count =>
+        status != ASSURED_WITHIN_SCOPE`` holds. Statuses are never
+        hand-rolled here — ``decide()`` is the only producer of the status
+        vocabulary. Idempotent on re-entry; the caller refreshes the digest
+        afterwards so it covers the degraded payload.
+        """
+        reduced = [
+            c for c in trimmed_collections
+            if c["returned_count"] < c["enumerated_count"]
+        ]
+        if not (text_truncated or reduced):
+            return
+        if not (
+            isinstance(value.get("assurance_facts"), dict)
+            and isinstance(value.get("assurance"), dict)
+        ):
+            return
+
+        import dataclasses
+        from sot_graph.assurance.state import AssuranceFacts, decide
+
+        try:
+            known = {f.name for f in dataclasses.fields(AssuranceFacts)}
+            facts = AssuranceFacts(**{
+                k: v for k, v in value["assurance_facts"].items() if k in known
+            })
+        except TypeError:
+            # assurance_facts schema drift: leave the payload untouched
+            # rather than crash the whole response.
+            return
+
+        mutated = dataclasses.replace(facts, truncated=True)
+        decision = decide(mutated)
+        value["assurance_facts"] = dataclasses.asdict(mutated)
+        value["assurance"]["status"] = decision["status"]
+        value["assurance"]["reason_codes"] = decision["reason_codes"]
+        value["assurance"]["decision"] = decision
+        if "closure_decision" in value:
+            value["closure_decision"] = (
+                "closed" if decision["status"] == "ASSURED_WITHIN_SCOPE" else "open"
+            )
+        value["transport_truncation"] = {
+            "text_truncated": text_truncated,
+            "collections": reduced,
+        }
+
     def search(self, query: str, *, limit: int = 6, scope: Optional[str] = None,
                threshold: float = 0.5, assurance: bool = True,
                provider_policy: str = "builtin_only",
@@ -1300,7 +1410,7 @@ class McpService:
 
     def diff_impact(
         self,
-        target: str = "HEAD~1",
+        target: str = "HEAD",
         depth: int = 2,
         auto_reconcile: bool = False,
         format: str = "markdown",
@@ -1402,7 +1512,7 @@ class McpService:
 
     def diff_impact_receipt(
         self,
-        target: str = "HEAD~1",
+        target: str = "HEAD",
         depth: int = 2,
         staged: bool = False,
         working_tree: bool = False,
