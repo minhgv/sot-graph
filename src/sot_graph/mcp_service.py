@@ -1418,8 +1418,12 @@ class McpService:
         working_tree: bool = False,
     ) -> Dict[str, Any]:
         """Analyze blast radius, upstream inward callers, API contract impacts, and affected tests for git diff."""
+        from sot_graph.assurance.impact_pipeline import (
+            ImpactClaimRequest,
+            engine_view,
+            run_impact_claim,
+        )
         from sot_graph.diff_impact import (
-            DiffImpactEngine,
             format_diff_impact_github,
             format_diff_impact_markdown,
         )
@@ -1430,26 +1434,35 @@ class McpService:
 
         def op(conn: sqlite3.Connection) -> Dict[str, Any]:
             view = _ConnView(conn)
-            engine = DiffImpactEngine(cast(Database, view), repo_path=self.project_root)
-            res = engine.analyze_diff_impact(
-                target=target,
-                depth=depth,
-                staged=staged,
-                working_tree=working_tree,
+            # SG-105: the receipt comes from the ONE executor. The
+            # auto-reconcile itself runs above on the writer path (this op
+            # connection is mode=ro and cannot reconcile), so the request
+            # block records the pipeline invocation actually performed.
+            receipt = run_impact_claim(
+                ImpactClaimRequest(
+                    target=target, depth=depth,
+                    staged=staged, working_tree=working_tree,
+                ),
+                cast(Database, view), self.project_root,
             )
-            result_dict = res.to_dict()
-            cited: List[str] = []
-            for key in ("changed_files", "impacted", "affected_tests"):
-                entries = result_dict.get(key)
-                if isinstance(entries, list):
-                    for e in entries:
-                        p = e.get("path") if isinstance(e, dict) else str(e)
-                        if p and isinstance(p, str):
-                            cited.append(p)
+            cited: List[str] = list(receipt.get("changed_files") or [])
+            for entries in ("direct_nodes", "caller_impacts"):
+                for entry in receipt.get(entries) or []:
+                    if isinstance(entry, dict) and entry.get("path"):
+                        cited.append(str(entry["path"]))
             snapshot, stale = assured_query_context(
                 view, self.project_root, cited,
                 mark_ledger=False,  # read-only connection: detect, never write
             )
+            result: Dict[str, Any] = {
+                "target": target,
+                "changed_files": receipt.get("changed_files") or [],
+                "direct_nodes": receipt.get("direct_nodes") or [],
+                "caller_impacts": receipt.get("caller_impacts") or [],
+                "api_impacts": receipt.get("api_impacts") or [],
+                "test_impacts": receipt.get("test_impacts") or [],
+                "summary": receipt.get("summary") or {},
+            }
             payload: Dict[str, Any] = {
                 "ok": True,
                 "status": "success",
@@ -1457,10 +1470,15 @@ class McpService:
                 "depth": depth,
                 "format": format,
                 "providers": self._providers(conn),
-                "summary": result_dict.get("summary", {}),
-                "result": result_dict,
+                "summary": result["summary"],
+                "result": result,
                 "snapshot": snapshot,
                 "stale_files": stale,
+                # SG-105: canonical receipt blocks ride along so the
+                # SG-104 trim-degradation invariant protects this tool too.
+                "assurance": receipt.get("assurance"),
+                "assurance_facts": receipt.get("assurance_facts"),
+                "digest": receipt.get("digest"),
                 **(
                     {"reconcile": reconcile_result}
                     if reconcile_result is not None
@@ -1469,10 +1487,12 @@ class McpService:
             }
             rendered = str(format).lower()
             if rendered == "markdown":
-                payload["markdown"] = format_diff_impact_markdown(res)
+                payload["markdown"] = format_diff_impact_markdown(
+                    engine_view(receipt)
+                )
             elif rendered == "github":
                 payload["markdown"] = format_diff_impact_github(
-                    res, repo_root=self.project_root,
+                    engine_view(receipt), repo_root=self.project_root,
                 )
             return self._fits_response(payload)
         return self._run(op)
@@ -1518,16 +1538,30 @@ class McpService:
         working_tree: bool = False,
     ) -> Dict[str, Any]:
         """POST-change diff-impact receipt (P7.2) over MCP."""
-        from sot_graph.assurance.receipts import (
-            diff_impact_receipt as _diff_impact_receipt,
+        from sot_graph.assurance.impact_pipeline import (
+            ImpactClaimRequest,
+            ReceiptStore,
+            run_impact_claim,
         )
 
         def op(conn: sqlite3.Connection) -> Dict[str, Any]:
             view = cast(Database, _ConnView(conn))
-            payload = _diff_impact_receipt(
-                view, self.project_root, target=target, depth=depth,
-                staged=staged, working_tree=working_tree,
+            payload = run_impact_claim(
+                ImpactClaimRequest(
+                    target=target, depth=depth,
+                    staged=staged, working_tree=working_tree,
+                ),
+                view, self.project_root,
             )
+            # SG-105: persist the canonical receipt silently — the store
+            # path never enters the payload (the digest is the address)
+            # and persistence failures must not fail the tool.
+            try:
+                ReceiptStore(os.path.join(
+                    self.project_root, ".sot", "receipts",
+                )).put(payload)
+            except Exception:  # noqa: BLE001 - persistence is best-effort
+                pass
             return self._fits_response(payload)
 
         return self._run(op)

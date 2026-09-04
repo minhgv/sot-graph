@@ -1463,48 +1463,54 @@ def cmd_scope_receipt(args: argparse.Namespace, db: Database, root: str) -> int:
 
 def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
     from sot_graph.diff_impact import (
-        GitDeltaExtractor,
         format_diff_impact_github,
         format_diff_impact_markdown,
     )
 
-    from sot_graph.assurance.receipts import diff_impact_receipt
+    from sot_graph.assurance.impact_pipeline import (
+        ImpactClaimRequest,
+        ReceiptStore,
+        engine_view,
+        run_impact_claim,
+    )
     from sot_graph.assurance.state import ASSURED_STATUSES
-    from sot_graph.snapshot import capture_worktree_snapshot
-    from types import SimpleNamespace
 
-    target = getattr(args, "target", "HEAD~1") or "HEAD~1"
+    target = getattr(args, "target", "HEAD") or "HEAD"
     depth = int(getattr(args, "depth", 2) or 2)
     staged = bool(getattr(args, "staged", False))
     working_tree = bool(getattr(args, "working_tree", False))
 
-    # P1.g: capture PRE-change snapshot before any auto-reconcile mutates the
-    # index — the receipt binds it (volatile-stripped) beside the post state.
-    # P0 Contract 2: cite the diff's changed files so the pre-snapshot binds
-    # their content, mirroring the post-change snapshot in receipts.py.
-    try:
-        delta_files = list(
-            GitDeltaExtractor(root)
-            .extract_diff(target, staged=staged, working_tree=working_tree)[0]
-            .keys()
-        )
-    except Exception:  # pragma: no cover - best-effort content binding
-        delta_files = []
-    pre_snapshot = capture_worktree_snapshot(
-        root, role="pre_change", cited_paths=delta_files[:200] or None
+    # SG-105: ONE executor. The pipeline owns the PRE-change snapshot
+    # capture (P1.g: before any reconcile mutates the index), the
+    # optional auto-reconcile, and the receipt; this surface only
+    # projects and renders.
+    receipt = run_impact_claim(
+        ImpactClaimRequest(
+            target=target,
+            depth=depth,
+            staged=staged,
+            working_tree=working_tree,
+            auto_reconcile=bool(getattr(args, "auto_reconcile", False)),
+        ),
+        db, root,
     )
-    if getattr(args, "auto_reconcile", False):
-        try:
-            reconciler = Reconciler(db, root)
-            reconciler.reconcile()
-        except Exception as exc:
-            print(f"⚠️  Auto-reconcile failed: {exc}", file=sys.stderr)
+    # The executor's reconcile failures are receipt warnings, not prints;
+    # surface them on stderr in every format (bounded measurement must
+    # never be silent — R5).
+    for warning in receipt.get("warnings") or []:
+        if str(warning).startswith("auto_reconcile_failed"):
+            print(f"⚠️  {warning}", file=sys.stderr)
 
-    receipt = diff_impact_receipt(
-        db, root, target=target, depth=depth, staged=staged,
-        working_tree=working_tree,
-        pre_snapshot=pre_snapshot.as_dict(),
-    )
+    # Content-addressed persistence of the canonical receipt under the
+    # repo's .sot/receipts/. The store path never enters the payload (the
+    # digest is the address); persistence failures must never fail the
+    # command.
+    try:
+        stored = ReceiptStore(os.path.join(root, ".sot", "receipts")).put(receipt)
+        print(f"receipt stored: .sot/receipts/{stored}.json", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - persistence is best-effort
+        print(f"⚠️  receipt store skipped: {exc}", file=sys.stderr)
+
     # SG-103: advisory vs gate semantics. Default (no --gate) is advisory:
     # the report renders and the command exits 0 regardless of receipt
     # status. --gate fails closed (exit 1) unless the receipt status is in
@@ -1581,9 +1587,10 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
         return 1 if gate_failed else 0
 
     if fmt == "text":
+        pre_snap = receipt.get("pre_change_snapshot") or {}
         print(
-            f"_Snapshot: pre {pre_snapshot.descriptor_digest[:19]} "
-            f"(dirty={pre_snapshot.dirty}) → post {post_snapshot['descriptor_digest'][:19]} "
+            f"_Snapshot: pre {str(pre_snap.get('descriptor_digest') or '?')[:19]} "
+            f"(dirty={pre_snap.get('dirty')}) → post {post_snapshot['descriptor_digest'][:19]} "
             f"(dirty={post_snapshot['dirty']})_"
         )
         # R5: bounded measurement must never be silent — surface receipt
@@ -1592,32 +1599,10 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
         for warning in receipt.get("warnings") or []:
             print(f"⚠️  {warning}", file=sys.stderr)
 
-    def _ns(value: Any) -> Any:
-        if isinstance(value, dict):
-            return SimpleNamespace(**{k: _ns(v) for k, v in value.items()})
-        if isinstance(value, list):
-            return [_ns(v) for v in value]
-        return value
-
-    # Duck-typed stand-in carrying the receipt fields the markdown formatter
-    # reads off a DiffImpactResult. SG-103: receipt evidence fields are
-    # threaded through too so the github renderer can state assurance
-    # status, reason codes, truncation and snapshot identity honestly
-    # (plain engine results lack them; the renderer getattr-guards).
-    engine: Any = SimpleNamespace(
-        summary=receipt["summary"],
-        target=target,
-        changed_files=receipt["changed_files"],
-        direct_nodes=_ns(receipt["direct_nodes"]),
-        caller_impacts=_ns(receipt["caller_impacts"]),
-        api_impacts=_ns(receipt["api_impacts"]),
-        test_impacts=_ns(receipt["test_impacts"]),
-        assurance=receipt.get("assurance"),
-        assurance_facts=receipt.get("assurance_facts"),
-        changed_files_truncated=bool(receipt.get("changed_files_truncated", False)),
-        changed_files_total=receipt.get("changed_files_total"),
-        post_change_snapshot=receipt.get("post_change_snapshot"),
-    )
+    # SG-105: the renderers read engine attributes off the canonical
+    # receipt projected through the shared engine_view (getattr-guarded),
+    # so text/markdown/github output is identical across CLI and MCP.
+    engine: Any = engine_view(receipt)
     if fmt == "github":
         md = format_diff_impact_github(engine, repo_root=root)
     else:

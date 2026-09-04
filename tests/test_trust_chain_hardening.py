@@ -1107,7 +1107,8 @@ def test_mcp_diff_impact_receipt_default_target_is_head(tmp_path: Path):
     try:
         captured = {}
 
-        def fake_receipt(db, repo_root, *, target, depth, staged, working_tree):
+        def fake_receipt(db, repo_root, *, target, depth, staged,
+                         working_tree, pre_snapshot=None):
             captured["target"] = target
             return {"ok": True, "kind": "diff_impact", "digest": "a" * 64}
 
@@ -1116,7 +1117,15 @@ def test_mcp_diff_impact_receipt_default_target_is_head(tmp_path: Path):
         ):
             res = service.diff_impact_receipt()
         assert captured["target"] == "HEAD"
-        assert res["digest"] == "a" * 64
+        # SG-105: the executor recomputes the digest over the augmented
+        # (request/projection) payload, so the fake's placeholder digest
+        # never passes through; assert content-address consistency instead.
+        from sot_graph.assurance.receipts import receipt_digest
+
+        assert res["request"]["target"] == "HEAD"
+        assert res["digest"] == receipt_digest(
+            {k: v for k, v in res.items() if k != "digest"}
+        )
     finally:
         service.close()
 
