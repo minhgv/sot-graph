@@ -69,7 +69,7 @@ class TestChaos:
             )
             # Receipt read path still answers; ledger blocks degrade.
             payload = scope_receipt(db, str(chaos_repo), "run")
-            assert payload["schema_version"] == "1.4"
+            assert payload["schema_version"] == "1.5"
             assert payload["providers"]["union_entries"] >= 0
             assert payload["assurance"]["omp_confirmations"]
         finally:
@@ -82,7 +82,7 @@ class TestChaos:
             db.conn.commit()
             payload = scope_receipt(db, str(chaos_repo), "run")
             # Receipt still emits; nothing is silently trusted.
-            assert payload["schema_version"] == "1.4"
+            assert payload["schema_version"] == "1.5"
         finally:
             db.close()
 

@@ -26,7 +26,13 @@ import os
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from dataclasses import asdict
-from .coverage import CoverageState, build_scope_manifest, coverage_note, repo_coverage
+from .coverage import (
+    CoverageState,
+    build_scope_manifest,
+    compile_scope_universe,
+    coverage_note,
+    repo_coverage,
+)
 from .engine import assured_query_context, resolve_symbol_identity
 from .impact_pipeline import CollectionError, merge_collection_stats
 from .ledger import union_evidence
@@ -48,7 +54,7 @@ __all__ = [
     "RECEIPT_SCHEMA_VERSION",
     "RECEIPT_CITED_FILE_CAP",
 ]
-RECEIPT_SCHEMA_VERSION = "1.4"  # minor bump: 1.1 added canonical status vocabulary (P0); 1.2 added changed_files_total/changed_files_truncated (R5); 1.3 added request/projection blocks + machine-readable collection-error warnings (SG-105); 1.4 added per-collector collection_stats cap accounting + facts.truncation_sources reason codes (SG-107)
+RECEIPT_SCHEMA_VERSION = "1.5"  # minor bump: 1.1 added canonical status vocabulary (P0); 1.2 added changed_files_total/changed_files_truncated (R5); 1.3 added request/projection blocks + machine-readable collection-error warnings (SG-105); 1.4 added per-collector collection_stats cap accounting + facts.truncation_sources reason codes (SG-107); 1.5 added scope_universe block + enumeration/parser-capability exhaustion facts (SG-108)
 
 #: Bounded-work cap on how many changed files a post-change receipt will
 #: measure (journal staleness, evidence invalidation, snapshot citation).
@@ -375,12 +381,23 @@ def check_rename_gate(
     report = repo_coverage(db, repo_root)
     covered = report.covered_fraction
     files_touched = {row.get("path")} | {c["path"] for c in callers}
-    scoped = repo_coverage(db, repo_root, paths=sorted(
-        p for p in files_touched if p))
+    scoped_paths = sorted(p for p in files_touched if p)
+    scoped = repo_coverage(db, repo_root, paths=scoped_paths)
     scoped_fraction = scoped.covered_fraction
+    # SG-108: absence ("0 callers") requires a fully EXHAUSTED universe,
+    # not a 0.9 coverage average. The universe is REPO-WIDE on purpose:
+    # a caller can live in any eligible file, so restricting the
+    # enumeration to the target+caller files would let one unjournaled
+    # file elsewhere hide the sole caller. Requirements: every eligible
+    # file enumerated and fully parser-capable, plus scoped coverage
+    # exactly 1.0 over the touched files (with PARTIAL no longer in the
+    # numerator). scoped_fraction None (nothing measurable in scope)
+    # fails closed as insufficient.
+    universe = compile_scope_universe(db, repo_root)
     sufficient = (
-        covered is not None and covered >= 0.9
-        and (scoped_fraction is None or scoped_fraction >= 0.9)
+        universe.enumeration_complete
+        and universe.parser_capability_complete is True
+        and scoped_fraction == 1.0
     )
     zero_callers = len(callers) == 0
     if zero_callers and not sufficient:
@@ -388,9 +405,10 @@ def check_rename_gate(
             "symbol": symbol, "resolved": True, "blocked": True,
             "callers_found": 0,
             "coverage": covered, "scoped_coverage": scoped_fraction,
-            "reason": "0 callers is NOT claimable: index coverage below "
-                      "floor — absence only holds within a bounded, "
-                      "measured scope",
+            "reason": "0 callers is NOT claimable: universe not exhausted "
+                      "(enumeration/parser capability incomplete or scoped "
+                      "coverage < 100%) — absence needs 100% exhaustion, "
+                      "not a 0.9 average",
         }
     return {
         "symbol": symbol, "resolved": True, "blocked": False,
@@ -438,6 +456,13 @@ def scope_receipt(
     match only); an ambiguous or missing target ABSTAINS the receipt with
     an explicit reason code instead of silently picking ``LIMIT 1``.
     """
+    # SG-108: the scope universe is compiled BEFORE any evidence query
+    # ("manifest compiled before querying"). The receipt's absence facts
+    # must describe the whole enumeration universe — a universe derived
+    # from query RESULTS could never reveal what the queries missed.
+    # Scoped restriction (target+caller paths) happens inside
+    # check_rename_gate; this receipt-level universe is repo-wide.
+    universe = compile_scope_universe(db, repo_root)
     identity = resolve_symbol_identity(db, target)
     identity_status = identity["status"]
     row = identity["selected"]
@@ -561,6 +586,12 @@ def scope_receipt(
         truncated=truncated,
         truncation_sources=tuple(truncation_sources),
         provider_capability_ok=bool(ledger.get("provider_capability_ok", True)),
+        # SG-108 exhaustion facts: fail-closed wiring straight from the
+        # universe compiled above (None = unmeasured degrades exactly
+        # like incomplete under the absence rules in decide()).
+        enumeration_complete=universe.enumeration_complete,
+        parser_capability_complete=universe.parser_capability_complete,
+        partial_ast_present=universe.partial_ast_present,
         absence_claim=absence_claim,
         gate_blocked=bool(gate.get("blocked")),
         dynamic_dispatch_unresolved=dynamic_unresolved,
@@ -578,6 +609,10 @@ def scope_receipt(
             "dynamic_heavy": dynamic_heavy,
         },
         "manifest": asdict(manifest),
+        # SG-108 scope_universe: exact enumeration accounting + merkle
+        # root; list samples are presentation-only caps (exact counts
+        # always present), so they never feed truncation_sources.
+        "scope_universe": universe.to_dict(),
         "identity": {
             "status": identity_status,
             "candidates": identity["candidates"],

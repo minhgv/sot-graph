@@ -30,7 +30,9 @@ __all__ = [
     "FileCoverage",
     "CoverageReport",
     "ScopeManifest",
+    "ScopeUniverse",
     "build_scope_manifest",
+    "compile_scope_universe",
     "is_quarantined",
     "repo_coverage",
     "completeness",
@@ -151,15 +153,24 @@ class CoverageReport:
 
     @property
     def covered_fraction(self) -> Optional[float]:
-        """Fraction of source files in a covered state; None if unknown."""
+        """Fraction of in-scope source files in a covered state; None if unknown.
+
+        SG-108: only fully covered states (INDEXED/PARSED) count as
+        covered — a PARTIAL_AST regex fallback is NOT covered evidence —
+        and EXCLUDED files leave the denominator entirely (they are out
+        of scope, kept visible in ``files``/``totals`` only as boundary).
+        An empty denominator (nothing in scope) is None, not 1.0.
+        """
         if self.basis != "measured" or not self.files:
             return None
+        in_scope = [f for f in self.files if f.state != CoverageState.EXCLUDED]
+        if not in_scope:
+            return None
         good = sum(
-            1 for f in self.files
-            if f.state in (CoverageState.INDEXED, CoverageState.PARSED,
-                           CoverageState.PARTIAL)
+            1 for f in in_scope
+            if f.state in (CoverageState.INDEXED, CoverageState.PARSED)
         )
-        return good / len(self.files)
+        return good / len(in_scope)
 
 
 def _language_of(path: str) -> str:
@@ -208,6 +219,22 @@ def repo_coverage(
         norm = p.replace("\\", "/") if os.sep == "\\" else p
         if norm.startswith("./"):
             norm = norm[2:]
+        # Scope entries may be absolute (node rows store realpath'd
+        # absolute paths); normalize them to the same repo-relative form
+        # as the journal keys above or the membership filter below can
+        # never match. realpath both sides so symlink aliases of the
+        # root (macOS /tmp vs /private/tmp) resolve to one spelling.
+        if os.path.isabs(norm):
+            try:
+                rel = os.path.relpath(
+                    os.path.realpath(norm), os.path.realpath(root_norm)
+                )
+                if os.sep == "\\":
+                    rel = rel.replace("\\", "/")
+                if not rel.startswith(".."):
+                    return rel
+            except ValueError:
+                pass
         return norm
 
     scope = [_norm_scope_path(p) for p in paths] if paths else None
@@ -573,3 +600,296 @@ def build_scope_manifest(
 def is_quarantined(path: str, manifest: ScopeManifest) -> bool:
     """Check if a file path is quarantined by scope manifest."""
     return path in manifest.quarantined_files or path in manifest.parser_error_files
+
+
+#: Presentation-only sample cap for bounded universe lists embedded in
+#: receipts (SG-108). Exact counts are ALWAYS present next to the
+#: sample, so nothing is hidden — these are payload-size budgets, not
+#: evidence-loss caps, which is why they never feed
+#: ``AssuranceFacts.truncation_sources``.
+UNIVERSE_SAMPLE_CAP = 50
+
+
+@dataclass(frozen=True)
+class ScopeUniverse:
+    """SG-108: the exhaustive-enumeration universe behind absence claims.
+
+    An absence/exhaustive claim ("0 callers", "nothing else does X") is
+    only as strong as the enumeration it rests on. The universe makes
+    that enumeration measurable:
+
+    - ``eligible_files`` — every in-repo, on-disk, non-excluded file
+      that SHOULD be in the index (supported extension, or already
+      journaled), sorted.
+    - ``excluded_files`` — on-disk files matched by exclusion: out of
+      scope, but kept visible as an explicit boundary.
+    - ``unknown_files`` — eligible files on disk that the journal has
+      never scanned; each one is a hole an absence claim could hide in.
+    - ``missing_files`` — journaled in-scope files absent from disk.
+    - ``walk_errors`` — unreadable paths encountered while enumerating.
+
+    Fail-closed facts: ``enumeration_complete`` is False when anything
+    is unknown/unreadable; ``parser_capability_complete`` is None when
+    the journal itself could not be read (unmeasured degrades exactly
+    like incomplete).
+    """
+
+    eligible_files: Tuple[str, ...] = ()
+    excluded_files: Tuple[str, ...] = ()
+    unknown_files: Tuple[str, ...] = ()
+    missing_files: Tuple[str, ...] = ()
+    walk_errors: Tuple[str, ...] = ()
+    #: "sha256:<hex>" over f"{path}\0{content_sha256}\n" for every
+    #: eligible file sorted by path; unhashable files contribute
+    #: "MISSING". Content-addressed on purpose: no wall clock, no
+    #: mtime — two captures of one unchanged state share the digest.
+    content_merkle_root: str = ""
+    enumeration_complete: bool = False
+    parser_capability_complete: Optional[bool] = None
+    #: any eligible journaled file sits at the PARTIAL_AST ceiling
+    partial_ast_present: bool = False
+    #: journal SELECT succeeded (drives the None semantics below)
+    journal_readable: bool = True
+    #: eligible files that already have a journal row
+    journaled_eligible_count: int = 0
+
+    @property
+    def enumeration_fraction(self) -> Optional[float]:
+        """Journaled eligible / eligible; None iff journal unreadable."""
+        if not self.journal_readable:
+            return None
+        if not self.eligible_files:
+            return 1.0
+        return self.journaled_eligible_count / len(self.eligible_files)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Receipt-embedding view: exact counts + presentation-bounded lists.
+
+        The ``excluded_files``/``unknown_files`` samples are capped at
+        :data:`UNIVERSE_SAMPLE_CAP` for payload size ONLY — ``total``
+        and ``truncated`` always carry the exact accounting, and these
+        presentation caps deliberately do NOT append truncation sources
+        (no evidence is lost; the full sets live on the dataclass).
+        """
+
+        def _bounded(items: Sequence[str]) -> Dict[str, Any]:
+            shown = list(items[:UNIVERSE_SAMPLE_CAP])
+            return {
+                "returned": shown,
+                "cap": UNIVERSE_SAMPLE_CAP,
+                "truncated": len(items) > UNIVERSE_SAMPLE_CAP,
+                "total": len(items),
+            }
+
+        return {
+            "eligible_count": len(self.eligible_files),
+            "excluded_count": len(self.excluded_files),
+            "unknown_count": len(self.unknown_files),
+            "missing_count": len(self.missing_files),
+            "walk_error_count": len(self.walk_errors),
+            "enumeration_fraction": self.enumeration_fraction,
+            "enumeration_complete": self.enumeration_complete,
+            "parser_capability_complete": self.parser_capability_complete,
+            "content_merkle_root": self.content_merkle_root,
+            "excluded_files": _bounded(self.excluded_files),
+            "unknown_files": _bounded(self.unknown_files),
+        }
+
+
+def compile_scope_universe(
+    db: Any,
+    repo_root: str,
+    target_paths: Sequence[str] = (),
+    excluded_patterns: Sequence[str] = (),
+) -> ScopeUniverse:
+    """Enumerate the full in-scope file universe (SG-108).
+
+    Traversal rules are shared with :func:`build_scope_manifest`
+    (realpath containment via ``os.path.commonpath``, symlink-out
+    quarantine, the same ignored-dir names, ``onerror`` capture) but the
+    walk is intentionally implemented fresh here: the manifest answers
+    "what is in this scope", the universe answers "what could an
+    absence claim have missed" — a shared-walk refactor is out of scope
+    for SG-108.
+
+    A journal read failure fails closed (``enumeration_complete=False``,
+    ``parser_capability_complete=None``) instead of reading as an empty
+    universe.
+    """
+    import hashlib
+
+    from sot_graph.reconciler import EXT_DISPATCH, TEXT_EXTENSIONS
+
+    supported_exts = frozenset(EXT_DISPATCH.keys()) | frozenset(TEXT_EXTENSIONS)
+    default_exclusions = sorted(set(list(_GENERATED_PARTS) + list(excluded_patterns)))
+    canonical_root = os.path.realpath(repo_root)
+    root_norm = os.path.abspath(repo_root)
+
+    # --- journal (normalized repo-relative path -> parser outcome) ----
+    journal_readable = True
+    journal: Dict[str, Optional[str]] = {}
+    try:
+        rows = db.conn.execute(
+            "SELECT path, parser_outcome FROM file_journal"
+        ).fetchall()
+    except Exception:  # noqa: BLE001 - fail closed, never read as empty
+        journal_readable = False
+        rows = []
+    for r in rows:
+        p_raw = str(r[0])
+        outcome = str(r[1]) if r[1] is not None else None
+        if os.path.isabs(p_raw):
+            # Legacy journals may store absolute paths; normalize exactly
+            # like repo_coverage (repo-relative when inside the root).
+            try:
+                rel = os.path.relpath(p_raw, root_norm)
+                if os.sep == "\\":
+                    rel = rel.replace("\\", "/")
+            except ValueError:
+                rel = p_raw
+            if not rel.startswith(".."):
+                journal[rel] = outcome
+                continue
+        journal[_normalize_rel_path(p_raw)] = outcome
+
+    # --- target restriction (same normalization as manifest targets) ---
+    targets: Optional[List[str]] = None
+    if target_paths:
+        normalized: List[str] = []
+        for tp in target_paths:
+            if not tp:
+                continue
+            tp_str = str(tp)
+            try:
+                abs_tp = os.path.realpath(
+                    tp_str if os.path.isabs(tp_str) else os.path.join(canonical_root, tp_str)
+                )
+                rel_tp = _normalize_rel_path(os.path.relpath(abs_tp, canonical_root))
+                normalized.append(rel_tp)
+            except Exception:  # noqa: BLE001 - keep the literal as fallback
+                normalized.append(_normalize_rel_path(tp_str))
+        targets = sorted(set(normalized))
+
+    def _in_scope(rel: str) -> bool:
+        if targets is None:
+            return True
+        return any(rel == t or rel.startswith(t + "/") for t in targets)
+
+    # --- disk walk ------------------------------------------------------
+    # Same ignored-dir discipline as build_scope_manifest.
+    ignored_dir_names = set(_GENERATED_PARTS) | {
+        ".git", ".sot", ".venv", "venv", ".idea", ".vscode", "__pycache__", ".scip"
+    }
+    walk_errors: List[str] = []
+
+    def _on_walk_error(err: OSError) -> None:
+        walk_errors.append(str(err))
+
+    eligible: List[str] = []
+    excluded: List[str] = []
+    try:
+        for root_dir, dirs, files in os.walk(
+            canonical_root, followlinks=False, onerror=_on_walk_error
+        ):
+            surviving_dirs: List[str] = []
+            for d in dirs:
+                abs_d = os.path.join(root_dir, d)
+                abs_d_real = os.path.realpath(abs_d)
+                try:
+                    d_inside = (
+                        os.path.commonpath([canonical_root, abs_d_real])
+                        == canonical_root
+                    )
+                except ValueError:
+                    d_inside = False
+                if not d_inside:
+                    continue  # symlink-out quarantine: prune, never descend
+                if d in ignored_dir_names:
+                    continue
+                surviving_dirs.append(d)
+            dirs[:] = surviving_dirs
+            for f in files:
+                abs_f = os.path.join(root_dir, f)
+                abs_f_real = os.path.realpath(abs_f)
+                try:
+                    f_inside = (
+                        os.path.commonpath([canonical_root, abs_f_real])
+                        == canonical_root
+                    )
+                except ValueError:
+                    f_inside = False
+                rel_f = _normalize_rel_path(os.path.relpath(abs_f, canonical_root))
+                if not f_inside:
+                    continue  # symlink-out quarantine
+                if not _in_scope(rel_f):
+                    continue
+                if _matches_exclusion(rel_f, default_exclusions):
+                    excluded.append(rel_f)  # boundary visibility, out of scope
+                    continue
+                _, ext = os.path.splitext(f)
+                if ext.lower() not in supported_exts and rel_f not in journal:
+                    continue
+                eligible.append(rel_f)
+    except OSError as exc:  # pragma: no cover - os.walk rarely raises directly
+        _on_walk_error(exc)
+    eligible.sort()
+    excluded.sort()
+
+    unknown = [rel for rel in eligible if rel not in journal]
+
+    # Journaled in-scope, non-excluded files that vanished from disk.
+    missing: List[str] = []
+    for rel in sorted(journal):
+        if os.path.isabs(rel) or rel.startswith(".."):
+            continue
+        if not _in_scope(rel):
+            continue
+        if _matches_exclusion(rel, default_exclusions):
+            continue
+        if not os.path.isfile(os.path.join(canonical_root, rel)):
+            missing.append(rel)
+
+    # --- parser capability + content Merkle over eligible files ---------
+    capable: Optional[bool] = True if journal_readable else None
+    partial_ast = False
+    journaled_eligible = 0
+    hasher = hashlib.sha256()
+    for rel in eligible:
+        outcome = journal.get(rel) if rel in journal else None
+        if rel in journal:
+            journaled_eligible += 1
+            if capable is True and outcome is not None and outcome not in (
+                "COMPLETE", "VALID_EMPTY",
+            ):
+                capable = False
+            if outcome == "PARTIAL_AST":
+                partial_ast = True
+        content_sha: str
+        try:
+            file_hasher = hashlib.sha256()
+            with open(os.path.join(canonical_root, rel), "rb") as fh:
+                for chunk in iter(lambda: fh.read(65536), b""):
+                    file_hasher.update(chunk)
+            content_sha = file_hasher.hexdigest()
+        except OSError:
+            content_sha = "MISSING"
+            walk_errors.append(rel)
+        hasher.update(
+            f"{rel}\0{content_sha}\n".encode("utf-8", errors="surrogateescape")
+        )
+
+    return ScopeUniverse(
+        eligible_files=tuple(eligible),
+        excluded_files=tuple(excluded),
+        unknown_files=tuple(unknown),
+        missing_files=tuple(missing),
+        walk_errors=tuple(walk_errors),
+        content_merkle_root=f"sha256:{hasher.hexdigest()}",
+        enumeration_complete=(
+            journal_readable and not unknown and not walk_errors
+        ),
+        parser_capability_complete=capable,
+        partial_ast_present=partial_ast,
+        journal_readable=journal_readable,
+        journaled_eligible_count=journaled_eligible,
+    )

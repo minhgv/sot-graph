@@ -22,6 +22,11 @@ def _base_facts(**kwargs) -> AssuranceFacts:
         "unresolved_budget": 0,
         "open_conflicts": 0,
         "truncated": False,
+        # SG-108: an all-clear absence baseline now also requires a fully
+        # enumerated, fully parser-capable universe (None fails closed).
+        "enumeration_complete": True,
+        "parser_capability_complete": True,
+        "partial_ast_present": False,
         "provider_capability_ok": True,
         "absence_claim": True,
         "gate_blocked": False,

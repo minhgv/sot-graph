@@ -70,7 +70,13 @@ class TestReconcileAndAuditReceipts:
         assert "scope_manifest" in receipt
         assert "snapshot" in receipt
         assert "assurance_facts" in receipt
-        assert receipt["assurance"]["status"] == "ASSURED_WITHIN_SCOPE"
+        # SG-108: audit receipts do not compile a scope universe, so the
+        # absence-profile exhaustion facts stay unmeasured (None) and
+        # fail closed to PARTIAL — only via the two exhaustion codes.
+        assert receipt["assurance"]["status"] == "PARTIAL"
+        assert {"enumeration_incomplete", "parser_capability_incomplete"} <= set(
+            receipt["assurance"]["reason_codes"]
+        )
 
     def test_audit_receipt_collection_error_fails_closed(self, tmp_path):
         db = MagicMock()

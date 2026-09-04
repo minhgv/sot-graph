@@ -100,6 +100,21 @@ class AssuranceFacts:
     #: legacy shape (``truncated`` set, no sources — transport trim,
     #: pre-1.4 callers) keeps the historical "transitive_truncated" code.
     truncation_sources: Tuple[str, ...] = ()
+    #: SG-108: every in-scope file was enumerated (no unjournaled
+    #: eligible files, no walk errors, journal readable). None =
+    #: unmeasured, which fails closed under an absence/exhaustive/
+    #: relation claim exactly like False.
+    enumeration_complete: Optional[bool] = None
+    #: SG-108: every in-scope journaled file was parsed by the full
+    #: parser (no PARTIAL_AST/PARSE_ERROR/PARSER_UNAVAILABLE ceilings;
+    #: legacy NULL-outcome rows count as capable). None = unmeasured
+    #: (journal unreadable) and fails closed like False.
+    parser_capability_complete: Optional[bool] = None
+    #: SG-108: at least one in-scope journaled file sits at the
+    #: PARTIAL_AST regex-fallback ceiling — named ceiling because a
+    #: partial parse never allows an ASSURED relation/absence claim,
+    #: even when coverage averages look high.
+    partial_ast_present: bool = False
     provider_capability_ok: bool = True
     #: receipt rests on a negative claim (e.g. "0 callers").
     #: Fail-closed default: assume an absence claim unless proven otherwise.
@@ -191,14 +206,39 @@ def decide(facts: AssuranceFacts) -> Dict[str, Any]:
         reasons.append("dynamic_dispatch_unresolved")
         candidate_statuses.append("PARTIAL")
 
-    # 10. absence claim without measured coverage at/above floor
-    requires_absence = facts.absence_claim or facts.claim_profile in ("absence", "exhaustive")
+    # 10. absence/exhaustive/relation claims need measured coverage at or
+    # above the floor AND an exhausted, fully parser-capable enumeration
+    # universe (SG-108). Each condition is evaluated independently and
+    # appends its own reason: an absence claim is only as strong as the
+    # weakest fact behind it.
+    requires_absence = facts.absence_claim or facts.claim_profile in (
+        "absence", "exhaustive", "relation",
+    )
     if requires_absence and (
         not facts.coverage_measured
         or facts.coverage_fraction is None
         or facts.coverage_fraction < facts.coverage_floor
     ):
         reasons.append("coverage_below_floor")
+        candidate_statuses.append("PARTIAL")
+
+    # 10b. SG-108 exhaustion facts. None (unmeasured) fails closed
+    # exactly like False — "cannot prove the universe was fully
+    # enumerated" must never read as "fully enumerated".
+    if requires_absence and facts.enumeration_complete is not True:
+        reasons.append("enumeration_incomplete")
+        candidate_statuses.append("PARTIAL")
+
+    if requires_absence and facts.parser_capability_complete is not True:
+        reasons.append("parser_capability_incomplete")
+        candidate_statuses.append("PARTIAL")
+
+    # 10c. SG-108 partial-AST ceiling: PARTIAL_AST files never allow an
+    # ASSURED relation/absence claim even when coverage averages look
+    # high — the parse itself is incomplete, so absence over it would be
+    # fabricated.
+    if requires_absence and facts.partial_ast_present:
+        reasons.append("partial_ast_ceiling")
         candidate_statuses.append("PARTIAL")
 
     # 11. provider capability

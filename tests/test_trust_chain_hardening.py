@@ -107,7 +107,13 @@ def test_audit_receipt_fail_closed_on_doctor_error(tmp_path: Path):
             "errors": [],
         }
         clean_receipt = audit_receipt(db, str(repo), doctor_report=doctor_clean)
-        assert clean_receipt["assurance"]["status"] == ReceiptStatus.ASSURED_WITHIN_SCOPE
+        # SG-108: no scope universe is compiled for audit receipts, so
+        # the unmeasured exhaustion facts fail closed under the default
+        # absence profile (PARTIAL, not ASSURED).
+        assert clean_receipt["assurance"]["status"] == ReceiptStatus.PARTIAL
+        assert {"enumeration_incomplete", "parser_capability_incomplete"} <= set(
+            clean_receipt["assurance"]["reason_codes"]
+        )
     finally:
         db.close()
 
@@ -214,7 +220,12 @@ def test_audit_receipt_fail_closed_on_unjournaled_files(tmp_path: Path):
         Reconciler(db, str(repo)).reconcile()
         # Clean state: all files journaled
         receipt_clean = audit_receipt(db, str(repo), doctor_report={"ok": True})
-        assert receipt_clean["assurance"]["status"] == ReceiptStatus.ASSURED_WITHIN_SCOPE
+        # SG-108: unmeasured exhaustion facts fail closed under the
+        # default absence profile (PARTIAL with exactly those codes).
+        assert receipt_clean["assurance"]["status"] == ReceiptStatus.PARTIAL
+        assert {"enumeration_incomplete", "parser_capability_incomplete"} <= set(
+            receipt_clean["assurance"]["reason_codes"]
+        )
         assert receipt_clean["quarantined_files"] == []
         snap_clean = receipt_clean["snapshot"]["scope_digest"]
 

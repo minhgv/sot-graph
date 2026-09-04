@@ -152,7 +152,7 @@ class TestRunImpactClaim:
             receipt = run_impact_claim(ImpactClaimRequest(), db, str(impact_repo))
         finally:
             db.close()
-        assert receipt["schema_version"] == RECEIPT_SCHEMA_VERSION == "1.4"
+        assert receipt["schema_version"] == RECEIPT_SCHEMA_VERSION == "1.5"
         assert receipt["request"] == {
             "schema_version": "impact-request/1",
             "target": "HEAD",
