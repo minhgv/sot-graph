@@ -1,0 +1,112 @@
+name: CI Watchdog
+
+# Turns a silently-red main into an open GitHub issue (and closes it once
+# green again). Branch protection only gates PR merges; this repo pushes
+# directly to main, so the watchdog is the mechanism that actually makes
+# red main impossible to miss (e.g. the multi-day fault-4b/4c red streak).
+#
+# Runbook for a 🔴 issue: open the linked run, read the first failing job's
+# log, fix forward on main (or revert the culprit commit).
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  issues: write
+
+concurrency:
+  group: ci-watchdog
+  cancel-in-progress: false
+
+env:
+  ISSUE_TITLE: "🔴 CI on main is RED"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate CI state of main and manage alarm issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # --- 1. Current HEAD of main -------------------------------------
+          head_sha=$(gh api "repos/$REPO/branches/main" --jq '.commit.sha')
+          short="${head_sha::7}"
+
+          # --- 2. Latest CI & Release run for that exact commit ------------
+          # Any event type counts (push or tag), since the workflow runs the
+          # same gate jobs for both.
+          run_json=$(gh api "repos/$REPO/actions/runs?head_sha=$head_sha&per_page=20" \
+            --jq '[.workflow_runs[] | select(.name == "CI & Release")] | sort_by(.run_started_at) | last // empty')
+
+          state="UNKNOWN"
+          detail=""
+          run_url=""
+
+          if [ -n "$run_json" ]; then
+            status=$(jq -r '.status' <<<"$run_json")
+            conclusion=$(jq -r '.conclusion // "null"' <<<"$run_json")
+            run_id=$(jq -r '.id' <<<"$run_json")
+            run_url="https://github.com/$REPO/actions/runs/$run_id"
+            if [ "$status" = "completed" ]; then
+              if [ "$conclusion" = "success" ]; then
+                state="GREEN"
+              else
+                state="RED"
+                failed=$(gh api "repos/$REPO/actions/runs/$run_id/jobs" \
+                  --jq '[.jobs[] | select(.conclusion == "failure") | .name] | join(", ")')
+                detail="conclusion=$conclusion; failing jobs: $failed"
+              fi
+            else
+              state="RUNNING"
+              detail="status=$status"
+            fi
+          else
+            # No run for HEAD: fine only if the commit touches exclusively
+            # paths that ci.yml ignores (keep in sync with ci.yml paths-ignore).
+            ignored=$(gh api "repos/$REPO/commits/$head_sha" \
+              --jq '[.files[].filename] | map(test("\\.md$") or startswith("plan/") or startswith("docs/") or . == ".gitignore") | all')
+            if [ "$ignored" = "true" ]; then
+              state="SKIPPED_BY_DESIGN"
+              detail="docs-only commit; ci.yml paths-ignore"
+            else
+              state="NO_RUN"
+              detail="CI never triggered for main HEAD $short"
+            fi
+          fi
+
+          echo "CI state for main@$short: $state $detail"
+
+          # --- 3. Manage the alarm issue ------------------------------------
+          issue_url=$(gh issue list --repo "$REPO" --state open --search "in:title \"$ISSUE_TITLE\"" --json url --jq '.[0].url // ""')
+
+          case "$state" in
+            RED|NO_RUN)
+              body="**Watchdog status:** $state
+          **Commit:** [$short](https://github.com/$REPO/commit/$head_sha)
+          **Detail:** $detail
+          **Run:** ${run_url:-<no run>}
+
+          Auto-managed by the CI Watchdog workflow; it closes itself once main is green again."
+              if [ -n "$issue_url" ]; then
+                gh issue comment "$issue_url" --repo "$REPO" --body "Still $state at $(date -u +%FT%TZ): $detail ($run_url)"
+              else
+                gh issue create --repo "$REPO" --title "$ISSUE_TITLE" --body "$body" --label ci 2>/dev/null \
+                  || gh issue create --repo "$REPO" --title "$ISSUE_TITLE" --body "$body"
+              fi
+              # Exit non-zero so the watchdog run itself shows red while main is red.
+              exit 1
+              ;;
+            *)
+              if [ -n "$issue_url" ]; then
+                gh issue close "$issue_url" --repo "$REPO" \
+                  --comment "Watchdog: main is $state at $(date -u +%FT%TZ) ($short). Closing alarm."
+              fi
+              ;;
+          esac
