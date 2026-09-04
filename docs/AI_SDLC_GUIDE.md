@@ -81,7 +81,7 @@ However, contemporary AI coding agents suffer from **3 Critical Failure Modes**:
    ```bash
    ./bin/sot search "jwt token validation role"
    ```
-   The engine responds immediately (< 1.2ms) with authoritative **Trust Verdicts**:
+   The engine responds immediately (< 1.2ms) with advisory **Trust Verdicts**:
    - `[STRONG]`: File physically exists on disk and contains ≥ 50% query keyword coverage (Agent can immediately use/import).
    - `[WEAK]`: Semantic or header match (Agent should inspect before implementing).
 2. **Architecture Scoping via Louvain Communities (`sot cluster` / `sot report`):**
@@ -151,7 +151,7 @@ However, contemporary AI coding agents suffer from **3 Critical Failure Modes**:
    - Automatically purges permanently deleted paths (`[REMOVED]`).
    - Reports exact drift percentages and anomalous files.
 2. **CI/CD Quality Gate:**
-   If drift exceeds allowable thresholds, CI can automatically invoke `sot reconcile` to ensure 100% database-to-disk consistency before deployment.
+   If drift exceeds allowable thresholds, CI can automatically invoke `sot reconcile` to restore database-to-disk consistency for indexed paths before deployment.
 
 ---
 
@@ -207,7 +207,7 @@ However, contemporary AI coding agents suffer from **3 Critical Failure Modes**:
 
 | Evaluation Criterion | Traditional AI SDLC (Without sot-graph) | AI SDLC with sot-graph |
 | :--- | :--- | :--- |
-| **Path Grounding Accuracy** | **Poor (Prone to Hallucinations)**: Agents guess stale paths or write code against deleted files. | **Absolute (100% Verified)**: Every node is physically verified on disk by `TrustVerifier`. |
+| **Path Grounding Accuracy** | **Poor (Prone to Hallucinations)**: Agents guess stale paths or write code against deleted files. | **High (Span-Verified)**: Every returned node is physically verified on disk by `TrustVerifier`; verdicts are advisory and scope-bounded. |
 | **Code Reuse Capability** | **Low**: Frequently reinvents existing utilities (Cold Start Redundancy). | **High**: `sot search` with FTS5 BM25 locates existing utilities in < 1.2ms. |
 | **Refactoring Control** | **Blind Edits**: Modifies only local files, unaware of broken indirect callers. | **Comprehensive**: Analyzes **2-hop Blast Radius** and flags **God Nodes** prior to edits. |
 | **Context Retrieval Latency** | **Slow (10s - 30s)**: Requires reading entire files or querying remote Vector DBs. | **Ultra-Fast (~1.17ms P95)**: Queries local in-process SQLite FTS5 directly. |

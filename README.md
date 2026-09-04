@@ -1,14 +1,14 @@
 # sot-graph (Single Source of Truth Knowledge Graph)
 
 > **Verified, self-healing knowledge layer for AI coding agents and engineering teams.**
-> *Filesystem is the Single Source of Truth — The knowledge graph is an authoritative, verified projection of reality. Zero external daemons required.*
+> *Filesystem is the Single Source of Truth — The knowledge graph is a verified, bounded evidence index: every returned anchor is span-verified on disk; verdicts are advisory and scope-bounded. Zero external daemons required.*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](pyproject.toml)
 [![SQLite: WAL + FTS5](https://img.shields.io/badge/SQLite-FTS5%20%2B%20WAL-orange.svg)](src/sot_graph/db.py)
 [![Schema: v8 Multi-Provider](https://img.shields.io/badge/Schema-v8%20Multi--Provider-purple.svg)](src/sot_graph/db.py)
 [![Tests: 1014 collected](https://img.shields.io/badge/Tests-1014%20collected-brightgreen.svg)](tests/)
-[![Quality Gates: Passing](https://img.shields.io/badge/Quality%20Gates-Passing%20(87%25%20Core%20%7C%2091%25%20Receipts)-success.svg)](scripts/quality_gates.sh)
+[![Quality Gates: Passing](https://img.shields.io/badge/Quality%20Gates-Passing%20(%3E%3D85%25%20Core%20%7C%20%3E%3D90%25%20Receipts)-success.svg)](scripts/quality_gates.sh)
 [![Architecture: Zero-Daemon](https://img.shields.io/badge/Architecture-Zero--Daemon-purple.svg)](#database-architecture--durability)
 [![Tree-Sitter: 10 Grammars](https://img.shields.io/badge/Tree--Sitter-10%20Grammars-success.svg)](src/sot_graph/ts_extract.py)
 
@@ -22,7 +22,7 @@ It replaces slow, blind, and hallucination-prone text grepping with an increment
 
 ### Core Value Pillars
 
-1. **Zero Hallucinated Anchors**: The filesystem is the single source of truth. Every symbol returned is physically verified on disk with confidence scores and Trust Verdicts (`[STRONG]`, `[WEAK]`, `[REBUILT]`).
+1. **Verified Anchors (advisory)**: The filesystem is the single source of truth. Every symbol anchor is physically span-verified on disk with confidence scores and Trust Verdicts (`[STRONG]`, `[WEAK]`, `[REBUILT]`); semantic fit and exhaustiveness are NOT guaranteed — read the snippet and treat absence claims as scope-bounded.
 2. **Multi-Provider Provenance Ledger (Schema v8)**: Transparently records fast AST Heuristics (`AST_HEURISTIC_PARSER`), compiler-backed SCIP indices (`COMPILER_INDEXED_SYMBOLS`), and external provider telemetry (Codebase Memory) in dedicated `provider_runs` and `provider_evidence` tables.
 3. **Bounded Impact Trust Chain & Canonical Root Isolation**: Strictly evaluates scope coverage through a fail-closed 6-state decision machine (`ASSURED_WITHIN_SCOPE`, `PARTIAL`, `CONFLICTED`, `STALE`, `UNVERIFIABLE`, `ABSTAINED`). Enforces canonical `os.path.realpath` bounding across DB persistence and ledger queries, preventing cross-repository evidence leakage and symlink retarget exploits in multi-tenant environments.
 4. **Token-Bounded Context Packaging (`sot pack`)**: Extracts exact target spans (L0) + 1-hop caller/callee contracts (L1) + 2-hop signature stubs (L2) within strict hard token budgets (`--tokens` / `--max-tokens`), preventing prompt bloat.

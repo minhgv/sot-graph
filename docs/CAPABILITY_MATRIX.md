@@ -45,23 +45,25 @@ SOT-Graph operates as a **Verified Code Evidence and Impact-Assurance Layer**. I
 
 | Language | Provider | `SYMBOL_SEARCH` | `DIRECT_CALL` | `HIERARCHY` | `DIFF_IMPACT` | `PATH_COVERAGE` | Trust Ceiling |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
-| **Python** | SOT Builtin AST | Verified | Verified (99.7% F1) | Verified | Verified | Full Line-Level | `ASSURED_WITHIN_SCOPE` |
-| | SCIP Import | Verified | Verified | Verified | Verified | Snapshot Bounded | `ASSURED_WITHIN_SCOPE` |
+| **Python** | SOT Builtin AST | Verified | Verified (99.7% F1) | Verified | Verified | Full Line-Level | `VERIFIED_PRESENCE` |
+| | SCIP Import | Verified | Verified | Verified | Verified | Snapshot Bounded | `VERIFIED_PRESENCE` |
 | | Codebase Memory CLI | Candidate | Candidate (bare name) | Candidate | Candidate | Path Scoped | `HEURISTIC` (unless verified) |
-| **TypeScript** | SOT Builtin AST | Verified | Verified (99.5% F1) | Verified | Verified | Full Line-Level | `ASSURED_WITHIN_SCOPE` |
-| | SCIP Import | Verified | Verified | Verified | Verified | Snapshot Bounded | `ASSURED_WITHIN_SCOPE` |
+| **TypeScript** | SOT Builtin AST | Verified | Verified (99.5% F1) | Verified | Verified | Full Line-Level | `VERIFIED_PRESENCE` |
+| | SCIP Import | Verified | Verified | Verified | Verified | Snapshot Bounded | `VERIFIED_PRESENCE` |
 | | Codebase Memory CLI | Candidate | Candidate (bare name) | Candidate | Candidate | Path Scoped | `HEURISTIC` (unless verified) |
-| **Go** | SOT Builtin AST | Verified | Verified (100% F1) | Verified | Verified | Full Line-Level | `ASSURED_WITHIN_SCOPE` |
-| | SCIP Import | Verified | Verified | Verified | Verified | Snapshot Bounded | `ASSURED_WITHIN_SCOPE` |
+| **Go** | SOT Builtin AST | Verified | Verified (100% F1) | Verified | Verified | Full Line-Level | `VERIFIED_PRESENCE` |
+| | SCIP Import | Verified | Verified | Verified | Verified | Snapshot Bounded | `VERIFIED_PRESENCE` |
 | | Codebase Memory CLI | Candidate | Candidate (bare name) | Candidate | Candidate | Path Scoped | `HEURISTIC` (unless verified) |
-| **Rust** | SOT Builtin AST | Verified | Verified (98.5% F1) | Verified | Verified | Full Line-Level | `ASSURED_WITHIN_SCOPE` |
-| | SCIP Import | Verified | Verified | Verified | Verified | Snapshot Bounded | `ASSURED_WITHIN_SCOPE` |
+| **Rust** | SOT Builtin AST | Verified | Verified (98.5% F1) | Verified | Verified | Full Line-Level | `VERIFIED_PRESENCE` |
+| | SCIP Import | Verified | Verified | Verified | Verified | Snapshot Bounded | `VERIFIED_PRESENCE` |
 | | Codebase Memory CLI | Candidate | Candidate (bare name) | Candidate | Candidate | Path Scoped | `HEURISTIC` (unless verified) |
-| **Java** | SOT Builtin AST | Verified | Verified (99.2% F1) | Verified | Verified | Full Line-Level | `ASSURED_WITHIN_SCOPE` |
-| | SCIP Import | Verified | Verified | Verified | Verified | Snapshot Bounded | `ASSURED_WITHIN_SCOPE` |
+| **Java** | SOT Builtin AST | Verified | Verified (99.2% F1) | Verified | Verified | Full Line-Level | `VERIFIED_PRESENCE` |
+| | SCIP Import | Verified | Verified | Verified | Verified | Snapshot Bounded | `VERIFIED_PRESENCE` |
 | | Codebase Memory CLI | Candidate | Candidate (bare name) | Candidate | Candidate | Path Scoped | `HEURISTIC` (unless verified) |
 | **C / C++** | SOT Builtin AST | Verified | Partial (Static) | Partial | Verified | File Level | `HEURISTIC` |
 | **Dart / PHP** | SOT Builtin AST | Verified | Partial (Static) | Partial | Verified | File Level | `HEURISTIC` |
+
+> **Note on Trust Ceilings (advisory)**: `VERIFIED_PRESENCE` means anchors are physically span-verified on disk for the measured scope — it is not an exhaustiveness or correctness guarantee. On the synthetic exact corpus (234-file `oracle-corpus-v1`, §4) the engine measures aggregate F1 ≈ 99.7% (TP 1007 / FN 5 / FP 2). Ceilings are advisory; any absence claim ("no callers", "no references") still requires scope exhaustion per the fail-closed coverage rules.
 
 ---
 

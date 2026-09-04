@@ -60,6 +60,6 @@ roadmap from the 2026-09 ecosystem assessment.
 
 - Windows Job Object process-tree kill (G9), append-only ledger with
   `synchronous=FULL` commits (G8), strict module-eval CI gate (G7).
-- Full suite: **1014 collected** (1012 pass / 2 win32-only skips on
-  macOS/Linux); module-eval 6 scopes × ruff/pyright/pytest + 12 probes all
-  green.
+- Full suite: **1014 collected** (1012 pass / 2–3 skips: 2 win32-only + 1
+  Bun-dependent adapter test that skips when Bun is not installed);
+  module-eval 6 scopes × ruff/pyright/pytest + 12 probes all green.

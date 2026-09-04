@@ -51,7 +51,7 @@ Mọi symbol/kết quả do SOT-Graph trả về đều được đối soát v�
 
 | Nhãn Niềm Tin | Ý nghĩa Chi Tiết | Hành Động Khuyến Nghị Của Agent |
 | :--- | :--- | :--- |
-| `[STRONG]` | **Xác thực 100% trên đĩa:** File tồn tại, symbol tồn tại chính xác tại vị trí khai báo, nội dung hash trùng khớp. | An tâm tái sử dụng hoặc refactor trực tiếp, độ tin cậy tuyệt đối. |
+| `[STRONG]` | **Xác thực vật lý trên đĩa (span-verified):** File tồn tại, symbol tồn tại chính xác tại vị trí khai báo, nội dung hash trùng khớp. | Độ tin cậy cao cho điều hướng/tái sử dụng; vẫn nên đọc snippet — không phải bảo đảm về ngữ nghĩa hay tính đầy đủ. |
 | `[WEAK]` | **Khớp ngữ nghĩa / Khớp một phần:** Tìm thấy tên hàm nhưng độ bao phủ token (coverage) chưa đạt ngưỡng hoặc chỉ khớp trong comment/chuỗi. | Phải đọc lại phạm vi dòng (`range selector: file:start-end`) trước khi gọi. |
 | `[REBUILT]` | **Tệp đã được di chuyển:** File đã bị đổi tên hoặc chuyển thư mục nhưng bộ reconciler đã tìm thấy và tự động ánh xạ lại đường dẫn mới. | Cập nhật lại đường dẫn import sang path mới được báo cáo. |
 | `[REMOVED]` | **Tệp/Symbol đã bị xóa trên đĩa:** Node từng tồn tại trong CSDL nhưng hiện tại không còn trên đĩa. | **TUYỆT ĐỐI KHÔNG** tham chiếu hoặc sinh code gọi symbol này. |
@@ -180,7 +180,7 @@ Giao diện Model Context Protocol (MCP) của SOT-Graph tuân thủ chuẩn **M
 * **Mô tả:** Đọc và phân tích cây quyết định giao diện người dùng (Frontend UI Tree): trích xuất các trường dữ liệu đầu vào (Input fields), quy tắc validate, các nút bấm (Button Triggers) và sự kiện chuyển đổi Modal/Màn hình (hỗ trợ Flutter, React, Vue, Blade).
 * **Tham số (Parameters):**
   * `component` *(string, bắt buộc)*: Tên component hoặc đường dẫn file UI.
-* **Kịch bản sử dụng:** Dùng khi viết Hướng Dẫn Sử Dụng (HDSD) và Kịch Bản Kiểm Thử (KBKT), đảm bảo mô tả chính xác 100% các trường trên giao diện.
+* **Kịch bản sử dụng:** Dùng khi viết Hướng Dẫn Sử Dụng (HDSD) và Kịch Bản Kiểm Thử (KBKT), giúp mô tả các trường trên giao diện bám sát nguồn được truy vết (grounded); vẫn cần đối soát lại với giao diện thực tế.
 
 #### 13. `sot-graph_sot_backend_flow`
 * **Mô tả:** Bóc tách các vi bước xử lý backend (micro-steps), các nguồn dữ liệu đa dạng (Multi-Datasources, Oracle/MySQL/Redis), các nhánh rẽ điều kiện và các khối bắt ngoại lệ (Exception handling).

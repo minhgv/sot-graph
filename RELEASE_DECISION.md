@@ -1,14 +1,20 @@
 # Release Decision: SOT-Graph v0.3.0 Precision Gate & Flexible Impact-Assurance
 
+> **SUPERSEDED (2026-09-04)**: This v0.3.0 decision is superseded by the independent reassessment in
+> `plan/sot-graph-reassessment-roadmap-523e9cf-2026-09-04.md`. The current verdict is
+> **CONDITIONAL_GO / HUMAN_GATED**: autonomous refactoring is NOT certified, and all
+> impact-assurance verdicts remain advisory — human review is required before acting on them.
+> The text below is preserved as a historical record of the 2026-09-02 gate decision.
+
 **Date**: 2026-09-02  
-**Release Gate Verdict**: 🟢 **GO (PRODUCTION_QUALIFIED / ASSURED_WITHIN_SCOPE)**
+**Release Gate Verdict**: 🟢 **GO (PRODUCTION_QUALIFIED / ASSURED_WITHIN_SCOPE)** *(SUPERSEDED 2026-09-04 — current verdict: CONDITIONAL_GO / HUMAN_GATED; see banner above)*
 
 ### Verification Summary
 1. **Independent Evaluator & Quality Gates**: `bash scripts/quality_gates.sh` -> 0 Ruff errors, 0 Pyright errors on core modules, Core coverage 89% (>=85%), Receipts coverage 90% (>=90%), Bandit scan pass, Pip-audit pass.
 2. **Regression, Property & Assurance Tests**: **875 passing test cases** across Python 3.10–3.14 (including metamorphic, differential, chaos, state machine decision table, diff-impact oracle, dynamic gap corpus, and provider accuracy golden suites).
 3. **Real Provider E2E Verification**: `scripts/e2e_real_cbm.py` verified 17 semantic assertions against live Codebase Memory MCP, SQLite ledger persistence, atomic transaction guarantees, sha256-v2 content bindings, and fail-closed degradation.
 4. **P0 Trust Chain Closure**: Bounded-scope fail-closed state machine, sha256-v2 content digests, unambiguous canonical identity resolver, atomic provider ledger, and deterministic scope/diff-impact/reconcile/audit receipts.
-5. **Autonomous Navigation & Assurance Suitability**: Certified for autonomous code navigation, refactoring, and evidence-backed impact-assurance under OMP (Oh My Pi).
+5. **Autonomous Navigation & Assurance Suitability**: Certified for autonomous code navigation, refactoring, and evidence-backed impact-assurance under OMP (Oh My Pi). *(SUPERSEDED 2026-09-04: autonomous refactoring is NOT certified under the current CONDITIONAL_GO / HUMAN_GATED verdict.)*
 
 ### Definition of Done: Flexible Impact-Assurance Certification (Roadmap §11)
 

@@ -300,7 +300,7 @@ sequenceDiagram
     Note over User,Agent: Kết thúc Stage 1 (Machine-Level Fact Extraction)
     
     User->>Agent: 8. Cung cấp 5 Fact Files + ARCHITECTURE_TEMPLATE.md
-    Agent->>Agent: 9. Đọc & Tổng hợp thông tin (Grounded 100%, 0 Hallucination)
+    Agent->>Agent: 9. Đọc & Tổng hợp thông tin (Grounded trên span-verified anchors — verdicts advisory)
     Agent-->>User: 10. Trả về Báo cáo Kiến trúc Chuẩn hóa Toàn diện
     Note over User,Agent: Kết thúc Stage 2 (LLM Synthesis)
 ```

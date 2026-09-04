@@ -61,7 +61,7 @@ Autonomous AI coding agents operating across multi-thousand-line codebases often
 
 | Verdict | Definition | Agent Action Required |
 | :--- | :--- | :--- |
-| `[STRONG]` | File exists on disk, symbol exists in AST/SCIP, physical token coverage verified. | **Proceed directly.** 100% reliable anchor. |
+| `[STRONG]` | Anchor + span physically verified on disk. | High confidence for existence/navigation; semantic fit still requires reading the snippet. Not an absence or exhaustiveness guarantee. |
 | `[WEAK]` | Semantic or partial match; low lexical coverage. | **Inspect snippet range** before relying on symbol. |
 | `[REBUILT]` | File moved or renamed; auto-rehomed by atomic content-hash matching. | **Use updated path** reported in result. |
 | `[REMOVED]` | Node deleted on disk; scheduled for purge. | **Do NOT use.** Symbol no longer exists. |
@@ -71,7 +71,7 @@ Autonomous AI coding agents operating across multi-thousand-line codebases often
 
 ## 3. North-Star Response Envelope Contract
 
-All CLI commands supporting `--json` (`search`, `explore`, `usages`, `pack`, `doctor`) and 100% MCP tool responses wrap data inside a standardized envelope:
+All CLI commands supporting `--json` (`search`, `explore`, `usages`, `pack`, `doctor`) and all MCP tool responses wrap data inside a standardized envelope:
 
 ```json
 {
@@ -101,7 +101,7 @@ flowchart TD
     end
     
     subgraph S2 [Stage 2: Compiler Indexing]
-        B --> C["sot import-scip &lt;index.scip&gt; (Optional for 100% exact types)"]
+        B --> C["sot import-scip &lt;index.scip&gt; (Optional; compiler-exact when imported)"]
     end
     
     subgraph S3 [Stage 3: Tracing & Context Packaging]
@@ -222,7 +222,7 @@ When assigned an enterprise task, follow this standard 5-step analysis pattern:
 | **Sync** | `sot reconcile [--workers 4] [--force]` | `sot_reconcile` | Incremental AST sync with SHA-256 dirty checking and atomic rehoming. |
 | **Drift Audit** | `sot verify [--deep]` | `sot_verify` | Audits physical existence and detects phantom nodes. |
 | **Knowledge** | `sot insert --title "..." --body "..."` | `sot_insert` | Persists Architecture Decision Records into SQLite (preserved on reset). |
-| **Health** | `sot doctor [--json]` | `sot_doctor` | SQLite page count, freelist, journal mode, schema v5 health. |
+| **Health** | `sot doctor [--json]` | `sot_doctor` | SQLite page count, freelist, journal mode, schema v8 health. |
 | **Clean** | `sot clean [--all] [--include-notes]` | `sot_clean` | Purges stale records and deleted file nodes. |
 | **Vacuum** | `sot vacuum [--analyze]` | `sot_vacuum` | Reclaims unallocated SQLite freelist pages under maintenance lock. |
 | **Provision** | `sot setup [--harness omp\|claude\|all]` | CLI | Installs skills, rules, and MCP configurations. |

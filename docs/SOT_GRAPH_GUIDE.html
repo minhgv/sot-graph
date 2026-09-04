@@ -656,7 +656,7 @@
           <div class="stat-label">Thời Gian Truy Xuất Graph</div>
         </div>
         <div class="stat-card">
-          <div class="stat-value">100%</div>
+          <div class="stat-value">Span-verified</div>
           <div class="stat-label">Xác Thực Vật Lý [STRONG]</div>
         </div>
         <div class="stat-card">
@@ -751,8 +751,8 @@ flowchart TD
           <tbody>
             <tr>
               <td><span class="badge badge-strong">[STRONG]</span></td>
-              <td><strong>Xác thực 100% trên đĩa:</strong> Tệp tồn tại, symbol tồn tại đúng vị trí khai báo, hash nội dung trùng khớp.</td>
-              <td>Hoàn toàn tin cậy để tái sử dụng, phân tích hoặc gọi trực tiếp mà không cần đọc lại file.</td>
+              <td><strong>Xác thực vật lý trên đĩa (span-verified):</strong> Tệp tồn tại, symbol tồn tại đúng vị trí khai báo, hash nội dung trùng khớp.</td>
+              <td>Độ tin cậy cao cho điều hướng/tái sử dụng; vẫn nên đọc lại snippet — không phải bảo đảm về ngữ nghĩa hay tính đầy đủ.</td>
             </tr>
             <tr>
               <td><span class="badge badge-weak">[WEAK]</span></td>
@@ -795,7 +795,7 @@ flowchart TD
     CHK_AST -- "Không" --> R_WEAK_AST["[WEAK]<br/>Chỉ khớp text / comment"]
     CHK_AST -- "Có" --> CHK_COV{"Token Coverage<br/>>= Ngưỡng Threshold (0.5)?"}
     
-    CHK_COV -- "Đạt" --> R_STRONG["[STRONG]<br/>Xác thực 100% vật lý"]
+    CHK_COV -- "Đạt" --> R_STRONG["[STRONG]<br/>Xác thực vật lý (span-verified)"]
     CHK_COV -- "Không đạt" --> R_WEAK["[WEAK]<br/>Độ bao phủ thấp"]
 
     classDef strong fill:#064e3b,stroke:#059669,stroke-width:2px,color:#6ee7b7;

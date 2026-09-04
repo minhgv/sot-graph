@@ -32,7 +32,7 @@ Traditional RAG and Agent Memory systems (relying on Vector DBs, Neo4j, Redis) s
 
 > [!IMPORTANT]
 > **The Golden Rule of sot-graph:**  
-> *"Filesystem is the Single Source of Truth — The knowledge graph is an authoritative, verified projection of reality."*
+> *"Filesystem is the Single Source of Truth — The knowledge graph is a verified, bounded evidence index: anchors are span-verified on disk; verdicts are advisory and scope-bounded."*
 
 Every signal from file watchers, git hooks, or CLI commands is treated merely as a hint (*"please inspect this path"*). The system **never blindly trusts cached records**; it physically verifies file existence and content on disk before delivering results to the Agent.
 
@@ -50,7 +50,7 @@ Every signal from file watchers, git hooks, or CLI commands is treated merely as
 <details>
 <summary><h3>Q2: If I modify a single line in a file, does the system detect it, and how does reconciliation work?</h3></summary>
 
-**YES, 100% DETECTED IMMEDIATELY.**
+**YES — detected by the next reconciliation pass.**
 
 The `sot_graph.reconciler` coordinator employs a two-tier defense mechanism to capture even the smallest file modification:
 
