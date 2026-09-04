@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from dataclasses import asdict
 from .coverage import CoverageState, build_scope_manifest, coverage_note, repo_coverage
 from .engine import assured_query_context, resolve_symbol_identity
+from .impact_pipeline import CollectionError
 from .ledger import union_evidence
 from .state import CANONICAL_STATUSES, AssuranceFacts, decide
 
@@ -47,7 +48,7 @@ __all__ = [
     "RECEIPT_SCHEMA_VERSION",
     "RECEIPT_CITED_FILE_CAP",
 ]
-RECEIPT_SCHEMA_VERSION = "1.2"  # minor bump: 1.1 added canonical status vocabulary (P0); 1.2 added changed_files_total/changed_files_truncated (R5)
+RECEIPT_SCHEMA_VERSION = "1.3"  # minor bump: 1.1 added canonical status vocabulary (P0); 1.2 added changed_files_total/changed_files_truncated (R5); 1.3 added request/projection blocks + machine-readable collection-error warnings (SG-105)
 
 #: Bounded-work cap on how many changed files a post-change receipt will
 #: measure (journal staleness, evidence invalidation, snapshot citation).
@@ -65,11 +66,16 @@ _RELATION_FAMILIES = {
 _TEST_PATH_MARKERS = ("test", "spec")
 
 
-#: Snapshot fields that change between captures of the SAME worktree
-#: state (wall clock, generated id). They stay in the payload for
-#: operators but never enter the digest: two receipts of one unchanged
-#: state must share a digest (final gate: 100 lifecycle integrity runs).
-_VOLATILE_SNAPSHOT_KEYS = ("captured_at", "snapshot_id")
+#: Payload keys that change between captures/runs of the SAME evidenced
+#: state (wall clock, generated ids, engine timing). They stay in the
+#: payload for operators but never enter the digest: two receipts of one
+#: unchanged state must share a digest. Stripping is recursive (any
+#: nesting depth — e.g. ``summary.execution_time_ms`` sits inside the
+#: diff-impact summary), which is what makes diff-impact receipt digests
+#: stable across runs (SG-105).
+_VOLATILE_SNAPSHOT_KEYS = (
+    "captured_at", "snapshot_id", "execution_time_ms", "elapsed_ms",
+)
 
 
 def _strip_volatile(value: Any) -> Any:
@@ -97,6 +103,18 @@ def receipt_digest(payload: Dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8", errors="surrogateescape")).hexdigest()
 
 
+def _record_collection_error(errors: List[str], source: str, exc: Exception) -> str:
+    """Construct + record one CollectionError as machine-readable detail.
+
+    Swallow sites never crash the receipt, but "empty evidence" after a
+    storage fault must stay visible: the entry degrades the verdict to
+    UNVERIFIABLE via ``AssuranceFacts.collection_error`` (SG-105).
+    """
+    error = CollectionError(source=source, detail=f"{type(exc).__name__}: {exc}")
+    errors.append(str(error))
+    return str(error)
+
+
 def _node_row(db: Any, symbol: str) -> Optional[Dict[str, Any]]:
     row = db.get_node_by_symbol(symbol)
     if row is None:
@@ -104,9 +122,19 @@ def _node_row(db: Any, symbol: str) -> Optional[Dict[str, Any]]:
     return row
 
 
-def _edges_of(db: Any, node_id: str, direction: str,
-              relations: Optional[Sequence[str]] = None) -> List[Dict[str, Any]]:
-    """One-hop edges by direction; optionally filtered by relation."""
+def _edges_of(
+    db: Any,
+    node_id: str,
+    direction: str,
+    relations: Optional[Sequence[str]] = None,
+    errors: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """One-hop edges by direction; optionally filtered by relation.
+
+    Storage faults degrade to an empty edge list — and, when ``errors``
+    is supplied, to a recorded ``collection_error:edges_of:...`` entry so
+    the receipt's verdict degrades instead of silently assuming absence.
+    """
     if direction == "out":
         sql = ("SELECT e.relation, e.line, n.id, n.path, n.kind, n.symbol "
                "FROM graph_edges e JOIN graph_nodes n ON e.dst = n.id "
@@ -123,7 +151,9 @@ def _edges_of(db: Any, node_id: str, direction: str,
     sql += " ORDER BY n.path, n.symbol LIMIT 500"
     try:
         rows = db.conn.execute(sql, params).fetchall()
-    except Exception:  # noqa: BLE001 - receipt must not crash on storage
+    except Exception as exc:  # noqa: BLE001 - receipt must not crash on storage
+        if errors is not None:
+            _record_collection_error(errors, "edges_of", exc)
         return []
     return [
         {"relation": r[0], "line": r[1], "id": r[2],
@@ -240,7 +270,12 @@ def classify_change_risk(*, kind_of_change: str, symbol_kind: str = "",
     }
 
 
-def check_rename_gate(db: Any, repo_root: str, symbol: str) -> Dict[str, Any]:
+def check_rename_gate(
+    db: Any,
+    repo_root: str,
+    symbol: str,
+    errors: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """Blocking gate for public renames (P7 exit gate).
 
     A rename is blocked while CALLER COVERAGE is insufficient: '0
@@ -256,7 +291,8 @@ def check_rename_gate(db: Any, repo_root: str, symbol: str) -> Dict[str, Any]:
                       "the rename scope",
         }
     node_id = str(row.get("id") or row.get("node_id") or "")
-    callers = _edges_of(db, node_id, "in", ("calls", "call_reference", "usage"))
+    callers = _edges_of(db, node_id, "in", ("calls", "call_reference", "usage"),
+                        errors=errors)
     report = repo_coverage(db, repo_root)
     covered = report.covered_fraction
     files_touched = {row.get("path")} | {c["path"] for c in callers}
@@ -327,14 +363,16 @@ def scope_receipt(
     identity_status = identity["status"]
     row = identity["selected"]
     node_id = str((row or {}).get("id") or (row or {}).get("node_id") or "")
-    callers = _edges_of(db, node_id, "in") if node_id else []
-    callees = _edges_of(db, node_id, "out") if node_id else []
+    collection_errors: List[str] = []
+    callers = _edges_of(db, node_id, "in", errors=collection_errors) if node_id else []
+    callees = _edges_of(db, node_id, "out", errors=collection_errors) if node_id else []
     transitive: List[Dict[str, Any]] = []
     if node_id:
         try:
             transitive = db.explore_node(node_id, depth=depth, limit=200)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 - degrade, never crash
             transitive = []
+            _record_collection_error(collection_errors, "explore_node", exc)
     affected_files = sorted({
         (row or {}).get("path"),
         *(c["path"] for c in callers + callees),
@@ -349,7 +387,8 @@ def scope_receipt(
     snapshot_bound = bool(snapshot_dict.get("scope_digest"))
     relations: Dict[str, List[Dict[str, Any]]] = {
         name: (
-            _edges_of(db, node_id, "out", rels) + _edges_of(db, node_id, "in", rels)
+            _edges_of(db, node_id, "out", rels, errors=collection_errors)
+            + _edges_of(db, node_id, "in", rels, errors=collection_errors)
             if node_id else []
         )
         for name, rels in _RELATION_FAMILIES.items()
@@ -375,7 +414,7 @@ def scope_receipt(
         touches_auth=touches_auth,
         dynamic_heavy=dynamic_heavy or dynamic_unresolved,
     )
-    gate = (check_rename_gate(db, repo_root, target)
+    gate = (check_rename_gate(db, repo_root, target, errors=collection_errors)
             if kind_of_change in ("rename", "delete") else
             {"symbol": target, "resolved": row is not None, "blocked": False,
              "reason": "rename gate not applicable"})
@@ -386,6 +425,7 @@ def scope_receipt(
     absence_claim = bool(risk.get("absence_assurance")) and len(callers) == 0
     facts = AssuranceFacts(
         identity_status=identity_status,
+        collection_error=bool(collection_errors),
         snapshot_bound=snapshot_bound,
         stale_files=list(stale_files),
         coverage_measured=cov.basis == "measured",
@@ -437,6 +477,7 @@ def scope_receipt(
         "affected_files": affected_files,
         "candidate_tests": candidate_tests,
         "providers": ledger,
+        "warnings": list(collection_errors),
         "coverage": {
             "note": coverage_note(cov),
             "basis": cov.basis,
@@ -499,7 +540,7 @@ def diff_impact_receipt(
     db: Any,
     repo_root: str,
     *,
-    target: str = "HEAD~1",
+    target: str = "HEAD",
     depth: int = 2,
     staged: bool = False,
     working_tree: bool = False,
@@ -535,6 +576,7 @@ def diff_impact_receipt(
     )
     # Evidence invalidated by the diff: rows bound to changed paths.
     invalidated: List[Dict[str, Any]] = []
+    collection_errors: List[str] = []
     try:
         for path in cited_files:
             norm_fwd = path.replace("\\", "/")
@@ -547,8 +589,8 @@ def diff_impact_receipt(
                 {"id": r[0], "provider": r[1], "snapshot": r[2], "path": path}
                 for r in rows
             )
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001 - degrade, never crash the receipt
+        _record_collection_error(collection_errors, "provider_evidence", exc)
 
     test_impacts = getattr(result, "test_impacts", None) or []
     summary = getattr(result, "summary", None)
@@ -573,6 +615,7 @@ def diff_impact_receipt(
     manifest_parser_failures = len(manifest.parser_error_files)
     facts = AssuranceFacts(
         identity_status="UNIQUE",  # diff target is a revision, not a symbol
+        collection_error=bool(collection_errors),
         snapshot_bound=snapshot_bound,
         # Post-change staleness is MEASURED against the journal (see
         # _post_change_stale_files): reconciled changes leave nothing
@@ -620,6 +663,7 @@ def diff_impact_receipt(
             f"measured closure covers {len(cited_files)} of "
             f"{changed_files_total} changed files; closure evidence is partial"
         )
+    warnings.extend(collection_errors)
     payload: Dict[str, Any] = {
         "schema_version": RECEIPT_SCHEMA_VERSION,
         "kind": "diff_impact",

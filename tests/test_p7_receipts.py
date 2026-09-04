@@ -82,7 +82,7 @@ class TestScopeReceipt:
             payload = scope_receipt(db, str(receipt_repo), "run")
         finally:
             db.close()
-        assert payload["schema_version"] == RECEIPT_SCHEMA_VERSION == "1.2"
+        assert payload["schema_version"] == RECEIPT_SCHEMA_VERSION == "1.3"
         assert payload["proof_scope"] == "pre_change_only"
         assert payload["request"]["target"] == "run"
         assert payload["identity"]["selected"]["symbol"] == "run"
