@@ -53,6 +53,7 @@ def union_evidence(
     snapshot_hash: Optional[str] = None,
     limit: int = 5000,
     verify_spans: bool = True,
+    stats_out: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Union provider evidence by canonical identity — fail-closed.
 
@@ -65,54 +66,82 @@ def union_evidence(
     explicitly skipped via ``verify_spans=False``). Contradictions with
     a uniquely verified span resolve to ``source_verified``; unresolved
     conflicts stay ``CONFLICT``.
+
+    SG-107: when ``stats_out`` is supplied it receives the collection's
+    cap accounting — the TRUE enumerated row count via a twin COUNT
+    query (same WHERE, no LIMIT), the returned count, the caller-supplied
+    ``limit`` as cap, and the derived truncated/cursor_exhausted flags.
     """
     order_clause = " ORDER BY e.path, e.relation, e.src_symbol, e.dst_symbol, e.line_start, e.line_end, e.run_id, e.id"
     is_truncated = False
     canonical_root = os.path.realpath(repo_root) if repo_root else ""
     if not canonical_root:
         return []
-    sql = (
-        "SELECT e.path, e.relation, e.src_symbol, e.dst_symbol, "
-        "e.snapshot_hash, e.provider_name, e.line_start, e.line_end, "
-        "e.run_id, e.confidence "
+
+    def _record_stats(enumerated: int, returned: int) -> None:
+        if stats_out is None:
+            return
+        from .impact_pipeline import CollectionStats
+
+        stats_out.clear()
+        stats_out.update(CollectionStats.counted(
+            enumerated, returned, int(limit),
+        ).as_dict())
+
+    base_from = (
         "FROM provider_evidence e JOIN provider_runs r ON e.run_id = r.id "
         "WHERE r.status = 'ok' AND e.invalidated_at IS NULL "
         "AND r.project_root = ?"
     )
     params: List[Any] = [canonical_root]
     if snapshot_hash is not None:
-        sql += " AND e.snapshot_hash = ?"
+        base_from += " AND e.snapshot_hash = ?"
         params.append(snapshot_hash)
-    sql += order_clause + " LIMIT ?"
+    sql = (
+        "SELECT e.path, e.relation, e.src_symbol, e.dst_symbol, "
+        "e.snapshot_hash, e.provider_name, e.line_start, e.line_end, "
+        f"e.run_id, e.confidence {base_from}"
+        + order_clause + " LIMIT ?"
+    )
+    count_sql = f"SELECT COUNT(*) {base_from}"
     params.append(int(limit) + 1)
     try:
         rows = db.conn.execute(sql, params).fetchall()
         if len(rows) > int(limit):
             is_truncated = True
             rows = rows[:int(limit)]
+        enumerated = int(db.conn.execute(count_sql, params[:-1]).fetchone()[0])
+        _record_stats(enumerated, len(rows))
     except Exception as exc:  # noqa: BLE001 - ledger is a sidecar
         # Tolerant fallback for sidecars opened before the invalidated_at
         # migration landed: retry with the legacy stale-metadata filter.
         legacy_params: List[Any] = [canonical_root]
-        legacy = (
-            "SELECT e.path, e.relation, e.src_symbol, e.dst_symbol, "
-            "e.snapshot_hash, e.provider_name, e.line_start, e.line_end, "
-            "e.run_id, e.confidence "
+        legacy_base = (
             "FROM provider_evidence e JOIN provider_runs r ON e.run_id = r.id "
             "WHERE r.status = 'ok' AND COALESCE(e.metadata_json, '') "
             "NOT LIKE '%\"stale\": true%' "
             "AND r.project_root = ?"
         )
         if snapshot_hash is not None:
-            legacy += " AND e.snapshot_hash = ?"
+            legacy_base += " AND e.snapshot_hash = ?"
             legacy_params.append(snapshot_hash)
-        legacy += order_clause + " LIMIT ?"
+        legacy = (
+            "SELECT e.path, e.relation, e.src_symbol, e.dst_symbol, "
+            "e.snapshot_hash, e.provider_name, e.line_start, e.line_end, "
+            f"e.run_id, e.confidence {legacy_base}"
+            + order_clause + " LIMIT ?"
+        )
+        legacy_count_sql = f"SELECT COUNT(*) {legacy_base}"
         legacy_params.append(int(limit) + 1)
         try:
             rows = db.conn.execute(legacy, legacy_params).fetchall()
             if len(rows) > int(limit):
                 is_truncated = True
                 rows = rows[:int(limit)]
+            enumerated = int(db.conn.execute(
+                legacy_count_sql, legacy_params[:-1],
+            ).fetchone()[0])
+            _record_stats(enumerated, len(rows))
         except Exception:  # noqa: BLE001 - still unreadable: degrade honestly
             return [{"error": f"ledger read failed: {type(exc).__name__}"}]
     groups: Dict[tuple, Dict[str, Any]] = {}

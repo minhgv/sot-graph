@@ -15,7 +15,7 @@ status via the canonical severity lattice:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 __all__ = [
     "CANONICAL_STATUSES",
     "CLAIM_PROFILES",
@@ -94,6 +94,12 @@ class AssuranceFacts:
     unresolved_budget: int = 0
     open_conflicts: int = 0
     truncated: bool = False
+    #: SG-107: ids of the capped collections that ACTUALLY truncated
+    #: (e.g. "edges_cap_500", "transitive_cap_200"). Non-empty implies
+    #: ``truncated``; each source degrades the verdict to PARTIAL. The
+    #: legacy shape (``truncated`` set, no sources — transport trim,
+    #: pre-1.4 callers) keeps the historical "transitive_truncated" code.
+    truncation_sources: Tuple[str, ...] = ()
     provider_capability_ok: bool = True
     #: receipt rests on a negative claim (e.g. "0 callers").
     #: Fail-closed default: assume an absence claim unless proven otherwise.
@@ -151,8 +157,22 @@ def decide(facts: AssuranceFacts) -> Dict[str, Any]:
         reasons.append("rename_gate_blocked")
         candidate_statuses.append("PARTIAL")
 
-    # 6. truncation
-    if facts.truncated:
+    # 6. truncation (bounded-collection caps, SG-107). Legacy shape —
+    # ``truncated`` without source ids (the SG-104 transport trim and
+    # pre-1.4 callers) — keeps the historical "transitive_truncated"
+    # reason. With sources, each capped collection that actually cut
+    # emits its own code: the transitive source keeps its historical
+    # reason code (backward compat with live tests), every other source
+    # emits ``collection_truncated:<source>``. Truncated facts still cap
+    # the candidate at PARTIAL.
+    if facts.truncation_sources:
+        for source in facts.truncation_sources:
+            if source == "transitive_cap_200":
+                reasons.append("transitive_truncated")
+            else:
+                reasons.append(f"collection_truncated:{source}")
+            candidate_statuses.append("PARTIAL")
+    elif facts.truncated:
         reasons.append("transitive_truncated")
         candidate_statuses.append("PARTIAL")
 

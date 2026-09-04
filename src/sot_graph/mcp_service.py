@@ -548,34 +548,90 @@ class McpService:
 
         # The degraded verdict + transport_truncation block are appended
         # after the greedy refill; if their bytes push the payload past the
-        # ceiling, evict tail items from the reduced collections (the
-        # block's returned counts stay honest) until it fits.
-        encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        if isinstance(value.get("transport_truncation"), dict):
-            entries = value["transport_truncation"].get("collections") or []
-            pos = len(entries) - 1
-            while len(encoded) > budget and pos >= 0:
-                entry = entries[pos]
-                container = (
-                    value["result"]
-                    if entry.get("container") == "result" and isinstance(value.get("result"), dict)
-                    else value
-                )
-                target_list = container.get(entry["key"])
-                if (
-                    isinstance(target_list, list)
-                    and target_list
-                    and entry.get("returned_count", 0) > 0
+        # ceiling, shrink further HONESTLY before giving up, in cost order:
+        #
+        #   1. SG-107: compact the collection_stats cap-accounting detail —
+        #      collapse each entry to {enumerated_count, returned_count,
+        #      truncated}. The verbose fields (cap, cursor_exhausted) are
+        #      presentation detail; a truncation flag and the true counts
+        #      are never dropped or altered, so the invariant
+        #      returned < enumerated => non-ASSURED still holds.
+        #   2. Evict tail items from ANY refilled collection, not just
+        #      already-reduced ones (a fully-refilled collection's bytes
+        #      can be given back too; its counts stay truthful, and the
+        #      re-degrade below records the new cut). Eviction can turn a
+        #      fully-returned collection into a reduced one, which grows
+        #      the degradation block again — so evict, re-degrade, and
+        #      re-measure in rounds until the payload fits or no evictable
+        #      item is left.
+        #
+        # Only when even the fully compacted, fully evicted envelope still
+        # exceeds the ceiling is response_too_large raised.
+        def _encode() -> bytes:
+            return json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+        def _compact_collection_stats() -> bool:
+            stats = value.get("collection_stats")
+            if not isinstance(stats, dict) or not stats:
+                return False
+            compacted: Dict[str, Any] = {}
+            changed = False
+            for name, st in stats.items():
+                if isinstance(st, dict) and (
+                    "cap" in st or "cursor_exhausted" in st
                 ):
-                    target_list.pop()
-                    entry["returned_count"] -= 1
-                    encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                    compacted[name] = {
+                        "enumerated_count": st.get("enumerated_count"),
+                        "returned_count": st.get("returned_count"),
+                        "truncated": bool(st.get("truncated")),
+                    }
+                    changed = True
                 else:
-                    pos -= 1
+                    compacted[name] = st
+            if changed:
+                value["collection_stats"] = compacted
+            return changed
+
+        encoded = _encode()
+        if len(encoded) > budget:
+            _compact_collection_stats()
+            encoded = _encode()
+        if len(encoded) > budget:
+            for _round in range(3):
+                pos = len(trimmed_collections) - 1
+                while len(encoded) > budget and pos >= 0:
+                    entry = trimmed_collections[pos]
+                    container = (
+                        value["result"]
+                        if entry.get("container") == "result" and isinstance(value.get("result"), dict)
+                        else value
+                    )
+                    target_list = container.get(entry["key"])
+                    if (
+                        isinstance(target_list, list)
+                        and target_list
+                        and entry.get("returned_count", 0) > 0
+                    ):
+                        target_list.pop()
+                        entry["returned_count"] -= 1
+                        if entry["key"] == "results" and "returned" in value:
+                            value["returned"] = len(target_list)
+                        encoded = _encode()
+                    else:
+                        pos -= 1
+                # Re-degrade over the FINAL counts: eviction may have
+                # reduced a previously fully-returned collection, and the
+                # transport_truncation block must name every real cut.
+                self._degrade_assurance_after_trim(
+                    value, text_truncated, trimmed_collections
+                )
+                encoded = _encode()
+                if len(encoded) <= budget:
+                    break
 
         _refresh_digest()
 
-        encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        encoded = _encode()
         if len(encoded) <= budget:
             return value
 
@@ -1438,10 +1494,17 @@ class McpService:
             # auto-reconcile itself runs above on the writer path (this op
             # connection is mode=ro and cannot reconcile), so the request
             # block records the pipeline invocation actually performed.
+            # SG-107 provenance honesty: when this surface reconciled on
+            # the writer path BEFORE the executor ran, the receipt states
+            # so ("surface_pre") instead of implying the pipeline did it.
             receipt = run_impact_claim(
                 ImpactClaimRequest(
                     target=target, depth=depth,
                     staged=staged, working_tree=working_tree,
+                    reconcile_provenance=(
+                        "surface_pre" if reconcile_result is not None
+                        else "pipeline"
+                    ),
                 ),
                 cast(Database, view), self.project_root,
             )

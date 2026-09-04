@@ -82,7 +82,7 @@ class TestScopeReceipt:
             payload = scope_receipt(db, str(receipt_repo), "run")
         finally:
             db.close()
-        assert payload["schema_version"] == RECEIPT_SCHEMA_VERSION == "1.3"
+        assert payload["schema_version"] == RECEIPT_SCHEMA_VERSION == "1.4"
         assert payload["proof_scope"] == "pre_change_only"
         assert payload["request"]["target"] == "run"
         assert payload["identity"]["selected"]["symbol"] == "run"
@@ -388,7 +388,7 @@ class TestReceiptTruncationHonesty:
         )
         # Enumeration limits degrade the decision (R5 honesty contract).
         assert post["assurance"]["status"] == "PARTIAL"
-        assert "transitive_truncated" in post["assurance"]["reason_codes"]
+        assert "collection_truncated:changed_files_cap_200" in post["assurance"]["reason_codes"]
         assert post["closure_decision"] == "open"
         assert post["assurance_facts"]["truncated"] is True
 

@@ -152,7 +152,7 @@ class TestRunImpactClaim:
             receipt = run_impact_claim(ImpactClaimRequest(), db, str(impact_repo))
         finally:
             db.close()
-        assert receipt["schema_version"] == RECEIPT_SCHEMA_VERSION == "1.3"
+        assert receipt["schema_version"] == RECEIPT_SCHEMA_VERSION == "1.4"
         assert receipt["request"] == {
             "schema_version": "impact-request/1",
             "target": "HEAD",
@@ -160,6 +160,7 @@ class TestRunImpactClaim:
             "working_tree": False,
             "depth": 2,
             "auto_reconcile": False,
+            "reconcile_provenance": "pipeline",
         }
         projection = receipt["projection"]
         assert projection["next_cursor"] is None

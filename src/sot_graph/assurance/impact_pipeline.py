@@ -36,6 +36,9 @@ from typing import Any, Dict, List
 __all__ = [
     "IMPACT_REQUEST_SCHEMA_VERSION",
     "PROJECTION_COLLECTION_KEYS",
+    "RECONCILE_PROVENANCE_VALUES",
+    "CollectionStats",
+    "merge_collection_stats",
     "ImpactClaimRequest",
     "CollectionError",
     "ReceiptIntegrityError",
@@ -60,6 +63,88 @@ PROJECTION_COLLECTION_KEYS = (
 )
 
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}")
+
+
+#: Where a claim's reconcile happened (SG-107 provenance honesty):
+#: "pipeline" — the executor's own auto-reconcile (or none);
+#: "surface_pre" — the calling surface reconciled on the writer path
+#: BEFORE invoking the executor (McpService.diff_impact).
+RECONCILE_PROVENANCE_VALUES = ("pipeline", "surface_pre")
+
+
+class CollectionStats:
+    """SG-107 cap accounting for ONE capped collection.
+
+    ``enumerated_count`` is the collection's TRUE total — measured with a
+    twin ``COUNT(*)`` query over the same WHERE clause without the LIMIT
+    (SQLite-local, cheap) wherever the collector is SQL-backed — while
+    ``returned_count`` is what actually entered the receipt. A collector
+    that cuts at its cap reports ``truncated=True`` so the cut can never
+    hide behind "the receipt is just the first N rows".
+
+    ``cursor_exhausted`` is the pagination contract of this phase: no
+    cursor exists yet, so a collection that was NOT truncated is reported
+    fully drained; full pagination stays out of scope.
+
+    Instances travel through receipts as JSON-friendly dicts (``as_dict``).
+    """
+
+    def __init__(
+        self,
+        enumerated_count: int,
+        returned_count: int,
+        cap: int,
+        truncated: bool,
+        cursor_exhausted: bool,
+    ) -> None:
+        self.enumerated_count = int(enumerated_count)
+        self.returned_count = int(returned_count)
+        self.cap = int(cap)
+        self.truncated = bool(truncated)
+        self.cursor_exhausted = bool(cursor_exhausted)
+
+    @staticmethod
+    def counted(enumerated_count: int, returned_count: int, cap: int) -> "CollectionStats":
+        """Derive truncated/cursor_exhausted from the counted pair."""
+        truncated = int(enumerated_count) > int(returned_count)
+        return CollectionStats(
+            enumerated_count=enumerated_count,
+            returned_count=returned_count,
+            cap=cap,
+            truncated=truncated,
+            cursor_exhausted=not truncated,
+        )
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "enumerated_count": self.enumerated_count,
+            "returned_count": self.returned_count,
+            "cap": self.cap,
+            "truncated": self.truncated,
+            "cursor_exhausted": self.cursor_exhausted,
+        }
+
+
+def merge_collection_stats(
+    entries: List[Dict[str, Any]], cap: int
+) -> Dict[str, Any]:
+    """Fold per-query stats of one logical collection into a single record.
+
+    A logical collection may span several capped queries (e.g. direct
+    edges = one callers query + one callees query, each capped). Counts
+    sum across the queries; ``cap`` stays the per-query cap; the
+    collection is truncated when ANY of its queries was.
+    """
+    enumerated = sum(int(e["enumerated_count"]) for e in entries)
+    returned = sum(int(e["returned_count"]) for e in entries)
+    truncated = any(bool(e["truncated"]) for e in entries)
+    return {
+        "enumerated_count": enumerated,
+        "returned_count": returned,
+        "cap": int(cap),
+        "truncated": truncated,
+        "cursor_exhausted": not truncated,
+    }
 
 
 class CollectionError(Exception):
@@ -100,6 +185,13 @@ class ImpactClaimRequest:
     staged: bool = False
     working_tree: bool = False
     auto_reconcile: bool = False
+    #: SG-107 provenance honesty: where reconciliation happened relative
+    #: to the executor. "pipeline" (default) = the executor's own
+    #: auto-reconcile (or none); "surface_pre" = the calling surface
+    #: already reconciled on the writer path BEFORE invoking the executor
+    #: (McpService.diff_impact). Digest-affecting by design: the receipt
+    #: states who reconciled, not just that the graph is fresh.
+    reconcile_provenance: str = "pipeline"
 
     def normalize(self) -> "ImpactClaimRequest":
         """Validate and canonicalize; pure (no I/O)."""
@@ -122,6 +214,11 @@ class ImpactClaimRequest:
             # Engine parity: extract_diff appends --staged first and only
             # falls through to the working-tree diff when staged is unset.
             working_tree = False
+        if self.reconcile_provenance not in RECONCILE_PROVENANCE_VALUES:
+            raise ValueError(
+                "ImpactClaimRequest.reconcile_provenance must be one of "
+                f"{RECONCILE_PROVENANCE_VALUES}, got {self.reconcile_provenance!r}"
+            )
         return replace(
             self,
             target=target,
@@ -202,6 +299,10 @@ def run_impact_claim(
         "working_tree": request.working_tree,
         "depth": request.depth,
         "auto_reconcile": request.auto_reconcile,
+        # SG-107: the receipt states where reconciliation happened —
+        # "pipeline" (the executor's own auto-reconcile) or "surface_pre"
+        # (the surface reconciled on the writer path before this call).
+        "reconcile_provenance": request.reconcile_provenance,
     }
     receipt["projection"] = build_projection(receipt)
     if reconcile_warnings:
@@ -215,19 +316,70 @@ def run_impact_claim(
 
 
 def build_projection(receipt: Dict[str, Any]) -> Dict[str, Any]:
-    """SG-104 projection vocabulary over the receipt's own collections."""
+    """SG-104 projection vocabulary over the receipt's own collections.
+
+    SG-107: when the receipt carries a ``collection_stats`` block (schema
+    1.4+), a collection whose key has accounting there reports the TRUE
+    enumerated/returned/cap/truncated values instead of the naive
+    ``len(payload list)`` — a collection cut by its collector's cap at
+    receipt-build time can no longer masquerade as whole. Receipts without
+    stats (older shapes) keep the len()-based fallback. SG-104 transport
+    trimming stays ADDITIVE on top: when the receipt also carries a
+    ``transport_truncation`` block for the same key (the payload was cut
+    again for response size), the projection keeps the WORSE numbers —
+    a transport trim never overwrites the enumerated count of an already
+    collection-truncated collection with a smaller value.
+    """
+    stats_block = receipt.get("collection_stats")
+    stats_block = stats_block if isinstance(stats_block, dict) else {}
+    transport_block = receipt.get("transport_truncation")
+    transport_entries = (
+        transport_block.get("collections")
+        if isinstance(transport_block, dict) else None
+    ) or []
+    transport_by_key = {
+        str(e.get("key")): e
+        for e in transport_entries
+        if isinstance(e, dict) and e.get("key")
+    }
     collections: List[Dict[str, Any]] = []
     for key in PROJECTION_COLLECTION_KEYS:
         items = receipt.get(key)
         enumerated = len(items) if isinstance(items, (list, tuple)) else 0
-        collections.append(
-            {
-                "key": key,
-                "enumerated_count": enumerated,
-                "returned_count": enumerated,
-                "truncated": False,
-            }
-        )
+        entry: Dict[str, Any] = {
+            "key": key,
+            "enumerated_count": enumerated,
+            "returned_count": enumerated,
+            "truncated": False,
+        }
+        stats = stats_block.get(key)
+        if isinstance(stats, dict):
+            # True collector accounting wins over the payload-list length.
+            entry["enumerated_count"] = int(
+                stats.get("enumerated_count", enumerated)
+            )
+            entry["returned_count"] = int(stats.get("returned_count", enumerated))
+            entry["truncated"] = bool(stats.get("truncated", False))
+            entry["cap"] = int(stats.get("cap", 0))
+            entry["cursor_exhausted"] = bool(
+                stats.get("cursor_exhausted", not entry["truncated"])
+            )
+        transport = transport_by_key.get(key)
+        if transport is not None:
+            # SG-104 additive fold: keep the worse of the two cuts. The
+            # transport trimmer only records collections it actually
+            # emptied/refilled, so min() can only ever reduce returned.
+            t_enumerated = int(transport.get("enumerated_count", 0))
+            t_returned = int(transport.get("returned_count", 0))
+            entry["enumerated_count"] = max(
+                entry["enumerated_count"], t_enumerated
+            )
+            entry["returned_count"] = min(entry["returned_count"], t_returned)
+            entry["truncated"] = bool(entry["truncated"]) or (
+                t_returned < t_enumerated
+            )
+            entry["cursor_exhausted"] = not entry["truncated"]
+        collections.append(entry)
     return {"collections": collections, "next_cursor": None}
 
 

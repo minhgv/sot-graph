@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from dataclasses import asdict
 from .coverage import CoverageState, build_scope_manifest, coverage_note, repo_coverage
 from .engine import assured_query_context, resolve_symbol_identity
-from .impact_pipeline import CollectionError
+from .impact_pipeline import CollectionError, merge_collection_stats
 from .ledger import union_evidence
 from .state import CANONICAL_STATUSES, AssuranceFacts, decide
 
@@ -48,7 +48,7 @@ __all__ = [
     "RECEIPT_SCHEMA_VERSION",
     "RECEIPT_CITED_FILE_CAP",
 ]
-RECEIPT_SCHEMA_VERSION = "1.3"  # minor bump: 1.1 added canonical status vocabulary (P0); 1.2 added changed_files_total/changed_files_truncated (R5); 1.3 added request/projection blocks + machine-readable collection-error warnings (SG-105)
+RECEIPT_SCHEMA_VERSION = "1.4"  # minor bump: 1.1 added canonical status vocabulary (P0); 1.2 added changed_files_total/changed_files_truncated (R5); 1.3 added request/projection blocks + machine-readable collection-error warnings (SG-105); 1.4 added per-collector collection_stats cap accounting + facts.truncation_sources reason codes (SG-107)
 
 #: Bounded-work cap on how many changed files a post-change receipt will
 #: measure (journal staleness, evidence invalidation, snapshot citation).
@@ -56,6 +56,23 @@ RECEIPT_SCHEMA_VERSION = "1.3"  # minor bump: 1.1 added canonical status vocabul
 #: carry ``changed_files_total`` / ``changed_files_truncated`` so the
 #: partial closure evidence is visible instead of silently assumed whole.
 RECEIPT_CITED_FILE_CAP = 200
+
+#: SG-107 bounded-collection caps. The caps themselves are unchanged
+#: bounded-work budgets; what changed is that each capped collector now
+#: REPORTS its accounting (true enumerated vs returned via a twin COUNT
+#: query) instead of silently returning the first N rows. Each cap has a
+#: stable source id that lands in ``AssuranceFacts.truncation_sources``
+#: (and therefore in ``collection_truncated:<source>`` reason codes)
+#: whenever it actually cuts a collection.
+_EDGES_CAP = 500                  # _edges_of per query (callers/callees/relations)
+_EDGES_SOURCE = "edges_cap_500"
+_EVIDENCE_PATH_CAP = 50           # invalidated provider_evidence per changed path
+_EVIDENCE_SOURCE = "evidence_cap_50"
+_LEDGER_RUNS_CAP = 200            # recent provider_runs cross-check
+_LEDGER_RUNS_SOURCE = "ledger_runs_cap_200"
+_TRANSITIVE_CAP = 200             # bounded transitive BFS walk
+_TRANSITIVE_SOURCE = "transitive_cap_200"
+_CHANGED_FILES_SOURCE = f"changed_files_cap_{RECEIPT_CITED_FILE_CAP}"
 
 
 _RELATION_FAMILIES = {
@@ -128,33 +145,47 @@ def _edges_of(
     direction: str,
     relations: Optional[Sequence[str]] = None,
     errors: Optional[List[str]] = None,
+    stats_out: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """One-hop edges by direction; optionally filtered by relation.
 
     Storage faults degrade to an empty edge list — and, when ``errors``
     is supplied, to a recorded ``collection_error:edges_of:...`` entry so
     the receipt's verdict degrades instead of silently assuming absence.
+
+    SG-107: the ``LIMIT`` is cap accounting, not truth — when ``stats_out``
+    is supplied, the collector appends one record with the TRUE row count
+    (twin ``COUNT(*)`` over the same WHERE, no LIMIT) next to what the
+    cap let through, so a cut at :data:`_EDGES_CAP` is visible instead of
+    silently reading as "no more callers".
     """
     if direction == "out":
-        sql = ("SELECT e.relation, e.line, n.id, n.path, n.kind, n.symbol "
-               "FROM graph_edges e JOIN graph_nodes n ON e.dst = n.id "
-               "WHERE e.src = ?")
+        where = ("FROM graph_edges e JOIN graph_nodes n ON e.dst = n.id "
+                 "WHERE e.src = ?")
     else:
-        sql = ("SELECT e.relation, e.line, n.id, n.path, n.kind, n.symbol "
-               "FROM graph_edges e JOIN graph_nodes n ON e.src = n.id "
-               "WHERE e.dst = ?")
+        where = ("FROM graph_edges e JOIN graph_nodes n ON e.src = n.id "
+                 "WHERE e.dst = ?")
     params: List[Any] = [node_id]
     if relations:
         marks = ",".join("?" for _ in relations)
-        sql += f" AND e.relation IN ({marks})"
+        where += f" AND e.relation IN ({marks})"
         params.extend(relations)
-    sql += " ORDER BY n.path, n.symbol LIMIT 500"
+    sql = ("SELECT e.relation, e.line, n.id, n.path, n.kind, n.symbol "
+           f"{where} ORDER BY n.path, n.symbol LIMIT {_EDGES_CAP}")
+    count_sql = f"SELECT COUNT(*) {where}"
     try:
         rows = db.conn.execute(sql, params).fetchall()
+        enumerated = int(db.conn.execute(count_sql, params).fetchone()[0])
     except Exception as exc:  # noqa: BLE001 - receipt must not crash on storage
         if errors is not None:
             _record_collection_error(errors, "edges_of", exc)
         return []
+    if stats_out is not None:
+        from .impact_pipeline import CollectionStats
+
+        stats_out.append(CollectionStats.counted(
+            enumerated, len(rows), _EDGES_CAP,
+        ).as_dict())
     return [
         {"relation": r[0], "line": r[1], "id": r[2],
          "path": r[3], "kind": r[4], "symbol": r[5]}
@@ -172,9 +203,19 @@ def _ledger_cross_check(
     repo_root: str,
     limit: int = 5,
     snapshot_hash: Optional[str] = None,
+    stats_out: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """Recent provider runs + union conflicts for the receipt."""
+    """Recent provider runs + union conflicts for the receipt.
+
+    SG-107: when ``stats_out`` is supplied it receives cap accounting per
+    collection name — ``ledger_runs`` (the bounded recent-runs window) and
+    ``ledger_union`` (the evidence union's row cap, inside
+    :func:`union_evidence`) — so a cross-check that saw only its newest
+    200 runs is visible as truncated instead of silently whole.
+    """
     has_failed_runs = False
+    runs_enumerated: Optional[int] = None
+    all_runs: List[Any] = []
     try:
         canonical_root = os.path.realpath(repo_root) if repo_root else ""
         if not canonical_root:
@@ -192,7 +233,12 @@ def _ledger_cross_check(
                 "WHERE project_root = ? AND snapshot_hash = ? "
                 "ORDER BY created_at DESC LIMIT ?"
             )
-            params = (canonical_root, snapshot_hash, 200)
+            runs_count_sql = (
+                "SELECT COUNT(*) FROM provider_runs "
+                "WHERE project_root = ? AND snapshot_hash = ?"
+            )
+            params: Tuple[Any, ...] = (canonical_root, snapshot_hash, _LEDGER_RUNS_CAP)
+            count_params: Tuple[Any, ...] = (canonical_root, snapshot_hash)
         else:
             runs_query = (
                 "SELECT id, provider_name, provider_version, capability, "
@@ -200,8 +246,16 @@ def _ledger_cross_check(
                 "WHERE project_root = ? "
                 "ORDER BY created_at DESC LIMIT ?"
             )
-            params = (canonical_root, 200)
+            runs_count_sql = (
+                "SELECT COUNT(*) FROM provider_runs "
+                "WHERE project_root = ?"
+            )
+            params = (canonical_root, _LEDGER_RUNS_CAP)
+            count_params = (canonical_root,)
         all_runs = db.conn.execute(runs_query, params).fetchall()
+        runs_enumerated = int(
+            db.conn.execute(runs_count_sql, count_params).fetchone()[0]
+        )
         runs_to_eval = all_runs
         all_recent = runs_to_eval[:int(limit)]
         latest_status_by_cap: Dict[Tuple[str, str], str] = {}
@@ -211,7 +265,18 @@ def _ledger_cross_check(
     except Exception:  # noqa: BLE001
         all_recent = []
         has_failed_runs = True  # Strict Fail-Closed: ledger read exception is unhealthy
-    union = union_evidence(db, repo_root, snapshot_hash=snapshot_hash)
+    if stats_out is not None and runs_enumerated is not None:
+        from .impact_pipeline import CollectionStats
+
+        stats_out["ledger_runs"] = CollectionStats.counted(
+            runs_enumerated, len(all_runs), _LEDGER_RUNS_CAP,
+        ).as_dict()
+    union_stats: Dict[str, Any] = {}
+    union = union_evidence(
+        db, repo_root, snapshot_hash=snapshot_hash, stats_out=union_stats,
+    )
+    if stats_out is not None and union_stats:
+        stats_out["ledger_union"] = union_stats
     errors = [e for e in union if e.get("error")]
     conflicts = [e for e in union if e.get("conflict")]
     # P0 Contract 1: any union entry not fully SUPPORTED is unresolved
@@ -230,6 +295,20 @@ def _ledger_cross_check(
         "unresolved_count": unresolved,
         "provider_capability_ok": (len(errors) == 0 and not has_failed_runs),
     }
+
+
+def _ledger_truncation_sources(
+    stats: Dict[str, Dict[str, Any]],
+) -> List[str]:
+    """Map ledger cross-check stats to SG-107 truncation source ids."""
+    sources: List[str] = []
+    runs = stats.get("ledger_runs")
+    if runs and runs.get("truncated"):
+        sources.append(_LEDGER_RUNS_SOURCE)
+    union = stats.get("ledger_union")
+    if union and union.get("truncated"):
+        sources.append(f"ledger_union_cap_{int(union.get('cap') or 0)}")
+    return sources
 
 def classify_change_risk(*, kind_of_change: str, symbol_kind: str = "",
                          touches_auth: bool = False,
@@ -364,15 +443,37 @@ def scope_receipt(
     row = identity["selected"]
     node_id = str((row or {}).get("id") or (row or {}).get("node_id") or "")
     collection_errors: List[str] = []
-    callers = _edges_of(db, node_id, "in", errors=collection_errors) if node_id else []
-    callees = _edges_of(db, node_id, "out", errors=collection_errors) if node_id else []
+    truncation_sources: List[str] = []
+    direct_edge_stats: List[Dict[str, Any]] = []
+    callers = (
+        _edges_of(db, node_id, "in", errors=collection_errors,
+                  stats_out=direct_edge_stats)
+        if node_id else []
+    )
+    callees = (
+        _edges_of(db, node_id, "out", errors=collection_errors,
+                  stats_out=direct_edge_stats)
+        if node_id else []
+    )
+    if any(s["truncated"] for s in direct_edge_stats):
+        truncation_sources.append(_EDGES_SOURCE)
     transitive: List[Dict[str, Any]] = []
+    # SG-107: fetch one row past the cap so "exactly cap reachable" and
+    # "cut at cap" are distinguishable — the BFS result is still capped
+    # before it enters the receipt.
+    transitive_truncated = False
     if node_id:
         try:
-            transitive = db.explore_node(node_id, depth=depth, limit=200)
+            explored = db.explore_node(
+                node_id, depth=depth, limit=_TRANSITIVE_CAP + 1,
+            )
+            transitive_truncated = len(explored) > _TRANSITIVE_CAP
+            transitive = explored[:_TRANSITIVE_CAP]
         except Exception as exc:  # noqa: BLE001 - degrade, never crash
             transitive = []
             _record_collection_error(collection_errors, "explore_node", exc)
+    if transitive_truncated:
+        truncation_sources.append(_TRANSITIVE_SOURCE)
     affected_files = sorted({
         (row or {}).get("path"),
         *(c["path"] for c in callers + callees),
@@ -385,14 +486,19 @@ def scope_receipt(
     # P0 Contract 2: scope_digest must be present and non-empty.
     # Missing or empty scope_digest indicates unreadable or unbound file -> fail-closed (False).
     snapshot_bound = bool(snapshot_dict.get("scope_digest"))
+    relation_stats: List[Dict[str, Any]] = []
     relations: Dict[str, List[Dict[str, Any]]] = {
         name: (
-            _edges_of(db, node_id, "out", rels, errors=collection_errors)
-            + _edges_of(db, node_id, "in", rels, errors=collection_errors)
+            _edges_of(db, node_id, "out", rels, errors=collection_errors,
+                      stats_out=relation_stats)
+            + _edges_of(db, node_id, "in", rels, errors=collection_errors,
+                        stats_out=relation_stats)
             if node_id else []
         )
         for name, rels in _RELATION_FAMILIES.items()
     }
+    if any(s["truncated"] for s in relation_stats):
+        truncation_sources.append(_EDGES_SOURCE)
     candidate_tests = sorted({
         c["path"] for c in callers
         if _looks_like_test(str(c.get("path") or ""), str(c.get("symbol") or ""))
@@ -400,7 +506,11 @@ def scope_receipt(
         f for f in affected_files if _looks_like_test(f, "")
     })
     cov = repo_coverage(db, repo_root)
-    ledger = _ledger_cross_check(db, repo_root)
+    ledger_stats: Dict[str, Dict[str, Any]] = {}
+    ledger = _ledger_cross_check(db, repo_root, stats_out=ledger_stats)
+    for source in _ledger_truncation_sources(ledger_stats):
+        if source not in truncation_sources:
+            truncation_sources.append(source)
     manifest = build_scope_manifest(db, repo_root, affected_files)
     dynamic_unresolved = bool(dynamic_heavy) or bool(manifest.unsupported_constructs)
     manifest_parser_failures = len(manifest.parser_error_files)
@@ -418,7 +528,21 @@ def scope_receipt(
             if kind_of_change in ("rename", "delete") else
             {"symbol": target, "resolved": row is not None, "blocked": False,
              "reason": "rename gate not applicable"})
-    truncated = len(transitive) >= 200
+    truncated = bool(truncation_sources)
+    # SG-107 per-collector cap accounting (schema 1.4): true enumerated vs
+    # returned for every bounded collection that feeds this receipt.
+    collection_stats: Dict[str, Any] = {
+        "direct_edges": merge_collection_stats(direct_edge_stats, _EDGES_CAP),
+        "relations": merge_collection_stats(relation_stats, _EDGES_CAP),
+        "transitive": {
+            "enumerated_count": len(transitive),
+            "returned_count": len(transitive),
+            "cap": _TRANSITIVE_CAP,
+            "truncated": transitive_truncated,
+            "cursor_exhausted": not transitive_truncated,
+        },
+        **ledger_stats,
+    }
     # Absence claim: the receipt's conclusion would rest on a negative
     # claim (rename/delete gate with 0 callers, or a kind whose rule
     # permits absence assurance) while the graph shows no callers.
@@ -435,6 +559,7 @@ def scope_receipt(
         unresolved_budget=0,
         open_conflicts=int(ledger.get("open_conflicts") or 0),
         truncated=truncated,
+        truncation_sources=tuple(truncation_sources),
         provider_capability_ok=bool(ledger.get("provider_capability_ok", True)),
         absence_claim=absence_claim,
         gate_blocked=bool(gate.get("blocked")),
@@ -472,8 +597,9 @@ def scope_receipt(
         "transitive_impact": {
             "depth": depth,
             "nodes": transitive,
-            "truncated": truncated,
+            "truncated": transitive_truncated,
         },
+        "collection_stats": collection_stats,
         "affected_files": affected_files,
         "candidate_tests": candidate_tests,
         "providers": ledger,
@@ -577,14 +703,30 @@ def diff_impact_receipt(
     # Evidence invalidated by the diff: rows bound to changed paths.
     invalidated: List[Dict[str, Any]] = []
     collection_errors: List[str] = []
+    evidence_stats: List[Dict[str, Any]] = []
     try:
         for path in cited_files:
             norm_fwd = path.replace("\\", "/")
             norm_back = path.replace("/", "\\")
             rows = db.conn.execute(
                 "SELECT id, provider_name, snapshot_hash FROM provider_evidence "
-                "WHERE path = ? OR path = ? LIMIT 50", (norm_fwd, norm_back),
+                f"WHERE path = ? OR path = ? LIMIT {_EVIDENCE_PATH_CAP}", (norm_fwd, norm_back),
             ).fetchall()
+            # SG-107: the per-path LIMIT is cap accounting, not truth.
+            # A short page is exact by construction (COUNT would return
+            # the same), so the twin COUNT only runs when the cap was
+            # actually reached — the cut must not read as "no more rows".
+            enumerated = len(rows)
+            if len(rows) >= _EVIDENCE_PATH_CAP:
+                enumerated = int(db.conn.execute(
+                    "SELECT COUNT(*) FROM provider_evidence "
+                    "WHERE path = ? OR path = ?", (norm_fwd, norm_back),
+                ).fetchone()[0])
+            evidence_stats.append({
+                "enumerated_count": enumerated,
+                "returned_count": len(rows),
+                "truncated": enumerated > len(rows),
+            })
             invalidated.extend(
                 {"id": r[0], "provider": r[1], "snapshot": r[2], "path": path}
                 for r in rows
@@ -605,10 +747,24 @@ def diff_impact_receipt(
     )
     scope_dig = post_ps.get("scope_digest")
     snapshot_bound = bool(scope_dig)
+    ledger_stats: Dict[str, Dict[str, Any]] = {}
     diff_ledger = _ledger_cross_check(
         db, repo_root,
         snapshot_hash=str(scope_dig) if scope_dig is not None else None,
+        stats_out=ledger_stats,
     )
+    # SG-107: every capped collection that actually cut its enumeration
+    # names itself here — facts.truncated is no longer a single anonymous
+    # flag but a list of named sources with per-collection accounting in
+    # the receipt's ``collection_stats`` block.
+    truncation_sources: List[str] = []
+    if changed_files_truncated:
+        truncation_sources.append(_CHANGED_FILES_SOURCE)
+    if any(s["truncated"] for s in evidence_stats):
+        truncation_sources.append(_EVIDENCE_SOURCE)
+    for source in _ledger_truncation_sources(ledger_stats):
+        if source not in truncation_sources:
+            truncation_sources.append(source)
     provider_capability_ok = bool(diff_ledger.get("provider_capability_ok", True))
     manifest = build_scope_manifest(db, repo_root, changed_files)
     dynamic_unresolved = bool(manifest.unsupported_constructs)
@@ -628,15 +784,17 @@ def diff_impact_receipt(
         # an absence claim over the whole graph — "absence" would demand
         # a coverage floor that is only measurable pre-change and make
         # closure permanently dead logic. Enumeration limits still
-        # degrade the decision via truncated/unresolved facts: a diff
+        # degrade the decision via named truncation sources: a diff
         # larger than RECEIPT_CITED_FILE_CAP is measured only on its
-        # newest-claimed 200 paths, so `truncated` degrades to PARTIAL.
+        # newest-claimed 200 paths, and every collection that cut at its
+        # cap names itself in ``truncation_sources`` (SG-107).
         claim_profile="scoped",
         parser_failures=manifest_parser_failures,
         unresolved_count=len(invalidated),
         unresolved_budget=0,
         open_conflicts=0,
-        truncated=changed_files_truncated,
+        truncated=bool(truncation_sources),
+        truncation_sources=tuple(truncation_sources),
         provider_capability_ok=provider_capability_ok,
         absence_claim=False,
         gate_blocked=False,
@@ -688,6 +846,19 @@ def diff_impact_receipt(
         } - {"", "None"}) if test_impacts else [],
 
         "invalidated_evidence": invalidated,
+        "collection_stats": {
+            "changed_files": {
+                "enumerated_count": changed_files_total,
+                "returned_count": len(cited_files),
+                "cap": RECEIPT_CITED_FILE_CAP,
+                "truncated": changed_files_truncated,
+                "cursor_exhausted": not changed_files_truncated,
+            },
+            "invalidated_evidence": merge_collection_stats(
+                evidence_stats, _EVIDENCE_PATH_CAP,
+            ),
+            **ledger_stats,
+        },
         "post_change_snapshot": (
             post_snapshot if isinstance(post_snapshot, dict)
             else post_snapshot.as_dict()
