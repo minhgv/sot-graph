@@ -28,7 +28,7 @@
 > **Both systems optimize for fundamentally different engineering objective functions:**
 >
 > 1. **`GitNexus` is a Code-Intelligence & Semantic Graph Engine:** Focuses on deep Tree-sitter AST extraction, expressive Cypher graph querying via LadybugDB, Leiden community clustering, execution flow tracing, and client-side browser/WASM visualization.
-> 2. **`sot-graph` is an Authoritative Trust, Freshness & Operational Governance Layer:** Focuses on instantaneous freshness synchronization (Filesystem SSOT), on-disk physical verification at query time to eliminate phantom anchors, a zero-daemon embedded SQLite WAL architecture, and strict Read-Only MCP protocol boundaries.
+> 2. **`sot-graph` is a Trust, Freshness & Operational Governance Layer:** Focuses on instantaneous freshness synchronization (Filesystem SSOT), on-disk physical verification at query time to eliminate phantom anchors, a zero-daemon embedded SQLite WAL architecture, and strict Read-Only MCP protocol boundaries.
 
 **Core Architectural Distinction:**  
 - **GitNexus** is designed for **deep semantic relationship analysis and call graph exploration**.
@@ -78,7 +78,7 @@
 
 ### Dimension 6: Agent Integration & MCP Protocol
 - **GitNexus:** Automated integration with Claude Code and Codex via CLI hooks (`PreToolUse` and `PostToolUse`) that automatically enrich prompts with graph context.
-- **sot-graph:** Exposes a standard MCP Stdio Server operating in **Strictly Read-Only Mode** (`mode=ro`). Guarantees that concurrent agent queries can never corrupt or lock the database.
+- **sot-graph:** Exposes a standard MCP Stdio Server operating in **Strictly Read-Only Mode** (`mode=ro`). The tool surface is read-only by construction, so concurrent agent queries cannot lock or corrupt the database through MCP.
 
 ### Dimension 7: Multi-Language & Visualization
 - **GitNexus:** Extensive multi-language support powered by Tree-sitter grammars and an interactive WebAssembly UI for in-browser graph exploration.

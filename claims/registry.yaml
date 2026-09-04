@@ -1,0 +1,187 @@
+# SOT-Graph trust-claim registry (SG-110).
+#
+# Every public trust claim the project makes lives here with its same-commit
+# artifact trace. `sot claims lint` validates three invariants:
+#   1. artifact exists, is git-tracked, provenance commit is an ancestor of
+#      HEAD, and the cited metric still matches the artifact;
+#   2. each `pattern` still appears in every listed doc (docs <-> registry
+#      cannot drift silently);
+#   3. README/AGENTS/docs contain no unhedged absolute phrase ("100%",
+#      "guarantee", "authoritative", ...) unless it is covered by a claim
+#      below, hedged on the same line, or carries a reviewed `allow` entry.
+#
+# Guidance:
+#   - numeric metric claim  -> artifact = benchmark JSON + artifact_field/value
+#   - enforced property     -> artifact = the enforcing test + artifact_symbol
+#   - positioning language  -> prefer rewording; `allow` is the last resort
+#     and every allow entry must keep matching its `contains` text or lint
+#     fails (exemptions cannot rot into blanket passes).
+#
+# skip_files: frozen/point-in-time records that are not living product claims.
+
+claims:
+  # --- search quality (benchmarks/search-quality.json, 48-probe corpus) ---
+  - id: search-exact-row
+    claim: "exact-mode search: Hit@1/5/10 100%, MRR 1.00"
+    files: [docs/BENCHMARKS.md]
+    pattern: "**exact** (bare symbol) | 100% | 100% | 100% | 1.00"
+    artifact: benchmarks/search-quality.json
+    artifact_field: metrics.by_class.exact.hit_at_1
+    artifact_value: 1.0
+    commit: 85fd9ddbb05a1a5b87949ade1c6a5bc8dbf02833
+    capability: search
+    language: multi
+    provider: builtin-ast
+    corpus: "search-quality 48-probe synthetic corpus (digest d8292065…)"
+    ceiling: "advisory: measured on synthetic corpus, top-k=10"
+
+  - id: search-semantic-row
+    claim: "semantic-mode search: Hit@1 75%, Hit@5/10 100%, MRR 0.875"
+    files: [docs/BENCHMARKS.md]
+    pattern: "**semantic** (natural-language → body) | 75% | 100% | 100% | 0.875"
+    artifact: benchmarks/search-quality.json
+    artifact_field: metrics.by_class.semantic.hit_at_1
+    artifact_value: 0.75
+    commit: 85fd9ddbb05a1a5b87949ade1c6a5bc8dbf02833
+    capability: search
+    language: multi
+    provider: builtin-ast
+    corpus: "search-quality 48-probe synthetic corpus (digest d8292065…)"
+    ceiling: "advisory: measured on synthetic corpus, top-k=10"
+
+  - id: search-ambiguous-row
+    claim: "ambiguous-name search: Hit@1/5/10 100%, MRR 1.00"
+    files: [docs/BENCHMARKS.md]
+    pattern: "**ambiguous** (same bare name, 3 modules) | 100% | 100% | 100% | 1.00"
+    artifact: benchmarks/search-quality.json
+    artifact_field: metrics.by_class.ambiguous.hit_at_1
+    artifact_value: 1.0
+    commit: 85fd9ddbb05a1a5b87949ade1c6a5bc8dbf02833
+    capability: search
+    language: multi
+    provider: builtin-ast
+    corpus: "search-quality 48-probe synthetic corpus (digest d8292065…)"
+    ceiling: "advisory: measured on synthetic corpus, top-k=10"
+
+  - id: search-path-qualified-row
+    claim: "path-qualified search: Hit@1/5/10 100%, MRR 1.00"
+    files: [docs/BENCHMARKS.md]
+    pattern: "**path_qualified** (path fragment + symbol) | 100% | 100% | 100% | 1.00"
+    artifact: benchmarks/search-quality.json
+    artifact_field: metrics.by_class.path_qualified.hit_at_1
+    artifact_value: 1.0
+    commit: 85fd9ddbb05a1a5b87949ade1c6a5bc8dbf02833
+    capability: search
+    language: multi
+    provider: builtin-ast
+    corpus: "search-quality 48-probe synthetic corpus (digest d8292065…)"
+    ceiling: "advisory: measured on synthetic corpus, top-k=10"
+
+  - id: search-overall-row
+    claim: "overall search: Hit@1 93.8%, Hit@5/10 100%, MRR 0.969"
+    files: [docs/BENCHMARKS.md]
+    pattern: "**overall** | 93.8% | 100% | 100% | 0.969"
+    artifact: benchmarks/search-quality.json
+    artifact_field: metrics.overall.hit_at_1
+    artifact_value: 0.9375
+    commit: 85fd9ddbb05a1a5b87949ade1c6a5bc8dbf02833
+    capability: search
+    language: multi
+    provider: builtin-ast
+    corpus: "search-quality 48-probe synthetic corpus (digest d8292065…)"
+    ceiling: "advisory: measured on synthetic corpus, top-k=10"
+
+  - id: capability-hit-rates
+    claim: "search top-k precision: Hit@1 93.8%, Hit@5 100%, Hit@10 100%"
+    files: [docs/CAPABILITY_MATRIX.md]
+    pattern: "Hit@1: 93.8%, Hit@5: 100%, Hit@10: 100%"
+    artifact: benchmarks/search-quality.json
+    artifact_field: metrics.overall.hit_at_1
+    artifact_value: 0.9375
+    commit: 85fd9ddbb05a1a5b87949ade1c6a5bc8dbf02833
+    capability: search
+    language: multi
+    provider: builtin-ast
+    corpus: "search-quality 48-probe synthetic corpus (digest d8292065…)"
+    ceiling: "advisory: measured on synthetic corpus, top-k=10"
+
+  # --- builtin oracle (benchmarks/oracle/builtin-baseline.json) ---
+  - id: builtin-oracle-f1
+    claim: "builtin AST oracle: aggregate F1 ≈ 99.7% (TP 1007 / FN 5 / FP 2)"
+    files: [docs/CAPABILITY_MATRIX.md]
+    pattern: "aggregate F1 ≈ 99.7% (TP 1007 / FN 5 / FP 2)"
+    artifact: benchmarks/oracle/builtin-baseline.json
+    artifact_field: builtin.counts.f1
+    artifact_value: 0.9965
+    commit: b09548d29510087d7693fd4a598c1b3d07fab9fc
+    capability: relation-extraction
+    language: "go/java/python/rust/typescript"
+    provider: builtin-ast
+    corpus: "oracle-corpus-v1 (236 files, digest 23c0e29c…)"
+    ceiling: "advisory: static calls/extends/implements only, synthetic corpus"
+
+  - id: builtin-oracle-go-f1
+    claim: "Go relation extraction: 100% F1 on oracle corpus"
+    files: [docs/CAPABILITY_MATRIX.md]
+    pattern: "**Go** | SOT Builtin AST | Verified | Verified (100% F1)"
+    artifact: benchmarks/oracle/builtin-baseline.json
+    artifact_field: builtin.per_language.go.overall.f1
+    artifact_value: 1.0
+    commit: b09548d29510087d7693fd4a598c1b3d07fab9fc
+    capability: relation-extraction
+    language: go
+    provider: builtin-ast
+    corpus: "oracle-corpus-v1 (236 files, digest 23c0e29c…)"
+    ceiling: "advisory: static relations only, synthetic Go fixtures"
+
+  # --- diff-impact oracle (benchmarks/diff-impact-oracle.json) ---
+  - id: diff-impact-oracle-macro
+    claim: "diff-impact oracle: macro symbols/tests/files P/R/F1 1.00 across six scripted scenarios"
+    files: [docs/BENCHMARKS.md]
+    pattern: "| modify_body | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | exact |"
+    artifact: benchmarks/diff-impact-oracle.json
+    artifact_field: metrics.macro_f1
+    artifact_value: 1.0
+    commit: 85fd9ddbb05a1a5b87949ade1c6a5bc8dbf02833
+    capability: diff-impact
+    language: python
+    provider: builtin-ast
+    corpus: "diff-impact synthetic git repo (9 files, 9 planted edges)"
+    ceiling: "advisory: ground truth known by construction, synthetic repo"
+
+  # --- enforced properties (artifact = the enforcing test) ---
+  - id: root-isolation-guarantee
+    claim: "run recording and evidence queries resolve realpath(project_root), isolating projects (multi-tenant safety)"
+    files: [README.md]
+    pattern: "guaranteeing strict multi-tenant isolation"
+    artifact: tests/test_sg109_generation_invalidation.py
+    artifact_symbol: "def test_project_isolation"
+    commit: 10138cdd8dd15c676caa093da532b65c89ce400d
+    capability: provider-ingest
+    language: multi
+    provider: all
+    corpus: "unit fixtures"
+    ceiling: "test-enforced property: evidence supersede never crosses project roots"
+
+allow:
+  - file: docs/IMPACT_ASSESSMENT_COMPARISON.md
+    contains: "(100% Local)"
+    reason: "describes a competitor column's locality, not a sot-graph trust claim"
+  - file: docs/QA_GUIDE.md
+    contains: "To guarantee *Determinism*"
+    reason: "design rationale for the single-writer reconciler architecture, not an output-trust claim"
+  - file: docs/QA_GUIDE.md
+    contains: "to guarantee ACID compliance"
+    reason: "example `sot insert` payload embedded in documentation text"
+  - file: docs/QA_GUIDE.md
+    contains: "authoritative engineering guideline"
+    reason: "guidance on reading user-authored knowledge notes, not engine output trust"
+
+skip_files:
+  # Frozen release records: immutable history, not living product claims.
+  - docs/RELEASE_NOTES_v0.3.0.md
+  - docs/RELEASE_NOTES_v0.3.1.md
+  - docs/RELEASE_NOTES_v0.3.2.md
+  # Point-in-time internal audits that quote code/docs verbatim.
+  - docs/ARCHITECTURE_REPORT.md
+  - docs/MODULE_AUDIT_REPORT.md

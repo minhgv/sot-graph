@@ -1,6 +1,6 @@
 # Applying sot-graph Across the AI-Assisted Software Development Life Cycle (AI SDLC)
 
-> **Comprehensive Guide to Integrating `sot-graph` as the Authoritative Single Source of Truth Knowledge Layer for AI Coding Agents.**  
+> **Comprehensive Guide to Integrating `sot-graph` as the Single Source of Truth Knowledge Layer for AI Coding Agents.**  
 > *Eliminate Phantom Anchors, prevent path hallucinations, eradicate Cold Start Redundancy, and constrain Blast Radius during active coding loops.*
 
 ---
@@ -81,7 +81,7 @@ However, contemporary AI coding agents suffer from **3 Critical Failure Modes**:
    ```bash
    ./bin/sot search "jwt token validation role"
    ```
-   The engine responds immediately (< 1.2ms) with advisory **Trust Verdicts**:
+   The engine responds in milliseconds with advisory **Trust Verdicts**:
    - `[STRONG]`: File physically exists on disk and contains ≥ 50% query keyword coverage (Agent can immediately use/import).
    - `[WEAK]`: Semantic or header match (Agent should inspect before implementing).
 2. **Architecture Scoping via Louvain Communities (`sot cluster` / `sot report`):**
@@ -194,7 +194,7 @@ However, contemporary AI coding agents suffer from **3 Critical Failure Modes**:
      ./bin/sot clean --all --yes
      ```
 2. **B-Tree Optimization & WAL Checkpointing (`sot vacuum`):**
-   - Restructures SQLite FTS5 storage and defragments pages to guarantee sub-**1.2ms** query latency:
+   - Restructures SQLite FTS5 storage and defragments pages to keep bounded-query latency low (measured p50 ≈ 49 ms on a 5,000-file corpus; artifact `benchmarks/performance_baseline.json`):
      ```bash
      ./bin/sot vacuum
      ```
@@ -208,9 +208,9 @@ However, contemporary AI coding agents suffer from **3 Critical Failure Modes**:
 | Evaluation Criterion | Traditional AI SDLC (Without sot-graph) | AI SDLC with sot-graph |
 | :--- | :--- | :--- |
 | **Path Grounding Accuracy** | **Poor (Prone to Hallucinations)**: Agents guess stale paths or write code against deleted files. | **High (Span-Verified)**: Every returned node is physically verified on disk by `TrustVerifier`; verdicts are advisory and scope-bounded. |
-| **Code Reuse Capability** | **Low**: Frequently reinvents existing utilities (Cold Start Redundancy). | **High**: `sot search` with FTS5 BM25 locates existing utilities in < 1.2ms. |
+| **Code Reuse Capability** | **Low**: Frequently reinvents existing utilities (Cold Start Redundancy). | **High**: `sot search` with FTS5 BM25 locates existing utilities in milliseconds (in-process SQLite; measured p50 ≈ 49 ms at 5,000 files). |
 | **Refactoring Control** | **Blind Edits**: Modifies only local files, unaware of broken indirect callers. | **Comprehensive**: Analyzes **2-hop Blast Radius** and flags **God Nodes** prior to edits. |
-| **Context Retrieval Latency** | **Slow (10s - 30s)**: Requires reading entire files or querying remote Vector DBs. | **Ultra-Fast (~1.17ms P95)**: Queries local in-process SQLite FTS5 directly. |
+| **Context Retrieval Latency** | **Slow (10s - 30s)**: Requires reading entire files or querying remote Vector DBs. | **Fast (measured p95 ≈ 50 ms at 5,000 files)**: Queries local in-process SQLite FTS5 directly. |
 | **Infrastructure Overhead** | **Heavy**: Demands Docker, Vector DBs, background daemons consuming 1-2GB RAM. | **Zero-Daemon (< 25MB RAM)**: Embedded in-process Python/SQLite CLI & MCP server. |
 | **Self-Healing Capabilities** | **None**: Directory moves (`mv`) completely break vector/agent memory indices. | **Automated**: `Auto-Rehome` tracks moved files; `Auto-Purge` cleans dead paths. |
 
@@ -324,7 +324,7 @@ A fundamental operational question: **"When integrating sot-graph into a codebas
 
 Unlike cloud RAG or vector database solutions (which consume continuous API credits for LLM summarization and embedding vectors):
 
-1. **AST Parsing & Extraction:** 100% local CPU processing via Tree-sitter / Regex → **0 Tokens**.
+1. **AST Parsing & Extraction:** Fully local CPU processing via Tree-sitter / Regex → **0 Tokens**.
 2. **Indexing & SHA-256 Hashing:** All hash tables and SQLite FTS5 inverted indices run in-process → **0 Tokens**.
 3. **Graph Algorithms & Clustering:** Louvain community detection, Modularity Q, God Node cutoff (μ + 1.5σ), and BFS 2-hop traversals execute in RAM → **0 Tokens**.
 4. **Zero Embedding Cost:** No dependency on or billing from external embedding APIs (e.g., `text-embedding-3-small` or `ada-002`).
@@ -368,7 +368,7 @@ Consider a typical real-world development task: **"Add Role-Based Access Control
 │    -> Consumes 45,000 tokens reading logs.  │    -> Consumes 600 tokens.               │
 │                                             │                                          │
 │ 4. Path hallucination (Phantom Anchor)      │ 4. Auto-Rehome & Auto-Purge eliminate    │
-│    on a recently renamed file               │    100% of dead paths                    │
+│    on a recently renamed file               │    dead paths (rehome/purge)              │
 │    -> Consumes 20,000 tokens retrying.      │    -> Consumes 0 retry tokens.           │
 ├─────────────────────────────────────────────┼──────────────────────────────────────────┤
 │ TOTAL CONSUMPTION: ~106,500 TOKENS          │ TOTAL CONSUMPTION: ~1,250 TOKENS         │

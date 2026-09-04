@@ -13,12 +13,14 @@ echo "== ruff (core modules)"
 uv run ruff check src/sot_graph/assurance/ src/sot_graph/providers/ \
     src/sot_graph/diff_impact.py src/sot_graph/db.py src/sot_graph/snapshot.py \
     src/sot_graph/providers_registry.py src/sot_graph/mcp_service.py src/sot_graph/mcp_server.py \
+    src/sot_graph/claims.py \
     || fail "ruff"
 
 echo "== pyright (core modules)"
 uv run pyright src/sot_graph/assurance/ src/sot_graph/providers/ \
     src/sot_graph/diff_impact.py src/sot_graph/db.py src/sot_graph/snapshot.py \
     src/sot_graph/providers_registry.py src/sot_graph/mcp_service.py src/sot_graph/mcp_server.py \
+    src/sot_graph/claims.py \
     || fail "pyright"
 
 echo "== coverage floor (core >= 85%, receipts >= 90%)"

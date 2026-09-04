@@ -2229,6 +2229,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_diff.add_argument("--format", default=None,
                         choices=["text", "markdown", "json", "github"],
                         help="Output format: text (legacy CLI report), markdown (pure report body), json (envelope), github (PR-comment-safe collapsed sections; R4). Default: text, or json with --json")
+    # claims (docs trust-claim linter; no database required)
+    p_claims = subparsers.add_parser("claims", help="Lint public trust claims in docs against the claim registry (SG-110)")
+    claims_subs = p_claims.add_subparsers(dest="claims_command", required=True)
+    p_claims_lint = claims_subs.add_parser("lint", help="Validate claims/registry.yaml: artifact traces, docs sync, unregistered absolutes")
+    p_claims_lint.add_argument("--json", action="store_true", help="Output the raw JSON report")
+    p_claims_lint.add_argument("--registry", default=None, help="Path to registry.yaml (default: <root>/claims/registry.yaml)")
     p_diff.add_argument("--gate", action="store_true",
                         help="Exit 1 unless the receipt assurance status is in the ASSURED set (ASSURED_WITHIN_SCOPE); default: advisory mode, always exit 0")
     p_diff.add_argument("--provider", default="builtin",
@@ -2284,6 +2290,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # Keep the optional SDK out of normal CLI startup/import paths.
         from sot_graph.mcp_server import main as mcp_main
         return mcp_main(["--root", root, "--db", db_path])
+    if args.command == "claims":
+        # Docs/artifact validation: no database required, so it stays
+        # runnable on docs-only PRs where no .sot index exists.
+        import json as _json
+        from pathlib import Path as _Path
+        from sot_graph.claims import lint_claims, format_report
+        registry = getattr(args, "registry", None)
+        report = lint_claims(
+            _Path(root),
+            _Path(registry) if registry else None,
+        )
+        if getattr(args, "json", False):
+            print(_json.dumps(report, indent=2, sort_keys=True))
+        else:
+            print(format_report(report))
+        return 0 if report["ok"] else 1
     try:
         db = Database(db_path)
     except (LockBusy, RuntimeError) as exc:

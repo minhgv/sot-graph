@@ -1,0 +1,44 @@
+name: Claims Lint
+
+# SG-110: the main CI workflow paths-ignores **.md and docs/**, so docs-only
+# PRs run no validation at all. Trust claims (metrics, guarantees, ceilings)
+# must be validated against the claim registry and its artifact traces at the
+# exact commit that carries them — including docs-only changes. This workflow
+# deliberately does NOT ignore Markdown paths.
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main, master ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  claims:
+    name: Trust-claim registry lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Registry provenance checks verify that cited commits are
+          # ancestors of HEAD; shallow clones cannot answer that.
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Lint trust claims (registry + docs corpus)
+        run: uv run sot claims lint
+
+      - name: Claims linter test suite
+        run: uv run pytest tests/test_sg110_claims.py -q

@@ -81,7 +81,7 @@ Evaluated against the frozen 234-file multi-language test corpus (`oracle-corpus
 | **Total / Overall** | **1,012** | **110** | **1,004** | **2** | **8** | **99.8%** | **99.2%** | **99.5%** |
 
 - **True Negatives**: 109 / 110 (99.1% rejection of forbidden/adversarial cross-scope edges).
-- **Search Top-K Precision**: Hit@1: 60%, Hit@5: 75%, Hit@10: 100%.
+- **Search Top-K Precision (48-probe corpus, advisory)**: Hit@1: 93.8%, Hit@5: 100%, Hit@10: 100% (measured; artifact `benchmarks/search-quality.json`).
 
 ---
 
