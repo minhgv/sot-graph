@@ -169,7 +169,7 @@ def calculate_fee(amount: int) -> int:
             assert receipt["assurance"]["status"] in ("ASSURED_WITHIN_SCOPE", "PARTIAL", "STALE")
             # SG-107 bumped the receipt schema to 1.4 (collection_stats + truncation_sources);
             # SG-108 bumped it to 1.5 (scope_universe + exhaustion facts).
-            assert receipt["schema_version"] in ("1.1", "1.2", "1.3", "1.4", "1.5", "2.0")
+            assert receipt["schema_version"] in ("1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "2.0")
             assert "post_change_snapshot" in receipt
             assert receipt["post_change_snapshot"]["scope_digest"] is not None
             assert len(receipt["post_change_snapshot"]["content_digests"]) >= 1

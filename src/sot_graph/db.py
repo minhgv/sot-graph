@@ -2912,7 +2912,56 @@ class Database:
                 "duplicate provider_evidence id in batch; evidence ids are "
                 "unique forever — drop explicit ids to auto-generate fresh ones"
             ) from exc
+        # SG-109: append-only supersede transition. Evidence identity is
+        # project root + PROVIDER + canonical subject/relation on a path;
+        # a fresh ingest of a path is a newer generation of that
+        # identity, so prior LIVE rows of the SAME provider on the same
+        # paths (same project, status-ok runs) transition to dead with
+        # a recorded reason. Cross-provider evidence must coexist — the
+        # union federates providers precisely to surface conflicts, so
+        # a supersede must never cross provider boundaries. The guard
+        # makes it idempotent and append-only: only invalidated_at IS
+        # NULL rows move (once), the reason of the FIRST transition is
+        # never overwritten, and rows are never deleted — old
+        # generations stop supporting claims but stay countable
+        # (receipts expose them via dead-count visibility).
+        self._supersede_evidence_for_run(run_id, now)
         return len(rows)
+
+    def _supersede_evidence_for_run(self, run_id: str, now: int) -> int:
+        """Invalidate prior live same-provider evidence on re-ingested paths.
+
+        Returns the number of rows transitioned (0 when the run is
+        unbound to a project — no project root means the supersede
+        cannot be scoped safely, so it is skipped rather than guessed).
+        """
+        run_row = self.conn.execute(
+            "SELECT project_root, provider_name FROM provider_runs "
+            "WHERE id = ?", (run_id,),
+        ).fetchone()
+        project_root = run_row[0] if run_row else None
+        provider_name = run_row[1] if run_row else None
+        if not project_root or not provider_name:
+            return 0
+        paths = [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT path FROM provider_evidence WHERE run_id = ?",
+            (run_id,),
+        ).fetchall()]
+        if not paths:
+            return 0
+        placeholders = ",".join("?" for _ in paths)
+        reason = f"superseded_by_run:{run_id}"
+        cursor = self.conn.execute(
+            "UPDATE provider_evidence SET invalidated_at = ?, "
+            "invalidation_reason = ? "
+            "WHERE invalidated_at IS NULL AND run_id != ? "
+            "AND provider_name = ? "
+            "AND run_id IN (SELECT id FROM provider_runs "
+            "               WHERE project_root = ? AND status = 'ok') "
+            f"AND path IN ({placeholders})",
+            [now, reason, run_id, provider_name, project_root, *paths],
+        )
+        return int(cursor.rowcount or 0)
 
     insert_provider_evidence = record_provider_evidence
 

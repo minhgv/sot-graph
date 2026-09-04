@@ -54,7 +54,7 @@ __all__ = [
     "RECEIPT_SCHEMA_VERSION",
     "RECEIPT_CITED_FILE_CAP",
 ]
-RECEIPT_SCHEMA_VERSION = "1.5"  # minor bump: 1.1 added canonical status vocabulary (P0); 1.2 added changed_files_total/changed_files_truncated (R5); 1.3 added request/projection blocks + machine-readable collection-error warnings (SG-105); 1.4 added per-collector collection_stats cap accounting + facts.truncation_sources reason codes (SG-107); 1.5 added scope_universe block + enumeration/parser-capability exhaustion facts (SG-108)
+RECEIPT_SCHEMA_VERSION = "1.6"  # minor bump: 1.1 added canonical status vocabulary (P0); 1.2 added changed_files_total/changed_files_truncated (R5); 1.3 added request/projection blocks + machine-readable collection-error warnings (SG-105); 1.4 added per-collector collection_stats cap accounting + facts.truncation_sources reason codes (SG-107); 1.5 added scope_universe block + enumeration/parser-capability exhaustion facts (SG-108); 1.6 made the evidence join generation-correct (project-bound, live-only) + real open_conflicts from the union + invalidated_evidence_dead_count visibility (SG-109)
 
 #: Bounded-work cap on how many changed files a post-change receipt will
 #: measure (journal staleness, evidence invalidation, snapshot citation).
@@ -735,17 +735,33 @@ def diff_impact_receipt(
         repo_root, role="post_change",
         cited_paths=cited_files or None,
     )
-    # Evidence invalidated by the diff: rows bound to changed paths.
+    # Evidence invalidated by the diff: live rows bound to changed paths
+    # (SG-109: the join is generation-correct — status-ok runs of THIS
+    # project only, dead evidence excluded from support but never
+    # silently vanished: already-dead rows on the same paths stay
+    # counted in invalidated_evidence_dead_count).
     invalidated: List[Dict[str, Any]] = []
     collection_errors: List[str] = []
     evidence_stats: List[Dict[str, Any]] = []
+    dead_evidence_count = 0
+    canonical_root = os.path.realpath(repo_root) if repo_root else ""
     try:
         for path in cited_files:
             norm_fwd = path.replace("\\", "/")
             norm_back = path.replace("/", "\\")
+            live_where = (
+                "FROM provider_evidence e JOIN provider_runs r "
+                "ON e.run_id = r.id "
+                "WHERE (e.path = ? OR e.path = ?) "
+                "AND r.status = 'ok' AND r.project_root = ? "
+                "AND e.invalidated_at IS NULL"
+            )
+            live_params: List[Any] = [norm_fwd, norm_back, canonical_root]
             rows = db.conn.execute(
-                "SELECT id, provider_name, snapshot_hash FROM provider_evidence "
-                f"WHERE path = ? OR path = ? LIMIT {_EVIDENCE_PATH_CAP}", (norm_fwd, norm_back),
+                "SELECT e.id, e.provider_name, e.snapshot_hash "
+                + live_where
+                + f" LIMIT {_EVIDENCE_PATH_CAP}",
+                live_params,
             ).fetchall()
             # SG-107: the per-path LIMIT is cap accounting, not truth.
             # A short page is exact by construction (COUNT would return
@@ -754,9 +770,19 @@ def diff_impact_receipt(
             enumerated = len(rows)
             if len(rows) >= _EVIDENCE_PATH_CAP:
                 enumerated = int(db.conn.execute(
-                    "SELECT COUNT(*) FROM provider_evidence "
-                    "WHERE path = ? OR path = ?", (norm_fwd, norm_back),
+                    f"SELECT COUNT(*) {live_where}", live_params,
                 ).fetchone()[0])
+            # SG-109 visibility: rows already dead on this path (older
+            # generations superseded at ingest) are counted, not hidden —
+            # old evidence must neither support the claim nor vanish.
+            dead_evidence_count += int(db.conn.execute(
+                "SELECT COUNT(*) FROM provider_evidence e "
+                "JOIN provider_runs r ON e.run_id = r.id "
+                "WHERE (e.path = ? OR e.path = ?) "
+                "AND r.status = 'ok' AND r.project_root = ? "
+                "AND e.invalidated_at IS NOT NULL",
+                (norm_fwd, norm_back, canonical_root),
+            ).fetchone()[0])
             evidence_stats.append({
                 "enumerated_count": enumerated,
                 "returned_count": len(rows),
@@ -827,7 +853,10 @@ def diff_impact_receipt(
         parser_failures=manifest_parser_failures,
         unresolved_count=len(invalidated),
         unresolved_budget=0,
-        open_conflicts=0,
+        # SG-109: real conflict join — provider conflicts from the
+        # evidence union surface here (decide() degrades CONFLICTED);
+        # the historical hard-coded 0 hid live contradictions.
+        open_conflicts=int(diff_ledger.get("open_conflicts") or 0),
         truncated=bool(truncation_sources),
         truncation_sources=tuple(truncation_sources),
         provider_capability_ok=provider_capability_ok,
@@ -881,6 +910,7 @@ def diff_impact_receipt(
         } - {"", "None"}) if test_impacts else [],
 
         "invalidated_evidence": invalidated,
+        "invalidated_evidence_dead_count": dead_evidence_count,
         "collection_stats": {
             "changed_files": {
                 "enumerated_count": changed_files_total,
