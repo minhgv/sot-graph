@@ -1,4 +1,4 @@
-# Agent Rules & Protocols (SOT-Graph SSOT v0.3.1)
+# Agent Rules & Protocols (SOT-Graph SSOT v0.3.2)
 
 ## SOT-Graph Knowledge Reuse & Multi-Provider Protocol
 
@@ -21,7 +21,7 @@ Before implementing any new feature, fix, or refactoring:
    `sot insert --title "<topic>" --body "<details>" --keywords "k1,k2"`
    *(User notes are permanently preserved even when resetting disposable graph indexes).*
 
-# SOT-Graph Single Source of Truth Protocols & Rules for Agents (SSOT v0.3.1)
+# SOT-Graph Single Source of Truth Protocols & Rules for Agents (SSOT v0.3.2)
 
 ## 1. Filesystem as Single Source of Truth (SSOT)
 - The physical filesystem is the ground truth. The SOT knowledge graph (`.sot/sot.db`) is a verified, scope-bounded projection of it (Schema v8) — re-verify against disk before acting on any verdict.
