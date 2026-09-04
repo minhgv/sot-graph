@@ -36,6 +36,7 @@ Self-check subcommand proves the matcher discriminates wrong-target edges.
 Usage:
   python3 scripts/sot_evaluator.py --output benchmarks/oracle/builtin-baseline.json
   python3 scripts/sot_evaluator.py --selfcheck
+  python3 scripts/sot_evaluator.py --gate   # full run + regression gate vs baseline
 """
 
 from __future__ import annotations
@@ -2140,6 +2141,192 @@ def run_selfcheck() -> List[str]:
 
 
 # ---------------------------------------------------------------------------
+# Gate mode: exact-oracle metric regression gate (SG-106)
+# ---------------------------------------------------------------------------
+
+GATE_TOLERANCE = 0.005  # absolute P/R slack below a baseline metric
+
+
+def normalize_corpus_path(path: object, repo_id: str = CORPUS_REPO_ID) -> object:
+    """Strip everything up to and including the corpus root dir name.
+
+    "/var/.../T/tmpXXX/oracle-corpus-v1/py_pkg/core/math_ops.py" becomes
+    "py_pkg/core/math_ops.py". Paths that do not contain the corpus root
+    marker (already corpus-relative paths, fqn strings, digests) are
+    returned unchanged, so the transform is idempotent and safe to apply
+    to legacy baselines and fresh payloads alike.
+    """
+    if not isinstance(path, str) or not path:
+        return path
+    for marker in (repo_id + "/", repo_id + "\\"):
+        idx = path.rfind(marker)
+        if idx != -1:
+            return path[idx + len(marker):].replace("\\", "/")
+    return path
+
+
+def normalize_payload_paths(payload: object, repo_id: str = CORPUS_REPO_ID) -> object:
+    """Recursively corpus-relative-ize every path string in a payload."""
+    if isinstance(payload, dict):
+        return {k: normalize_payload_paths(v, repo_id) for k, v in payload.items()}
+    if isinstance(payload, list):
+        return [normalize_payload_paths(v, repo_id) for v in payload]
+    return normalize_corpus_path(payload, repo_id)
+
+
+def load_baseline_doc(path: str) -> Dict[str, object]:
+    """Load a committed baseline, normalizing legacy absolute paths."""
+    with open(path, "r", encoding="utf-8") as fh:
+        doc = json.load(fh)
+    return normalize_payload_paths(doc)  # type: ignore[return-value]
+
+
+def _bucket_metrics(slot: Dict[str, object]) -> Tuple[float, float]:
+    tp = float(slot.get("tp", 0))
+    fp = float(slot.get("fp", 0))
+    fn = float(slot.get("fn", 0))
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    return precision, recall
+
+
+def evaluate_gate(
+    baseline: Dict[str, object],
+    fresh: Dict[str, object],
+    tolerance: float = GATE_TOLERANCE,
+    min_precision: Optional[float] = None,
+    min_recall: Optional[float] = None,
+) -> Tuple[bool, List[str], List[str]]:
+    """Compare a fresh oracle payload against the committed baseline.
+
+    Fails when:
+      (a) overall or per language×relation precision/recall drops below
+          (baseline metric − tolerance) — overridable for the overall
+          metric via min_precision / min_recall;
+      (b) a bucket that was clean in the baseline (fp == 0 and fn == 0)
+          now shows errors, or a brand-new bucket shows errors.
+    Both payloads must already be path-normalized (normalize_payload_paths).
+    Returns (passed, failure_reasons, report_lines).
+    """
+    failures: List[str] = []
+    lines: List[str] = []
+    base_builtin = baseline.get("builtin", {})
+    fresh_builtin = fresh.get("builtin", {})
+
+    # --- (a) overall precision/recall floors ---
+    base_counts = base_builtin.get("counts", {})  # type: ignore[union-attr]
+    fresh_counts = fresh_builtin.get("counts", {})  # type: ignore[union-attr]
+    overall_p_floor = (min_precision if min_precision is not None
+                       else float(base_counts.get("precision", 0.0)) - tolerance)
+    overall_r_floor = (min_recall if min_recall is not None
+                       else float(base_counts.get("recall", 0.0)) - tolerance)
+    overall_p = float(fresh_counts.get("precision", 0.0))
+    overall_r = float(fresh_counts.get("recall", 0.0))
+    p_ok, r_ok = overall_p >= overall_p_floor, overall_r >= overall_r_floor
+    lines.append(
+        f"overall              P {overall_p:.4f} (floor {overall_p_floor:.4f}) "
+        f"{'PASS' if p_ok else 'FAIL'}   R {overall_r:.4f} (floor {overall_r_floor:.4f}) "
+        f"{'PASS' if r_ok else 'FAIL'}"
+    )
+    if not p_ok:
+        failures.append(
+            f"overall precision {overall_p:.4f} below floor {overall_p_floor:.4f}"
+        )
+    if not r_ok:
+        failures.append(
+            f"overall recall {overall_r:.4f} below floor {overall_r_floor:.4f}"
+        )
+
+    # --- per language×relation buckets (incl. per-language "overall") ---
+    base_langs = base_builtin.get("per_language", {})  # type: ignore[union-attr]
+    fresh_langs = fresh_builtin.get("per_language", {})  # type: ignore[union-attr]
+    for lang in sorted(set(base_langs) | set(fresh_langs)):  # type: ignore[union-attr]
+        base_rels = base_langs.get(lang, {})  # type: ignore[union-attr]
+        fresh_rels = fresh_langs.get(lang, {})  # type: ignore[union-attr]
+        for rel in sorted(set(base_rels) | set(fresh_rels)):
+            base_slot = base_rels.get(rel)  # type: ignore[union-attr]
+            fresh_slot = fresh_rels.get(rel)  # type: ignore[union-attr]
+            name = f"{lang}/{rel}"
+            if fresh_slot is None:
+                failures.append(f"{name}: bucket missing from fresh run")
+                lines.append(f"{name:20s} MISSING")
+                continue
+            fp_n = int(fresh_slot.get("fp", 0))
+            fn_n = int(fresh_slot.get("fn", 0))
+            if base_slot is None:
+                if fp_n or fn_n:
+                    failures.append(
+                        f"{name}: new error bucket (fp={fp_n}, fn={fn_n}) "
+                        "absent from baseline"
+                    )
+                    lines.append(
+                        f"{name:20s} NEW-ERRORS fp {fp_n}  fn {fn_n}  FAIL"
+                    )
+                else:
+                    lines.append(f"{name:20s} NEW-CLEAN fp 0  fn 0  PASS")
+                continue
+            base_fp = int(base_slot.get("fp", 0))
+            base_fn = int(base_slot.get("fn", 0))
+            clean_ok = not (base_fp == 0 and base_fn == 0 and (fp_n or fn_n))
+            if not clean_ok:
+                failures.append(
+                    f"{name}: previously clean bucket now has errors "
+                    f"(fp={fp_n}, fn={fn_n})"
+                )
+            base_p, base_r = _bucket_metrics(base_slot)
+            fresh_p, fresh_r = _bucket_metrics(fresh_slot)
+            p_floor = (base_p - tolerance) if (base_p or base_slot.get("fp", 0)) else 0.0
+            r_floor = (base_r - tolerance) if (base_r or base_slot.get("fn", 0)) else 0.0
+            p_ok = fresh_p >= p_floor
+            r_ok = fresh_r >= r_floor
+            if not p_ok:
+                failures.append(
+                    f"{name}: precision {fresh_p:.4f} below floor {p_floor:.4f}"
+                )
+            if not r_ok:
+                failures.append(
+                    f"{name}: recall {fresh_r:.4f} below floor {r_floor:.4f}"
+                )
+            verdict = "PASS" if (clean_ok and p_ok and r_ok) else "FAIL"
+            lines.append(
+                f"{name:20s} P {fresh_p:.4f} (floor {p_floor:.4f}) "
+                f"{'PASS' if p_ok else 'FAIL'}   "
+                f"R {fresh_r:.4f} (floor {r_floor:.4f}) "
+                f"{'PASS' if r_ok else 'FAIL'}   "
+                f"fp {fp_n}  fn {fn_n}  {verdict}"
+            )
+
+    return (not failures), failures, lines
+
+
+def run_gate(
+    baseline: Dict[str, object],
+    fresh: Dict[str, object],
+    tolerance: float = GATE_TOLERANCE,
+    min_precision: Optional[float] = None,
+    min_recall: Optional[float] = None,
+) -> int:
+    """Print the compact gate report; returns process exit code (0 pass, 1 fail)."""
+    passed, failures, lines = evaluate_gate(
+        baseline, fresh, tolerance, min_precision, min_recall
+    )
+    print()
+    print("=" * 72)
+    print("EXACT-ORACLE METRIC GATE (fresh vs committed baseline)")
+    print("=" * 72)
+    for line in lines:
+        print(f"  {line}")
+    print("-" * 72)
+    if passed:
+        print("gate verdict: PASS (no metric regression beyond budget)")
+        return 0
+    print(f"gate verdict: FAIL ({len(failures)} violation(s))")
+    for f_ in failures:
+        print(f"  ! {f_}")
+    return 1
+
+
+# ---------------------------------------------------------------------------
 # Suite entry
 # ---------------------------------------------------------------------------
 
@@ -2353,6 +2540,9 @@ def run_benchmark_suite(output_path: Optional[str] = None, corpus_dir: Optional[
             "builtin": report.as_dict(),
             "search_topk": search,
         }
+        # Corpus-relative paths everywhere (search top3 etc. carry absolute
+        # DB paths); baselines stay OS/machine-independent.
+        payload = normalize_payload_paths(payload)  # type: ignore[assignment]
 
         print()
         print("=" * 72)
@@ -2399,6 +2589,19 @@ def main() -> None:
                              "against the same corpus (exploratory sample)")
     parser.add_argument("--selfcheck", action="store_true",
                         help="Run oracle discrimination self-checks and exit")
+    parser.add_argument("--gate", action="store_true",
+                        help="After the run, compare fresh metrics against the committed "
+                             "baseline and exit 1 on any regression beyond budget")
+    parser.add_argument("--baseline", metavar="PATH",
+                        default=str(Path(__file__).resolve().parent.parent
+                                    / "benchmarks" / "oracle" / "builtin-baseline.json"),
+                        help="Baseline JSON to gate against (default: committed builtin baseline)")
+    parser.add_argument("--min-precision", type=float, metavar="F",
+                        help="Override the overall precision floor")
+    parser.add_argument("--min-recall", type=float, metavar="F",
+                        help="Override the overall recall floor")
+    parser.add_argument("--tolerance", type=float, default=GATE_TOLERANCE, metavar="F",
+                        help="Absolute per-bucket P/R slack below baseline (default 0.005)")
     args = parser.parse_args()
 
     if args.selfcheck:
@@ -2414,7 +2617,16 @@ def main() -> None:
     if args.cbm_probe:
         run_cbm_probe(args.cbm_probe, args.output, args.corpus_dir)
         sys.exit(0)
-    run_benchmark_suite(args.output, args.corpus_dir)
+    payload = run_benchmark_suite(args.output, args.corpus_dir)
+    if args.gate:
+        baseline = load_baseline_doc(args.baseline)
+        code = run_gate(
+            baseline, payload,
+            tolerance=args.tolerance,
+            min_precision=args.min_precision,
+            min_recall=args.min_recall,
+        )
+        sys.exit(code)
     sys.exit(0)
 
 

@@ -91,8 +91,8 @@ jobs:
       - name: Oracle self-check (discrimination proofs)
         run: uv run python scripts/sot_evaluator.py --selfcheck
 
-      - name: Full corpus run (builtin baseline regeneration)
-        run: uv run python scripts/sot_evaluator.py --output /tmp/builtin-baseline-ci.json
+      - name: Full corpus run (metric gate + baseline regeneration)
+        run: uv run python scripts/sot_evaluator.py --gate --output /tmp/builtin-baseline-ci.json
 
       - name: Committed baseline matches fresh corpus digest
         run: |
