@@ -726,7 +726,8 @@ def create_server(service: McpService) -> Any:
         import importlib.metadata
         _server_ver = importlib.metadata.version("sot-graph")
     except Exception:
-        _server_ver = "0.3.0"
+        from sot_graph import __version__ as _pkg_ver
+        _server_ver = _pkg_ver
     server._sot_initialization_options = InitializationOptions(
         server_name="sot-graph", server_version=_server_ver,
         capabilities=server.get_capabilities(notification_options=NotificationOptions(), experimental_capabilities={}),

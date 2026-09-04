@@ -19,7 +19,8 @@ import subprocess
 import sys
 import tempfile
 
-MCP_VERIFY_CODE = '''import os
+MCP_VERIFY_CODE = '''import importlib.metadata
+import os
 import tempfile
 
 from sot_graph.db import Database
@@ -34,7 +35,7 @@ db.close()
 service = McpService(db_path, ".")
 try:
     s = create_server(service)
-    assert s._sot_initialization_options.server_version == "0.3.0"
+    assert s._sot_initialization_options.server_version == importlib.metadata.version("sot-graph")
     print("MCP server verified:", s._sot_initialization_options.server_version)
 finally:
     service.close()

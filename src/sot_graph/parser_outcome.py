@@ -30,17 +30,21 @@ class ParserOutcome(str, Enum):
     COMPLETE = "COMPLETE"
 
 
-_DEFAULT_VERSION = "0.3.0"
-
-
 def package_version() -> str:
-    """Version of the sot-graph package (used as extractor version stamp)."""
+    """Version of the sot-graph package (used as extractor version stamp).
+
+    The fallback import is deliberately inside the function: this module
+    sits in the package's own import chain, so a module-level import of
+    ``sot_graph.__version__`` would be circular.
+    """
     try:
         import importlib.metadata
 
         return importlib.metadata.version("sot-graph")
     except Exception:
-        return _DEFAULT_VERSION
+        from sot_graph import __version__
+
+        return __version__
 
 
 def coerce_outcome(value: Any) -> Optional[ParserOutcome]:

@@ -154,9 +154,9 @@ class RehomeCacheTests(unittest.TestCase):
             p2 = TrustVerifier.find_rehome(str(self.root), "svc_two.py")
             p3 = TrustVerifier.find_rehome(str(self.root), "svc_three.py")
         self.assertEqual(counted["n"], 1, "cache must serve the pass with one walk")
-        self.assertTrue(str(p1).endswith("svc_one.py"))
-        self.assertTrue(str(p2).endswith("svc_two.py"))
-        self.assertTrue(str(p3).endswith("svc_three.py"))
+        self.assertTrue(str(p1).replace(os.sep, "/").endswith("svc_one.py"))
+        self.assertTrue(str(p2).replace(os.sep, "/").endswith("svc_two.py"))
+        self.assertTrue(str(p3).replace(os.sep, "/").endswith("svc_three.py"))
 
     def test_stale_cached_path_invalidates_and_rebuilds_once(self):
         old = self.root / "old_dir"
@@ -165,7 +165,7 @@ class RehomeCacheTests(unittest.TestCase):
         spy, counted = self._walk_spy()
         with spy:
             first = TrustVerifier.find_rehome(str(self.root), "only.py")
-            self.assertTrue(str(first).endswith("old_dir/only.py"))
+            self.assertTrue(str(first).replace(os.sep, "/").endswith("old_dir/only.py"))
             # The cached candidate vanished; a new one appeared elsewhere.
             (old / "only.py").unlink()
             new_dir = self.root / "new_dir"
@@ -174,7 +174,7 @@ class RehomeCacheTests(unittest.TestCase):
             second = TrustVerifier.find_rehome(str(self.root), "only.py")
         self.assertEqual(counted["n"], 2,
                          "stale hit must trigger exactly one rebuild")
-        self.assertTrue(str(second).endswith("new_dir/only.py"), second)
+        self.assertTrue(str(second).replace(os.sep, "/").endswith("new_dir/only.py"), second)
 
     def test_absent_basename_never_answered_from_cache(self):
         (self.root / "real.py").write_text("x = 1\n")
@@ -185,7 +185,7 @@ class RehomeCacheTests(unittest.TestCase):
             self.assertIsNone(TrustVerifier.find_rehome(str(self.root), "ghost.py"))
             # And a positive lookup afterwards still resolves.
             found = TrustVerifier.find_rehome(str(self.root), "real.py")
-        self.assertTrue(str(found).endswith("real.py"))
+        self.assertTrue(str(found).replace(os.sep, "/").endswith("real.py"))
         self.assertGreaterEqual(counted["n"], 2,
                                 "absence decisions must come from fresh walks")
 
@@ -199,7 +199,7 @@ class RehomeCacheTests(unittest.TestCase):
         # Collision resolved by deletion: the fresh rebuild may rehome.
         (self.root / "pkg_b" / "dup.py").unlink()
         found = TrustVerifier.find_rehome(str(self.root), "dup.py")
-        self.assertTrue(str(found).endswith("pkg_a/dup.py"), found)
+        self.assertTrue(str(found).replace(os.sep, "/").endswith("pkg_a/dup.py"), found)
 
     def test_heal_pass_over_two_missing_files_costs_one_walk(self):
         db = Database(str(self.root / ".sot" / "sot.db"))
@@ -226,7 +226,7 @@ class RehomeCacheTests(unittest.TestCase):
                     db, candidates_for(symbol), tokenize(symbol),
                     str(self.root), auto_heal=True)
                 self.assertEqual(verdict, "REBUILT", symbol)
-                self.assertTrue(str(path).endswith(f"moved/{symbol}.py"), path)
+                self.assertTrue(str(path).replace(os.sep, "/").endswith(f"moved/{symbol}.py"), path)
         self.assertEqual(counted["n"], 1,
                          "both heal lookups must share one index build")
 

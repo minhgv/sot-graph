@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import sys
 from pathlib import Path
 import shutil
 import sqlite3
@@ -388,6 +389,11 @@ class TestFaultInjection(unittest.TestCase):
         lock_b.acquire()
         lock_b.release()
 
+    @unittest.skipIf(
+        sys.platform == "win32",
+        "scenario needs POSIX unlink-while-open semantics: Windows refuses "
+        "os.remove() on the open lock fd (WinError 32), so the inode-guard "
+        "race this test plants cannot be represented; covered on Linux/macOS")
     def test_scenario_4b_lock_file_replaced_during_contention(self) -> None:
         """A lock file deleted+recreated between open and flock must NOT be
         treated as acquired: the fd guards an orphaned inode and accepting it
@@ -426,6 +432,11 @@ class TestFaultInjection(unittest.TestCase):
         finally:
             lock.release()
 
+    @unittest.skipIf(
+        sys.platform == "win32",
+        "scenario needs POSIX unlink-while-open semantics: Windows refuses "
+        "os.remove() on the open lock fd (WinError 32), so the inode-guard "
+        "race this test plants cannot be represented; covered on Linux/macOS")
     def test_scenario_4c_lock_file_unlinked_during_contention(self) -> None:
         """An fd whose link count dropped to zero mid-contention guards a
         dying inode; the guard must reject it and re-contend on the live

@@ -143,7 +143,8 @@ def _package_version() -> str:
     try:
         return importlib.metadata.version("sot-graph")
     except Exception:  # pragma: no cover - only when package metadata is stripped
-        return "0.3.0"
+        from sot_graph import __version__
+        return __version__
 
 
 def _external_allowed(name: str, cfg: SotConfig) -> bool:

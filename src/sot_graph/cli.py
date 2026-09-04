@@ -1932,7 +1932,7 @@ def build_parser() -> argparse.ArgumentParser:
         import importlib.metadata
         __version__ = importlib.metadata.version("sot-graph")
     except Exception:
-        __version__ = "0.3.0"
+        from sot_graph import __version__ as __version__
     parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--root", default=".", help="Project root directory (default: current dir)")
     parser.add_argument("--db", default=None, help="Custom SQLite DB path (default: .sot/sot.db)")
