@@ -1,46 +1,88 @@
 name: 'SOT-Graph Diff Impact'
 description: >
-  CI-native blast-radius bot: runs `sot reconcile` + `sot diff-impact <base>`
+  CI-native blast-radius bot: runs `sot reconcile` + `sot diff-impact <target>`
   and posts/updates one idempotent PR comment (GitHub format, collapsed
   sections). Outside a pull_request context it writes the report to
   $GITHUB_STEP_SUMMARY instead. Checkout is the caller's job; ensure the
-  `base` revision is fetchable (a full or merge-capable checkout).
+  target revision(s) are fetchable (a full or merge-capable checkout).
 inputs:
+  target:
+    description: >
+      Git rev-or-range to diff. A single revision R diffs `R~1...R` (the
+      commit that created R). An explicit `A...B` range uses merge-base
+      semantics — for pull requests pass `base.sha...head.sha` (SG-101),
+      never just the base sha.
+    required: false
+    default: ''
   base:
-    description: 'Git revision to diff against (e.g. a PR merge base sha or HEAD~1)'
+    description: >
+      DEPRECATED legacy alias for a single-revision `target`. Ignored when
+      `target` is set. Kept so existing callers keep working.
     required: false
     default: 'HEAD~1'
   format:
     description: 'Renderer format passed to sot diff-impact (github | markdown)'
     required: false
     default: 'github'
-  install-extra:
-    description: 'Comma-separated pip extras when falling back to installing from this repo (e.g. "mcp")'
+  mode:
+    description: >
+      advisory (default): report only, the job stays green. gate: maps to
+      `sot diff-impact --gate` and fails the job (exit 1) unless the
+      receipt assurance status is in the ASSURED set. The comment is
+      still posted in gate mode before the job fails.
+    required: false
+    default: 'advisory'
+  tool-source:
+    description: >
+      Where sot-graph is installed from (SG-102 dogfood): auto (default;
+      `pip install .` from the workspace checkout when running in
+      minhgv/sot-graph, else PyPI) | checkout (force workspace install;
+      only valid when the workspace IS the sot-graph source) | pypi
+      (force PyPI).
+    required: false
+    default: 'auto'
+  pypi-version:
+    description: 'Optional sot-graph version pin for PyPI installs (e.g. "0.5.1"). Ignored for checkout installs.'
     required: false
     default: ''
+outputs:
+  source:
+    description: 'Resolved tool source: checkout | pypi-uv | pypi-pip'
+  tool-source-args:
+    description: 'The exact install command arguments used for sot-graph'
 runs:
   using: composite
   steps:
-    - name: 'Install sot-graph (PyPI, fallback to this repository)'
+    - name: 'Install sot-graph (dogfood checkout in minhgv/sot-graph, else PyPI)'
       id: install
+      env:
+        TOOL_SOURCE: ${{ inputs.tool-source }}
+        PYPI_VERSION: ${{ inputs.pypi-version }}
       shell: bash
       run: |
         set -euo pipefail
-        if command -v uv >/dev/null 2>&1 && uv tool install sot-graph >/dev/null 2>&1; then
+        PIN=""
+        if [ -n "$PYPI_VERSION" ]; then PIN="==${PYPI_VERSION}"; fi
+        SOURCE="${TOOL_SOURCE:-auto}"
+        # SG-102 dogfood: inside the sot-graph repo itself, `auto` installs
+        # the PR checkout so CI reviews PR code instead of the last PyPI
+        # release. The old `git+<this-repo>` fallback is gone on purpose:
+        # it resolved to the CONSUMER's repository and installed the wrong
+        # project as sot-graph.
+        if [ "$SOURCE" = "auto" ] && [ "${{ github.repository }}" = "minhgv/sot-graph" ]; then
+          SOURCE="checkout"
+        fi
+        if [ "$SOURCE" = "checkout" ]; then
+          pip install --quiet .
+          echo "source=checkout" >> "$GITHUB_OUTPUT"
+          echo "tool-source-args=pip install ." >> "$GITHUB_OUTPUT"
+        elif command -v uv >/dev/null 2>&1 && uv tool install "sot-graph${PIN}" >/dev/null 2>&1; then
           echo "source=pypi-uv" >> "$GITHUB_OUTPUT"
-        elif pip install --quiet sot-graph >/dev/null 2>&1; then
-          echo "source=pypi-pip" >> "$GITHUB_OUTPUT"
+          echo "tool-source-args=uv tool install sot-graph${PIN}" >> "$GITHUB_OUTPUT"
         else
-          # PyPI unavailable (or lagging this repo): install straight from
-          # the repository that invoked the action.
-          REPO_URL="${{ github.server_url }}/${{ github.repository }}.git"
-          EXTRA="${{ inputs.install-extra }}"
-          if [ -n "$EXTRA" ]; then
-            pip install --quiet "git+${REPO_URL}[${EXTRA}]"
-          else
-            pip install --quiet "git+${REPO_URL}"
-          fi
-          echo "source=repo" >> "$GITHUB_OUTPUT"
+          pip install --quiet "sot-graph${PIN}"
+          echo "source=pypi-pip" >> "$GITHUB_OUTPUT"
+          echo "tool-source-args=pip install sot-graph${PIN}" >> "$GITHUB_OUTPUT"
         fi
 
     - name: 'Reconcile graph index'
@@ -54,19 +96,53 @@ runs:
     - name: 'Render diff-impact report'
       id: analyze
       shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
       run: |
         set -euo pipefail
-        BASE="${{ inputs.base }}"
-        # Shallow PR checkouts may not contain the base revision yet.
-        if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null 2>&1; then
-          git fetch --no-tags --depth=1 origin "${BASE}" || true
+        TARGET="${{ inputs.target }}"
+        # Legacy single-revision input still works when `target` is unset.
+        if [ -z "$TARGET" ]; then TARGET="${{ inputs.base }}"; fi
+        if [ -z "$TARGET" ]; then TARGET="HEAD~1"; fi
+        # Shallow checkouts may not contain the range endpoints yet: fetch
+        # every missing side of `A...B` / `A..B`, or the single revision.
+        ENDPOINTS="$TARGET"
+        case "$TARGET" in
+          *"..."*) ENDPOINTS="${TARGET%%...*} ${TARGET#*...}" ;;
+          *".."*)  ENDPOINTS="${TARGET%%..*} ${TARGET#*..}" ;;
+        esac
+        for REV in $ENDPOINTS; do
+          if ! git rev-parse --verify --quiet "${REV}^{commit}" >/dev/null 2>&1; then
+            git fetch --no-tags --depth=1 origin "$REV" || true
+          fi
+        done
+        GATE_FLAG=""
+        if [ "$MODE" = "gate" ]; then GATE_FLAG="--gate"; fi
+        set +e
+        # shellcheck disable=SC2086
+        sot diff-impact "$TARGET" --format "${{ inputs.format }}" $GATE_FLAG > sot-diff-impact-comment.md
+        RC=$?
+        set -e
+        echo "rc=$RC" >> "$GITHUB_OUTPUT"
+        # SG-102: reviewers must see which code produced the report.
+        if [ "${{ steps.install.outputs.source }}" = "checkout" ]; then
+          TOOL_VER="$(git rev-parse --short HEAD)"
+        else
+          TOOL_VER="$(sot --version 2>/dev/null | awk '{print $NF}' || pip show sot-graph 2>/dev/null | awk '/^Version:/ {print $2}')"
         fi
-        sot diff-impact "${BASE}" --format "${{ inputs.format }}" > sot-diff-impact-comment.md
+        printf '\n---\n<sub>Tool: %s @ %s</sub>\n' \
+          "${{ steps.install.outputs.source }}" "${TOOL_VER:-unknown}" >> sot-diff-impact-comment.md
         {
           echo '### SOT-Graph Diff Impact'
           echo ''
           cat sot-diff-impact-comment.md
         } > /tmp/sot-step-summary.md
+        # Advisory mode keeps the historical fail-closed behavior on engine
+        # errors; in gate mode a non-zero rc (receipt not assured) is
+        # enforced by the dedicated step below so the comment still posts.
+        if [ "$RC" -ne 0 ] && [ "$MODE" != "gate" ]; then
+          exit "$RC"
+        fi
 
     - name: 'Post or update PR comment (writes step summary off-PR)'
       # Tolerant by design: a rendered report must not fail the job because
@@ -96,3 +172,15 @@ runs:
           gh pr comment "$PR_NUMBER" --body "$BODY" >/dev/null
           echo "Posted new diff-impact comment on PR #${PR_NUMBER}."
         fi
+
+    - name: 'Enforce assurance gate (mode: gate)'
+      if: inputs.mode == 'gate'
+      shell: bash
+      run: |
+        set -euo pipefail
+        RC="${{ steps.analyze.outputs.rc }}"
+        if [ "$RC" != "0" ]; then
+          echo "::error::sot diff-impact --gate failed (exit ${RC}): receipt assurance status is not in the ASSURED set."
+          exit "$RC"
+        fi
+        echo "Gate passed: receipt assurance status is assured within scope."

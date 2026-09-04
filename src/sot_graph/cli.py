@@ -1469,6 +1469,7 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
     )
 
     from sot_graph.assurance.receipts import diff_impact_receipt
+    from sot_graph.assurance.state import ASSURED_STATUSES
     from sot_graph.snapshot import capture_worktree_snapshot
     from types import SimpleNamespace
 
@@ -1504,6 +1505,21 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
         working_tree=working_tree,
         pre_snapshot=pre_snapshot.as_dict(),
     )
+    # SG-103: advisory vs gate semantics. Default (no --gate) is advisory:
+    # the report renders and the command exits 0 regardless of receipt
+    # status. --gate fails closed (exit 1) unless the receipt status is in
+    # the ASSURED set, without suppressing the rendered report.
+    assurance_status = str((receipt.get("assurance") or {}).get("status") or "")
+    gate_failed = (
+        bool(getattr(args, "gate", False)) and assurance_status not in ASSURED_STATUSES
+    )
+    if gate_failed:
+        print(
+            f"🚫 --gate: receipt assurance status is "
+            f"{assurance_status or 'MISSING'}, not {sorted(ASSURED_STATUSES)} "
+            "(report still rendered above/below).",
+            file=sys.stderr,
+        )
     post_snapshot = receipt["post_change_snapshot"]
     if not isinstance(post_snapshot, dict):
         post_snapshot = post_snapshot.as_dict()
@@ -1562,7 +1578,7 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
             print(payload_str)
         if fed is not None:
             _print_federation_notes(fed)
-        return 0
+        return 1 if gate_failed else 0
 
     if fmt == "text":
         print(
@@ -1584,7 +1600,10 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
         return value
 
     # Duck-typed stand-in carrying the receipt fields the markdown formatter
-    # reads off a DiffImpactResult.
+    # reads off a DiffImpactResult. SG-103: receipt evidence fields are
+    # threaded through too so the github renderer can state assurance
+    # status, reason codes, truncation and snapshot identity honestly
+    # (plain engine results lack them; the renderer getattr-guards).
     engine: Any = SimpleNamespace(
         summary=receipt["summary"],
         target=target,
@@ -1593,6 +1612,11 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
         caller_impacts=_ns(receipt["caller_impacts"]),
         api_impacts=_ns(receipt["api_impacts"]),
         test_impacts=_ns(receipt["test_impacts"]),
+        assurance=receipt.get("assurance"),
+        assurance_facts=receipt.get("assurance_facts"),
+        changed_files_truncated=bool(receipt.get("changed_files_truncated", False)),
+        changed_files_total=receipt.get("changed_files_total"),
+        post_change_snapshot=receipt.get("post_change_snapshot"),
     )
     if fmt == "github":
         md = format_diff_impact_github(engine, repo_root=root)
@@ -1610,7 +1634,7 @@ def cmd_diff_impact(args: argparse.Namespace, db: Database, root: str) -> int:
     # stay redirect-safe for CI piping (warnings already go to stderr).
     if fmt == "text":
         _print_federation_notes(fed)
-    return 0
+    return 1 if gate_failed else 0
 
 
 def cmd_log(args: argparse.Namespace, db: Database, root: str) -> int:
@@ -2220,6 +2244,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_diff.add_argument("--format", default=None,
                         choices=["text", "markdown", "json", "github"],
                         help="Output format: text (legacy CLI report), markdown (pure report body), json (envelope), github (PR-comment-safe collapsed sections; R4). Default: text, or json with --json")
+    p_diff.add_argument("--gate", action="store_true",
+                        help="Exit 1 unless the receipt assurance status is in the ASSURED set (ASSURED_WITHIN_SCOPE); default: advisory mode, always exit 0")
     p_diff.add_argument("--provider", default="builtin",
                         help="External evidence providers: builtin | auto | prefer:<name> | require:<name> | all (default: builtin)")
 

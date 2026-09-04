@@ -55,6 +55,13 @@ CLAIM_PROFILES = (
     "exhaustive",
 )
 
+#: Statuses that claim fully assured (within-scope) evidence. Any other
+#: canonical status means completeness is NOT proven — gates must fail
+#: closed on these (Contract 1: no surface invents its own vocabulary).
+ASSURED_STATUSES = frozenset(
+    s for s in CANONICAL_STATUSES if s.startswith("ASSURED")
+)
+
 #: Status severity ranking (highest to lowest).
 STATUS_SEVERITY: Dict[str, int] = {
     "ABSTAINED": 50,

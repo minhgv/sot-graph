@@ -18,6 +18,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from sot_graph.assurance.state import ASSURED_STATUSES
+
 __all__ = [
     "DiffHunk",
     "DirectNodeChange",
@@ -890,6 +892,10 @@ class DiffImpactEngine:
             test_impacts=test_impacts,
             elapsed_ms=elapsed_ms,
         )
+        # SG-101: record the RESOLVED request identity (raw target + the
+        # concrete base/head revisions the diff actually measured) so CI
+        # comments and JSON envelopes are auditable.
+        summary.update(self._resolve_diff_identity(target, staged=staged, working_tree=working_tree))
 
         effective_target = (
             "--staged" if staged
@@ -1232,6 +1238,41 @@ class DiffImpactEngine:
             "execution_time_ms": elapsed_ms,
         }
 
+    def _resolve_revision(self, rev: str) -> Optional[str]:
+        """Best-effort resolve a revision to its full commit sha (None if unresolvable)."""
+        code, stdout, _ = self.extractor.run_git(
+            ["rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}"]
+        )
+        sha = stdout.strip() if code == 0 else ""
+        return sha or None
+
+    def _resolve_diff_identity(
+        self, target: str, staged: bool, working_tree: bool
+    ) -> Dict[str, Any]:
+        """Resolved request identity for auditability (SG-101).
+
+        Mirrors GitDeltaExtractor.expand semantics: an explicit range is
+        diffed verbatim; a single revision R means `R~1...R`. Returns a
+        partial dict — keys are absent when the target carries no
+        resolvable revisions (staged/working-tree/option-like).
+        """
+        if staged or working_tree or not target or target.startswith("-"):
+            return {}
+        if "..." in target:
+            base_rev, _, head_rev = target.partition("...")
+        elif ".." in target:
+            base_rev, _, head_rev = target.partition("..")
+        else:
+            base_rev, head_rev = f"{target}~1", target
+        identity: Dict[str, Any] = {"diff_spec": f"{base_rev}...{head_rev}"}
+        resolved_base = self._resolve_revision(base_rev)
+        resolved_head = self._resolve_revision(head_rev)
+        if resolved_base:
+            identity["resolved_base"] = resolved_base
+        if resolved_head:
+            identity["resolved_head"] = resolved_head
+        return identity
+
 
 # ============================================================================
 # Standalone Convenience Functions
@@ -1440,6 +1481,26 @@ def format_diff_impact_github(result: DiffImpactResult, repo_root: Optional[str]
     target = _strip_ansi(result.target)
     changed = sorted({_repo_relative(f, repo_root) for f in (result.changed_files or [])})
 
+    # SG-103: receipt evidence fields are duck-typed (getattr-optional) so
+    # plain engine results render exactly as before, while the CLI threads
+    # the receipt through and the report becomes honest about completeness.
+    assurance = getattr(result, "assurance", None)
+    assurance = assurance if isinstance(assurance, dict) else {}
+    status = str(assurance.get("status") or "").upper()
+    reason_codes = [_strip_ansi(rc) for rc in (assurance.get("reason_codes") or [])]
+    facts = getattr(result, "assurance_facts", None)
+    facts = facts if isinstance(facts, dict) else {}
+    coverage_fraction = facts.get("coverage_fraction")
+    truncated = bool(
+        getattr(result, "changed_files_truncated", False) or facts.get("truncated", False)
+    )
+    snapshot = getattr(result, "post_change_snapshot", None)
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+    snap_head = str(
+        _strip_ansi(snapshot.get("commit_sha") or snapshot.get("descriptor_digest") or "")
+    )[:12]
+    receipt_attached = bool(status or snap_head or facts)
+
     lines: List[str] = [GITHUB_COMMENT_MARKER, ""]
     lines.append(
         f"## {risk_icon} SOT-Graph Diff Impact: **{risk_level}** "
@@ -1454,6 +1515,30 @@ def format_diff_impact_github(result: DiffImpactResult, repo_root: Optional[str]
         f"{summary.get('total_tests', 0)} tests to re-run"
     )
     lines.append("")
+
+    # SG-101: resolved request identity — the concrete revisions measured.
+    resolved_base = summary.get("resolved_base")
+    resolved_head = summary.get("resolved_head")
+    if resolved_base or resolved_head:
+        lines.append(
+            f"**Resolved range:** `{_strip_ansi(summary.get('diff_spec', target))}` · "
+            f"base `{str(_strip_ansi(resolved_base))[:12] or '?'}"
+            f"` → head `{str(_strip_ansi(resolved_head))[:12] or '?'}`"
+        )
+        lines.append("")
+
+    # SG-103: honest evidence summary — only when a receipt is attached.
+    if receipt_attached:
+        evidence = [f"status **{status or 'UNKNOWN'}**"]
+        if reason_codes:
+            evidence.append("reasons: " + " ".join(f"`{rc}`" for rc in reason_codes))
+        if coverage_fraction is not None:
+            evidence.append(f"coverage {coverage_fraction:.2f}")
+        evidence.append("changed-files truncated: " + ("yes" if truncated else "no"))
+        if snap_head:
+            evidence.append(f"snapshot `{snap_head}`")
+        lines.append("**Assurance:** " + " · ".join(evidence))
+        lines.append("")
 
     if changed:
         lines.append("**Changed files:** " + " · ".join(f"`{c}`" for c in changed))
@@ -1496,7 +1581,20 @@ def format_diff_impact_github(result: DiffImpactResult, repo_root: Optional[str]
             callee = _strip_ansi(c.callee_symbol).replace("|", "\\|")
             caller_lines.append(f"| {c.depth} | `{sym}` | `{path}:{c.line_start}` | `{rel}` | `{callee}` |")
     else:
-        caller_lines.append("_Zero inward caller dependencies detected (low ripple effect)._")
+        # SG-103: "zero callers" is only a low-ripple claim when the
+        # receipt proves completeness; otherwise say so explicitly.
+        if status in ASSURED_STATUSES and not truncated:
+            caller_lines.append(
+                "_Zero inward caller dependencies detected "
+                "(low ripple effect; assured within verified scope)_."
+            )
+        else:
+            shown_status = status or "NO_RECEIPT"
+            reasons = ", ".join(reason_codes) if reason_codes else "no reason codes"
+            caller_lines.append(
+                "_No inward callers found within verified scope — completeness "
+                f"not proven (status {shown_status}: {reasons})_."
+            )
     lines.extend(_details_block(
         f"💥 Blast radius — upstream callers ({len(callers)})", caller_lines,
     ))

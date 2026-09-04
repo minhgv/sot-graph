@@ -205,5 +205,95 @@ class GithubRendererTests(unittest.TestCase):
         self.assertNotIn("\x1b", md)
 
 
+def _zero_caller_result(repo: str = "/repo") -> DiffImpactResult:
+    """Same fabricated engine output as _result(), but with no callers."""
+    r = _result(repo)
+    r.caller_impacts = []
+    r.summary = dict(r.summary, total_callers=0)
+    return r
+
+
+class GithubRendererHonestyTests(unittest.TestCase):
+    """SG-103: the renderer must state receipt completeness honestly.
+
+    A zero-callers claim is only "low ripple" when an ASSURED receipt
+    proves completeness; otherwise the comment says so explicitly.
+    """
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.repo, ignore_errors=True)
+
+    @staticmethod
+    def _attach(result: DiffImpactResult, **receipt_fields) -> DiffImpactResult:
+        """Thread receipt fields onto a result like cmd_diff_impact does."""
+        for key, value in receipt_fields.items():
+            setattr(result, key, value)
+        return result
+
+    def _receipt(self, status: str, reason_codes=None, truncated: bool = False):
+        return {
+            "assurance": {"status": status, "reason_codes": reason_codes or []},
+            "assurance_facts": {"coverage_fraction": None, "truncated": truncated},
+            "changed_files_truncated": truncated,
+            "changed_files_total": 7,
+            "post_change_snapshot": {
+                "commit_sha": "abc123def4567890",
+                "descriptor_digest": "deadbeef" * 8,
+                "dirty": False,
+            },
+        }
+
+    def test_partial_status_shows_reasons_and_truncation(self):
+        r = self._attach(
+            _zero_caller_result(self.repo),
+            **self._receipt("PARTIAL", reason_codes=["changed_files_truncated"],
+                            truncated=True),
+        )
+        md = format_diff_impact_github(r, repo_root=self.repo)
+        self.assertIn("**Assurance:**", md)
+        self.assertIn("status **PARTIAL**", md)
+        self.assertIn("`changed_files_truncated`", md)
+        self.assertIn("changed-files truncated: yes", md)
+        # Snapshot head rendered short (12 chars).
+        self.assertIn("snapshot `abc123def456`", md)
+        self.assertNotIn("low ripple", md)
+        self.assertIn("completeness not proven (status PARTIAL:", md)
+
+    def test_assured_zero_callers_keeps_low_ripple_wording(self):
+        r = self._attach(
+            _zero_caller_result(self.repo),
+            **self._receipt("ASSURED_WITHIN_SCOPE"),
+        )
+        md = format_diff_impact_github(r, repo_root=self.repo)
+        self.assertIn("status **ASSURED_WITHIN_SCOPE**", md)
+        self.assertIn("changed-files truncated: no", md)
+        self.assertIn("low ripple effect; assured within verified scope", md)
+
+    def test_no_receipt_never_claims_low_ripple(self):
+        """Plain engine result (no receipt): honesty falls back to unproven."""
+        md = format_diff_impact_github(_zero_caller_result(self.repo), repo_root=self.repo)
+        self.assertNotIn("low ripple", md)
+        self.assertNotIn("**Assurance:**", md)
+        self.assertIn("completeness not proven (status NO_RECEIPT:", md)
+
+    def test_resolved_range_identity_rendered(self):
+        """SG-101: resolved request identity is auditable in the comment."""
+        r = _zero_caller_result(self.repo)
+        r.summary = dict(
+            r.summary,
+            diff_spec="1234abc...5678def",
+            resolved_base="1234abcdef" * 4,
+            resolved_head="5678abcdef" * 4,
+        )
+        md = format_diff_impact_github(r, repo_root=self.repo)
+        self.assertIn("**Resolved range:** `1234abc...5678def`", md)
+        # Sha identities render short (12 chars).
+        self.assertIn("base `1234abcdef12`", md)
+        self.assertIn("head `5678abcdef56`", md)
+
+
 if __name__ == "__main__":
     unittest.main()

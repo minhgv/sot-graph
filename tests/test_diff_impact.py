@@ -1088,6 +1088,124 @@ class TestCLIExecution(unittest.TestCase):
         self.assertTrue(os.path.exists(out_file))
 
 
+def _fabricated_receipt(status: str = "PARTIAL") -> dict:
+    """Minimal diff-impact receipt payload shaped like receipts.py output."""
+    return {
+        "changed_files": [],
+        "changed_files_total": 5,
+        "changed_files_truncated": status != "ASSURED_WITHIN_SCOPE",
+        "direct_nodes": [],
+        "caller_impacts": [],
+        "api_impacts": [],
+        "test_impacts": [],
+        "summary": {"risk_level": "LOW", "risk_score": 0},
+        "warnings": ["measured closure covers 5 of 9 changed files"],
+        "assurance": {
+            "status": status,
+            "reason_codes": [] if status == "ASSURED_WITHIN_SCOPE"
+            else ["changed_files_truncated"],
+        },
+        "assurance_facts": {"coverage_fraction": None,
+                            "truncated": status != "ASSURED_WITHIN_SCOPE"},
+        "post_change_snapshot": {
+            "commit_sha": "abc123def4567890",
+            "descriptor_digest": "deadbeef" * 8,
+            "dirty": False,
+        },
+    }
+
+
+class TestDiffImpactGate(unittest.TestCase):
+    """SG-103: --gate separates advisory (exit 0) from gate (exit 1 on
+    non-ASSURED receipt status) semantics without suppressing the report."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _run(self, gate: bool, status: str) -> int:
+        from sot_graph.cli import build_parser, cmd_diff_impact
+
+        argv = ["diff-impact", "HEAD~1", "--format", "markdown"]
+        if gate:
+            argv.append("--gate")
+        args = build_parser().parse_args(argv)
+        with patch(
+            "sot_graph.assurance.receipts.diff_impact_receipt",
+            return_value=_fabricated_receipt(status),
+        ):
+            with patch("sys.stdout", new_callable=io.StringIO), \
+                    patch("sys.stderr", new_callable=io.StringIO):
+                return cmd_diff_impact(args, MagicMock(), self.temp_dir)
+
+    def test_gate_fails_on_partial_receipt(self):
+        self.assertEqual(self._run(gate=True, status="PARTIAL"), 1)
+
+    def test_gate_passes_on_assured_receipt(self):
+        self.assertEqual(self._run(gate=True, status="ASSURED_WITHIN_SCOPE"), 0)
+
+    def test_default_advisory_exits_zero_even_on_partial(self):
+        self.assertEqual(self._run(gate=False, status="PARTIAL"), 0)
+
+    def test_gate_flag_registered(self):
+        from sot_graph.cli import build_parser
+
+        gated = build_parser().parse_args(["diff-impact", "HEAD", "--gate"])
+        self.assertTrue(gated.gate)
+        legacy = build_parser().parse_args(["diff-impact"])
+        self.assertFalse(legacy.gate)
+
+
+class TestGitDeltaExtractorRangeMergeBase(unittest.TestCase):
+    """SG-101: an explicit `A...B` target must equal
+    `git diff --name-only A...B` (merge-base semantics), not the two-dot
+    endpoint diff — this is what makes the CI workflow's base...head
+    range correct for PRs."""
+
+    def _git(self, repo: str, *args: str) -> str:
+        proc = subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
+            cwd=repo, check=True, capture_output=True, text=True, timeout=60,
+        )
+        return proc.stdout.strip()
+
+    def test_three_dot_range_uses_merge_base(self):
+        with tempfile.TemporaryDirectory() as repo:
+            self._git(repo, "init", "-q", "--initial-branch=main")
+            Path(repo, "a.py").write_text("def a():\n    pass\n")
+            self._git(repo, "add", ".")
+            self._git(repo, "commit", "-q", "-m", "base")
+            base_sha = self._git(repo, "rev-parse", "HEAD")
+
+            # Branch adds b.py; main independently adds c.py.
+            self._git(repo, "checkout", "-q", "-b", "feature")
+            Path(repo, "b.py").write_text("def b():\n    pass\n")
+            self._git(repo, "add", ".")
+            self._git(repo, "commit", "-q", "-m", "feature work")
+            feature_sha = self._git(repo, "rev-parse", "HEAD")
+
+            self._git(repo, "checkout", "-q", "main")
+            Path(repo, "c.py").write_text("def c():\n    pass\n")
+            self._git(repo, "add", ".")
+            self._git(repo, "commit", "-q", "-m", "main work")
+
+            expected = set(
+                self._git(repo, "diff", "--name-only", f"{base_sha}...{feature_sha}").splitlines()
+            )
+            self.assertEqual(expected, {"b.py"})
+
+            intervals, _ = GitDeltaExtractor(repo).extract_diff(
+                target=f"{base_sha}...{feature_sha}"
+            )
+            self.assertEqual(set(intervals.keys()), expected)
+
+            # Two-dot would include main's independent c.py — the range
+            # must NOT regress to endpoint-diff semantics.
+            self.assertNotIn("c.py", set(intervals.keys()))
+
+
 class TestMcpServiceDiffImpact(unittest.TestCase):
     """Test McpService integration for diff_impact and git_history."""
 
