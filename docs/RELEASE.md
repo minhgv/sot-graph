@@ -28,8 +28,10 @@ any stored credentials:
 ## Cutting a release
 
 ```bash
-# 1. Bump version in pyproject.toml (already done for 0.3.1) and make sure
-#    the working tree is clean and pushed.
+# 1. Bump __version__ in src/sot_graph/__init__.py — the single source of
+#    truth; pyproject reads it dynamically ([tool.setuptools.dynamic]) and
+#    every runtime surface falls back to it. Then make sure the working
+#    tree is clean and pushed.
 # 2. Tag and push:
 git tag -a v0.3.1 -m "sot-graph 0.3.1"
 git push origin main --follow-tags

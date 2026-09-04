@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sot-graph"
-version = "0.3.1"
+dynamic = ["version"]
 description = "Verified, self-healing Source-of-Truth knowledge graph for AI coding agents."
 readme = "README.md"
 authors = [{ name = "Minh Giap", email = "minhgv@users.noreply.github.com" }]
@@ -133,6 +133,11 @@ dev = [
 
 [project.scripts]
 sot = "sot_graph.cli:main"
+
+[tool.setuptools.dynamic]
+# __version__ is a plain string literal in __init__.py, so setuptools
+# reads it statically (no build-time import of the package).
+version = { attr = "sot_graph.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
