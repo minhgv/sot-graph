@@ -335,7 +335,6 @@ sot mcp
 pip install sot-graph            # zero-dependency core
 pip install "sot-graph[all]"     # with MCP, analytics, watch, vector, tree-sitter extras
 ```
-*(Available once the first `v*` tag is pushed — see [docs/RELEASE.md](docs/RELEASE.md).)*
 
 ### From Source / Git
 ```bash
