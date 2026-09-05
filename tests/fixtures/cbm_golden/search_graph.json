@@ -1,1 +1,1 @@
-{"content":[{"type":"text","text":"total: 1\nsearch_mode: bm25\nresults: 1  (cols: qn label file lines rank)\n  Users-giapminh79-code-GitHub-sot-graph-tests-fixtures-cbm_sample_repo.core.service.compute_total Function core/service.py 6-9 -15.12\nhas_more: false\n"}],"isError":false}
+{"content":[{"type":"text","text":"total: 1\nsearch_mode: bm25\nresults: 1  (cols: qn label file lines rank)\n  <ROOT>.core.service.compute_total Function core/service.py 6-9 -15.12\nhas_more: false\n"}],"isError":false}

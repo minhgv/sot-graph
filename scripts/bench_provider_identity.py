@@ -20,9 +20,11 @@ Corpus (all real machinery, no mocks):
 - CBM side: the recorded golden responses in
   ``tests/fixtures/cbm_golden/`` (CBM 0.10.8). search_graph carries the
   compute_total definition; trace_path carries the two build_invoice
-  callees. The golden qualified names embed the ORIGINAL fixture path
-  as their dash-mangled prefix; the replay rehomes that prefix onto the
-  temp root (names, hops and lines are replayed verbatim).
+  callees. The golden qualified names carry the ``<ROOT>`` token where
+  CBM embedded the dash-mangled capture-machine path; the replay
+  substitutes the live temp-root prefix for ``<ROOT>`` (names, hops and
+  lines are replayed verbatim), so any checkout location replays
+  identically.
 
 - SCIP side: a synthetic index in real SCIP JSON shape (documents,
   definitions with roles, ranges) imported through the REAL ScipImporter
@@ -138,6 +140,27 @@ def selfcheck() -> List[str]:
     }
     if not cbm_callees <= (TRUTH_BUILTIN_CALLS | TRUTH_BUILTIN_GAP_CALLS):
         problems.append("golden trace callees diverge from planted truth")
+
+    # Golden fixtures must be path-portable (SG-203): tokenized on disk
+    # (no capture-machine prefix), and the replay rehome must leave no
+    # <ROOT>/author chunk behind — a silent no-op rehome is the bug.
+    golden_dir = _REPO / "tests" / "fixtures" / "cbm_golden"
+    for path in sorted(golden_dir.glob("*.json")):
+        if _AUTHOR_PREFIX_CHUNK in path.read_text(encoding="utf-8"):
+            problems.append(
+                f"{path.name}: golden embeds the capture-machine prefix;"
+                f" tokenize it to {_ROOT_TOKEN}")
+    try:
+        rehomed = [r["qn"] for r in parse_golden_search()]
+        rehomed += [g for (_n, g, _h) in parse_golden_trace()]
+    except ValueError as exc:
+        problems.append(f"golden rehome failed: {exc}")
+    else:
+        if not rehomed:
+            problems.append("golden replay parsed zero root-prefixed rows")
+        for qn in rehomed:
+            if _ROOT_TOKEN in qn or _AUTHOR_PREFIX_CHUNK in qn:
+                problems.append(f"rehome left a prefix chunk in {qn!r}")
     return problems
 
 
@@ -171,26 +194,48 @@ def _golden_text(name: str) -> str:
     return payload["content"][0]["text"]
 
 
-def parse_golden_search(orig_prefix: str) -> List[Dict[str, str]]:
+_ROOT_TOKEN = "<ROOT>"
+_AUTHOR_PREFIX_CHUNK = "Users-giapminh79"
+
+
+def _strip_root_token(qn: str) -> str:
+    """Remove the ``<ROOT>.`` token prefix from a golden qualified name.
+
+    Golden fixtures are path-portable: the capture machine's dash-mangled
+    checkout path was tokenized to ``<ROOT>``. The caller rehomes the
+    remainder onto the live root prefix. A missing token must fail loud —
+    silently replaying an unrehomed name is exactly the SG-203 CI bug.
+    """
+    if not qn.startswith(_ROOT_TOKEN + "."):
+        raise ValueError(
+            f"golden qn lacks {_ROOT_TOKEN} prefix (untokenized fixture"
+            f" or non-root-prefixed row?): {qn!r}")
+    rel = qn[len(_ROOT_TOKEN) + 1:]
+    if _ROOT_TOKEN in rel or _AUTHOR_PREFIX_CHUNK in rel:
+        raise ValueError(f"golden qn rehome left a prefix chunk: {qn!r}")
+    return rel
+
+
+def parse_golden_search() -> List[Dict[str, str]]:
     """Rows from the recorded search_graph response (definition claims)."""
     rows: List[Dict[str, str]] = []
     for line in _golden_text("search_graph").splitlines():
         m = _SEARCH_ROW.match(line)
         if m:
             row = dict(m.groupdict())
-            row["qn"] = row["qn"].replace(orig_prefix + ".", "", 1)
+            row["qn"] = _strip_root_token(row["qn"])
             rows.append(row)
     return rows
 
 
-def parse_golden_trace(orig_prefix: str) -> List[Tuple[str, str, int]]:
+def parse_golden_trace() -> List[Tuple[str, str, int]]:
     """(callee_fqn, group_prefix, hop) from the recorded trace_path."""
     out: List[Tuple[str, str, int]] = []
     prefix = ""
     for line in _golden_text("trace_path").splitlines():
         g = _TRACE_GROUP.match(line)
         if g:
-            prefix = g.group("prefix").replace(orig_prefix + ".", "", 1)
+            prefix = _strip_root_token(g.group("prefix"))
             continue
         m = _TRACE_MEMBER.match(line)
         if m and prefix:
@@ -198,9 +243,7 @@ def parse_golden_trace(orig_prefix: str) -> List[Tuple[str, str, int]]:
     return out
 
 
-def insert_cbm_evidence(
-    db: Database, root: Path, orig_prefix: str,
-) -> Dict[str, int]:
+def insert_cbm_evidence(db: Database, root: Path) -> Dict[str, int]:
     """Replay golden CBM responses into provider_evidence (replayed+rehomed)."""
     conn = db.conn
     conn.execute(
@@ -220,17 +263,18 @@ def insert_cbm_evidence(
         )
 
     # search_graph definitions (qn, file, lines replayed verbatim; the
-    # mangled prefix is rehomed onto this temp root).
+    # <ROOT> token is substituted with the live mangled prefix of this
+    # temp root).
     new_prefix = mangled_root_prefix(str(root))
-    for row in parse_golden_search(orig_prefix):
+    for row in parse_golden_search():
         ls, le = row["lines"].split("-")
         ev(f"cbm-def-{row['qn']}", f"{new_prefix}.{row['qn']}", None,
            "defines", row["file"], int(ls), int(le))
         planted["definitions"] += 1
 
     # trace_path callees: group prefix names the callee module; the
-    # recorded groups carry the temp-root-rehomed namespace.
-    for i, (name, group, _hop) in enumerate(parse_golden_trace(orig_prefix)):
+    # recorded groups are rehomed onto the live temp-root namespace.
+    for i, (name, group, _hop) in enumerate(parse_golden_trace()):
         ev(f"cbm-call-{i}", f"{new_prefix}.app.main.build_invoice",
            f"{new_prefix}.{group}.{name}", "call:out", "app/main.py", 8, 8)
         planted["calls"] += 1
@@ -318,9 +362,7 @@ def run_benchmark(out_path: Path) -> Dict[str, Any]:
         db = Database(str(root / ".sot" / "sot.db"))
         try:
             Reconciler(db, str(root)).reconcile(workers=1)
-            orig_prefix = mangled_root_prefix(
-                str(_REPO / "tests" / "fixtures" / "cbm_sample_repo"))
-            planted = insert_cbm_evidence(db, root, orig_prefix)
+            planted = insert_cbm_evidence(db, root)
             scip_result = ScipImporter(db, str(root)).import_index(
                 scip_index(), provider_name="scip-index",
                 provider_version="1.0.0", project_root=str(root))

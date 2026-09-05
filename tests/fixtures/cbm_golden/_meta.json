@@ -2,7 +2,7 @@
   "description": "Golden outputs captured verbatim from the real codebase-memory-mcp binary against tests/fixtures/cbm_sample_repo. No mocked content. The CBM database itself is NOT committed.",
   "captured_at": "2026-08-25T07:20:00+07:00",
   "binary": {
-    "path": "/Users/giapminh79/.local/bin/codebase-memory-mcp",
+    "path": "<HOME>/.local/bin/codebase-memory-mcp",
     "version": "codebase-memory-mcp 0.10.8",
     "version_probe_exit": 0
   },
@@ -13,7 +13,7 @@
   "invocation_format": "codebase-memory-mcp cli --json <tool> [--flag value]",
   "fixture": {
     "path": "tests/fixtures/cbm_sample_repo",
-    "project_slug": "Users-giapminh79-code-GitHub-sot-graph-tests-fixtures-cbm_sample_repo",
+    "project_slug": "<ROOT>",
     "index_result": {"status": "indexed", "nodes": 46, "edges": 104, "exit": 0}
   },
   "captures": [
