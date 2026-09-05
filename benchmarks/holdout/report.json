@@ -1,0 +1,2842 @@
+{
+  "benchmark": "real-repo-holdout",
+  "schema_version": 1,
+  "manifest_digest": "5f1977d3c0c9",
+  "environment": {
+    "python": "3.14.6",
+    "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O"
+  },
+  "repos": [
+    {
+      "name": "itsdangerous",
+      "license": "BSD-3-Clause",
+      "commit": "c294b2fb47447d83be02470525c9c6292ce5fd74",
+      "diff_base": "93ae366874bbd4f69d90495c45b2cd336387496c",
+      "diff_head": "7f4dcf83a07bb3d53f4e0e65ef1b43327b4cca90",
+      "diff_subject": "access sha1 lazily",
+      "test_selection": {
+        "metrics": {
+          "test_selection_recall": 1.0,
+          "changed_symbols": [
+            "_lazy_sha1"
+          ]
+        },
+        "gt_tests": [
+          "tests/test_itsdangerous/test_serializer.py"
+        ],
+        "engine_tests": [
+          "tests/test_itsdangerous/test_serializer.py",
+          "tests/test_itsdangerous/test_signer.py",
+          "tests/test_itsdangerous/test_timed.py",
+          "tests/test_itsdangerous/test_url_safe.py"
+        ],
+        "missing_tests": []
+      },
+      "presence": {
+        "metrics": {
+          "presence_precision": 1.0,
+          "false_absence": 0,
+          "indexed_symbols": 136,
+          "oracle_definitions": 132,
+          "verified": 136
+        },
+        "parse_failures": [],
+        "near_misses": [],
+        "line_drift_sample": [
+          {
+            "path": "src/itsdangerous/_json.py",
+            "symbol": "_CompactJSON.loads",
+            "line": 11,
+            "gt_lines": [
+              10
+            ]
+          },
+          {
+            "path": "src/itsdangerous/_json.py",
+            "symbol": "_CompactJSON.dumps",
+            "line": 15,
+            "gt_lines": [
+              14
+            ]
+          },
+          {
+            "path": "src/itsdangerous/serializer.py",
+            "symbol": "Serializer.secret_key",
+            "line": 239,
+            "gt_lines": [
+              238
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_encoding.py",
+            "symbol": "test_want_bytes",
+            "line": 12,
+            "gt_lines": [
+              11
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_encoding.py",
+            "symbol": "test_base64",
+            "line": 18,
+            "gt_lines": [
+              17
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_encoding.py",
+            "symbol": "test_int_bytes",
+            "line": 33,
+            "gt_lines": [
+              30
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_signer.py",
+            "symbol": "TestSigner.signer_factory",
+            "line": 20,
+            "gt_lines": [
+              19
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_signer.py",
+            "symbol": "TestSigner.signer",
+            "line": 24,
+            "gt_lines": [
+              23
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_signer.py",
+            "symbol": "TestSigner.test_key_derivation",
+            "line": 70,
+            "gt_lines": [
+              67
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_signer.py",
+            "symbol": "TestSigner.test_algorithm",
+            "line": 87,
+            "gt_lines": [
+              84
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_timed.py",
+            "symbol": "FreezeMixin.ts",
+            "line": 20,
+            "gt_lines": [
+              19
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_timed.py",
+            "symbol": "FreezeMixin.freeze",
+            "line": 24,
+            "gt_lines": [
+              23
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_timed.py",
+            "symbol": "TestTimestampSigner.signer_factory",
+            "line": 31,
+            "gt_lines": [
+              30
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_timed.py",
+            "symbol": "TestTimedSerializer.serializer_factory",
+            "line": 98,
+            "gt_lines": [
+              97
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_url_safe.py",
+            "symbol": "TestURLSafeSerializer.serializer_factory",
+            "line": 13,
+            "gt_lines": [
+              12,
+              22
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_url_safe.py",
+            "symbol": "TestURLSafeSerializer.value",
+            "line": 17,
+            "gt_lines": [
+              16
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_url_safe.py",
+            "symbol": "TestURLSafeTimedSerializer.serializer_factory",
+            "line": 23,
+            "gt_lines": [
+              12,
+              22
+            ]
+          },
+          {
+            "path": "src/itsdangerous/signer.py",
+            "symbol": "Signer.secret_key",
+            "line": 176,
+            "gt_lines": [
+              175
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_serializer.py",
+            "symbol": "TestSerializer.serializer_factory",
+            "line": 38,
+            "gt_lines": [
+              37
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_serializer.py",
+            "symbol": "TestSerializer.serializer",
+            "line": 42,
+            "gt_lines": [
+              41
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_serializer.py",
+            "symbol": "TestSerializer.value",
+            "line": 46,
+            "gt_lines": [
+              45
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_serializer.py",
+            "symbol": "TestSerializer.test_serializer",
+            "line": 52,
+            "gt_lines": [
+              49
+            ]
+          },
+          {
+            "path": "tests/test_itsdangerous/test_serializer.py",
+            "symbol": "TestSerializer.test_changed_value",
+            "line": 64,
+            "gt_lines": [
+              55
+            ]
+          }
+        ],
+        "false_absence_sample": []
+      },
+      "retrieval": {
+        "metrics": {
+          "queries": 30,
+          "hit_at_1": 0.7333,
+          "hit_at_5": 1.0,
+          "mrr": 0.8444,
+          "abstention_probes": 20,
+          "abstention_accuracy": 1.0
+        },
+        "unfound_queries": [],
+        "false_presence_queries": []
+      },
+      "impact": {
+        "metrics": {
+          "targets": 16,
+          "impact_recall": 1.0,
+          "unresolved_calls": 232
+        },
+        "misses": []
+      },
+      "duration_s": 2.2
+    },
+    {
+      "name": "click",
+      "license": "BSD-3-Clause",
+      "commit": "a6256bfb5971d5e58585fe7b6c656134e1ade5a4",
+      "diff_base": "b551fe85714c906565303fae98136d7c72b252ea",
+      "diff_head": "7a0a3447f6ddd2c15438c5d098e289323f9f9556",
+      "diff_subject": "Mark clearly functions private status. Deprecated Python 2 utilities.",
+      "test_selection": {
+        "metrics": {
+          "test_selection_recall": 1.0,
+          "changed_symbols": [
+            "KeepOpenFile",
+            "LazyFile",
+            "PacifyFlushWrapper",
+            "_KeepOpenFile",
+            "_LazyFile",
+            "_PacifyFlushWrapper",
+            "__getattr__",
+            "_make_default_short_help",
+            "_safecall",
+            "make_default_short_help",
+            "safecall"
+          ]
+        },
+        "gt_tests": [
+          "tests/test_testing.py",
+          "tests/test_utils/test_KeepOpenFile.py",
+          "tests/test_utils/test_LazyFile.py",
+          "tests/test_utils/test_make_default_short_help.py"
+        ],
+        "engine_tests": [
+          "src/click/testing.py",
+          "tests/test_arguments.py",
+          "tests/test_basic.py",
+          "tests/test_chain.py",
+          "tests/test_command_decorators.py",
+          "tests/test_commands.py",
+          "tests/test_compat.py",
+          "tests/test_context.py",
+          "tests/test_custom_classes.py",
+          "tests/test_defaults.py",
+          "tests/test_formatting.py",
+          "tests/test_imports.py",
+          "tests/test_info_dict.py",
+          "tests/test_normalization.py",
+          "tests/test_options.py",
+          "tests/test_parser.py",
+          "tests/test_shell_completion.py",
+          "tests/test_stream_lifecycle.py",
+          "tests/test_termui.py",
+          "tests/test_testing.py",
+          "tests/test_types.py",
+          "tests/test_utils/test_KeepOpenFile.py",
+          "tests/test_utils/test_LazyFile.py",
+          "tests/test_utils/test__detect_program_name.py",
+          "tests/test_utils/test__expand_args.py",
+          "tests/test_utils/test_confirm.py",
+          "tests/test_utils/test_echo.py",
+          "tests/test_utils/test_echo_via_pager.py",
+          "tests/test_utils/test_format_filename.py",
+          "tests/test_utils/test_make_default_short_help.py",
+          "tests/test_utils/test_open_file.py",
+          "tests/test_utils/test_prompt.py",
+          "tests/test_utils/test_style.py",
+          "tests/typing/typing_aliased_group.py",
+          "tests/typing/typing_confirmation_option.py",
+          "tests/typing/typing_group_kw_options.py",
+          "tests/typing/typing_help_option.py",
+          "tests/typing/typing_options.py",
+          "tests/typing/typing_password_option.py",
+          "tests/typing/typing_simple_example.py",
+          "tests/typing/typing_version_option.py"
+        ],
+        "missing_tests": []
+      },
+      "presence": {
+        "metrics": {
+          "presence_precision": 1.0,
+          "false_absence": 0,
+          "indexed_symbols": 1779,
+          "oracle_definitions": 1194,
+          "verified": 1779
+        },
+        "parse_failures": [],
+        "near_misses": [],
+        "line_drift_sample": [
+          {
+            "path": "src/click/_textwrap.py",
+            "symbol": "TextWrapper.extra_indent",
+            "line": 165,
+            "gt_lines": [
+              164
+            ]
+          },
+          {
+            "path": "src/click/_winconsole.py",
+            "symbol": "_WindowsConsoleWriter._get_error_message",
+            "line": 168,
+            "gt_lines": [
+              167
+            ]
+          },
+          {
+            "path": "src/click/_winconsole.py",
+            "symbol": "ConsoleStream.name",
+            "line": 201,
+            "gt_lines": [
+              200
+            ]
+          },
+          {
+            "path": "src/click/formatting.py",
+            "symbol": "HelpFormatter.section",
+            "line": 274,
+            "gt_lines": [
+              273
+            ]
+          },
+          {
+            "path": "src/click/formatting.py",
+            "symbol": "HelpFormatter.indentation",
+            "line": 289,
+            "gt_lines": [
+              288
+            ]
+          },
+          {
+            "path": "src/click/parser.py",
+            "symbol": "_Option.takes_value",
+            "line": 166,
+            "gt_lines": [
+              165
+            ]
+          },
+          {
+            "path": "tests/test_chain.py",
+            "symbol": "test_chaining_help",
+            "line": 47,
+            "gt_lines": [
+              37
+            ]
+          },
+          {
+            "path": "tests/test_chain.py",
+            "symbol": "test_no_command_result_callback",
+            "line": 89,
+            "gt_lines": [
+              88
+            ]
+          },
+          {
+            "path": "tests/test_chain.py",
+            "symbol": "test_pipeline",
+            "line": 135,
+            "gt_lines": [
+              127
+            ]
+          },
+          {
+            "path": "tests/test_chain.py",
+            "symbol": "test_group_chaining",
+            "line": 222,
+            "gt_lines": [
+              221
+            ]
+          },
+          {
+            "path": "tests/test_command_decorators.py",
+            "symbol": "test_generate_name",
+            "line": 86,
+            "gt_lines": [
+              76
+            ]
+          },
+          {
+            "path": "tests/test_compat.py",
+            "symbol": "test_should_strip_ansi",
+            "line": 105,
+            "gt_lines": [
+              85
+            ]
+          },
+          {
+            "path": "tests/test_compat.py",
+            "symbol": "test_strip_ansi_removes_full_sequence",
+            "line": 125,
+            "gt_lines": [
+              124
+            ]
+          },
+          {
+            "path": "tests/test_compat.py",
+            "symbol": "test_strip_ansi_is_superset_of_legacy",
+            "line": 134,
+            "gt_lines": [
+              132
+            ]
+          },
+          {
+            "path": "tests/test_compat.py",
+            "symbol": "test_strip_ansi_mixed_content",
+            "line": 170,
+            "gt_lines": [
+              142
+            ]
+          },
+          {
+            "path": "tests/test_compat.py",
+            "symbol": "test_strip_ansi_leaves_plain_text",
+            "line": 196,
+            "gt_lines": [
+              183
+            ]
+          },
+          {
+            "path": "tests/test_compat.py",
+            "symbol": "test_strip_ansi_leaves_incomplete_sequences",
+            "line": 212,
+            "gt_lines": [
+              202
+            ]
+          },
+          {
+            "path": "tests/test_compat.py",
+            "symbol": "test_term_len",
+            "line": 238,
+            "gt_lines": [
+              224
+            ]
+          },
+          {
+            "path": "tests/test_compat.py",
+            "symbol": "test_ansi_re_matches_whole_sequence",
+            "line": 243,
+            "gt_lines": [
+              242
+            ]
+          },
+          {
+            "path": "tests/test_compat.py",
+            "symbol": "test_truncate_visible",
+            "line": 267,
+            "gt_lines": [
+              251
+            ]
+          },
+          {
+            "path": "tests/test_context.py",
+            "symbol": "test_multiple_eager_callbacks",
+            "line": 395,
+            "gt_lines": [
+              380
+            ]
+          },
+          {
+            "path": "tests/test_context.py",
+            "symbol": "test_parameter_source",
+            "line": 766,
+            "gt_lines": [
+              730
+            ]
+          },
+          {
+            "path": "tests/test_defaults.py",
+            "symbol": "test_basic_defaults",
+            "line": 22,
+            "gt_lines": [
+              11
+            ]
+          },
+          {
+            "path": "tests/test_defaults.py",
+            "symbol": "test_lookup_default_returns_hides_sentinel",
+            "line": 187,
+            "gt_lines": [
+              170
+            ]
+          },
+          {
+            "path": "tests/test_defaults.py",
+            "symbol": "test_default_map_source",
+            "line": 250,
+            "gt_lines": [
+              234
+            ]
+          }
+        ],
+        "false_absence_sample": []
+      },
+      "retrieval": {
+        "metrics": {
+          "queries": 30,
+          "hit_at_1": 0.7667,
+          "hit_at_5": 0.9333,
+          "mrr": 0.8361,
+          "abstention_probes": 20,
+          "abstention_accuracy": 1.0
+        },
+        "unfound_queries": [
+          "src/click/core.py::Argument",
+          "src/click/exceptions.py::__init__"
+        ],
+        "false_presence_queries": []
+      },
+      "impact": {
+        "metrics": {
+          "targets": 25,
+          "impact_recall": 0.992,
+          "unresolved_calls": 4390
+        },
+        "misses": [
+          {
+            "target": "CompletionItem",
+            "missing": [
+              "src/click/core.py::shell_complete"
+            ]
+          }
+        ]
+      },
+      "duration_s": 10.2
+    },
+    {
+      "name": "structlog",
+      "license": "MIT OR Apache-2.0",
+      "commit": "f194271d998edb9662c825adeca155e685345595",
+      "diff_base": "3800d401db2c682c7c83b2d3eec38d81c9791f4d",
+      "diff_head": "aca10f23dd12bd9e14cfe712f1ce66c9cb5f4400",
+      "diff_subject": "Drop pretend dependency (#766)",
+      "test_selection": {
+        "metrics": {
+          "test_selection_recall": 1.0,
+          "changed_symbols": [
+            "CustomError",
+            "call_recorder",
+            "raiser",
+            "stub"
+          ]
+        },
+        "gt_tests": [
+          "tests/processors/test_renderers.py",
+          "tests/test_base.py",
+          "tests/test_config.py",
+          "tests/test_frames.py",
+          "tests/test_output.py",
+          "tests/test_stdlib.py",
+          "tests/test_threadlocal.py",
+          "tests/test_twisted.py"
+        ],
+        "engine_tests": [
+          "tests/helpers.py",
+          "tests/processors/test_renderers.py",
+          "tests/test_base.py",
+          "tests/test_config.py",
+          "tests/test_frames.py",
+          "tests/test_output.py",
+          "tests/test_stdlib.py",
+          "tests/test_threadlocal.py",
+          "tests/test_twisted.py",
+          "tests/utils.py"
+        ],
+        "missing_tests": []
+      },
+      "presence": {
+        "metrics": {
+          "presence_precision": 1.0,
+          "false_absence": 0,
+          "indexed_symbols": 1099,
+          "oracle_definitions": 1030,
+          "verified": 1099
+        },
+        "parse_failures": [],
+        "near_misses": [],
+        "line_drift_sample": [
+          {
+            "path": "show_off.py",
+            "symbol": "SomeClass",
+            "line": 14,
+            "gt_lines": [
+              13
+            ]
+          },
+          {
+            "path": "tests/test_contextvars.py",
+            "symbol": "_clear_contextvars",
+            "line": 28,
+            "gt_lines": [
+              27
+            ]
+          },
+          {
+            "path": "tests/test_generic.py",
+            "symbol": "TestGenericBoundLogger.test_pickle",
+            "line": 43,
+            "gt_lines": [
+              41
+            ]
+          },
+          {
+            "path": "tests/test_native.py",
+            "symbol": "_bl",
+            "line": 22,
+            "gt_lines": [
+              21
+            ]
+          },
+          {
+            "path": "tests/test_native.py",
+            "symbol": "TestNativeFilteringLogger.test_pickle",
+            "line": 320,
+            "gt_lines": [
+              319
+            ]
+          },
+          {
+            "path": "tests/test_native.py",
+            "symbol": "TestNativeFilteringLogger.test_async_contextvars_merged",
+            "line": 352,
+            "gt_lines": [
+              344
+            ]
+          },
+          {
+            "path": "tests/test_tracebacks.py",
+            "symbol": "_unimport_rich",
+            "line": 34,
+            "gt_lines": [
+              33
+            ]
+          },
+          {
+            "path": "tests/test_tracebacks.py",
+            "symbol": "test_save_str",
+            "line": 43,
+            "gt_lines": [
+              42
+            ]
+          },
+          {
+            "path": "tests/test_tracebacks.py",
+            "symbol": "test_to_repr",
+            "line": 78,
+            "gt_lines": [
+              65
+            ]
+          },
+          {
+            "path": "tests/test_tracebacks.py",
+            "symbol": "test_to_repr_rich",
+            "line": 99,
+            "gt_lines": [
+              85
+            ]
+          },
+          {
+            "path": "tests/test_tracebacks.py",
+            "symbol": "Baam.__repr__",
+            "line": 127,
+            "gt_lines": [
+              29
+            ]
+          },
+          {
+            "path": "tests/test_tracebacks.py",
+            "symbol": "test_simple_exception_with_notes",
+            "line": 167,
+            "gt_lines": [
+              164
+            ]
+          },
+          {
+            "path": "tests/test_tracebacks.py",
+            "symbol": "test_exception_groups",
+            "line": 574,
+            "gt_lines": [
+              571
+            ]
+          },
+          {
+            "path": "tests/test_tracebacks.py",
+            "symbol": "test_exception_dict_transformer_locals_max_accept_none_argument",
+            "line": 662,
+            "gt_lines": [
+              649
+            ]
+          },
+          {
+            "path": "tests/test_tracebacks.py",
+            "symbol": "test_json_traceback_with_notes",
+            "line": 723,
+            "gt_lines": [
+              720
+            ]
+          },
+          {
+            "path": "tests/test_tracebacks.py",
+            "symbol": "test_json_traceback_max_frames",
+            "line": 802,
+            "gt_lines": [
+              793
+            ]
+          },
+          {
+            "path": "tests/test_tracebacks.py",
+            "symbol": "test_json_tracebacks_suppress",
+            "line": 845,
+            "gt_lines": [
+              838
+            ]
+          },
+          {
+            "path": "tests/test_tracebacks.py",
+            "symbol": "test_json_tracebacks_skip_sunder_dunder",
+            "line": 883,
+            "gt_lines": [
+              874
+            ]
+          },
+          {
+            "path": "tests/test_tracebacks.py",
+            "symbol": "test_json_traceback_value_error",
+            "line": 919,
+            "gt_lines": [
+              908
+            ]
+          },
+          {
+            "path": "tests/test_tracebacks.py",
+            "symbol": "test_json_exception_groups",
+            "line": 935,
+            "gt_lines": [
+              932
+            ]
+          },
+          {
+            "path": "tests/test_tracebacks.py",
+            "symbol": "TestLogException.cap_logs",
+            "line": 1008,
+            "gt_lines": [
+              1007
+            ]
+          },
+          {
+            "path": "tests/test_tracebacks.py",
+            "symbol": "TestLogException.logger",
+            "line": 1016,
+            "gt_lines": [
+              1015
+            ]
+          },
+          {
+            "path": "tests/test_tracebacks.py",
+            "symbol": "test_reraise_error_from_exception_group",
+            "line": 1079,
+            "gt_lines": [
+              1076
+            ]
+          },
+          {
+            "path": "src/structlog/_config.py",
+            "symbol": "BoundLoggerLazyProxy._context",
+            "line": 320,
+            "gt_lines": [
+              319
+            ]
+          },
+          {
+            "path": "src/structlog/contextvars.py",
+            "symbol": "bound_contextvars",
+            "line": 177,
+            "gt_lines": [
+              176
+            ]
+          }
+        ],
+        "false_absence_sample": []
+      },
+      "retrieval": {
+        "metrics": {
+          "queries": 30,
+          "hit_at_1": 0.8,
+          "hit_at_5": 0.9667,
+          "mrr": 0.855,
+          "abstention_probes": 20,
+          "abstention_accuracy": 1.0
+        },
+        "unfound_queries": [
+          "tests/processors/test_renderers.py::test_formats"
+        ],
+        "false_presence_queries": []
+      },
+      "impact": {
+        "metrics": {
+          "targets": 25,
+          "impact_recall": 1.0,
+          "unresolved_calls": 1626
+        },
+        "misses": []
+      },
+      "duration_s": 6.1
+    },
+    {
+      "name": "tenacity",
+      "license": "Apache-2.0",
+      "commit": "949dcfa6c0a4f0109dbbd019ff58208a580d185b",
+      "diff_base": "ee6a8f7a76654d712fd44604d3b6d4f9af6b2249",
+      "diff_head": "a15fa645326ef776dbef81ee13e3833cd14bdced",
+      "diff_subject": "fix: Avoid overwriting local contexts with retry decorator (#479)",
+      "test_selection": {
+        "metrics": {
+          "test_selection_recall": 1.0,
+          "changed_symbols": [
+            "TestIssue478",
+            "asynctest"
+          ]
+        },
+        "gt_tests": [
+          "tests/test_asyncio.py",
+          "tests/test_issue_478.py"
+        ],
+        "engine_tests": [
+          "tests/test_after.py",
+          "tests/test_asyncio.py",
+          "tests/test_issue_478.py",
+          "tests/test_tenacity.py",
+          "tests/test_tornado.py",
+          "tests/test_utils.py"
+        ],
+        "missing_tests": []
+      },
+      "presence": {
+        "metrics": {
+          "presence_precision": 1.0,
+          "false_absence": 0,
+          "indexed_symbols": 645,
+          "oracle_definitions": 501,
+          "verified": 645
+        },
+        "parse_failures": [],
+        "near_misses": [],
+        "line_drift_sample": [
+          {
+            "path": "tenacity/__init__.py",
+            "symbol": "IterState",
+            "line": 121,
+            "gt_lines": [
+              120
+            ]
+          },
+          {
+            "path": "tenacity/__init__.py",
+            "symbol": "BaseAction.__repr__",
+            "line": 164,
+            "gt_lines": [
+              163,
+              327,
+              659
+            ]
+          },
+          {
+            "path": "tenacity/__init__.py",
+            "symbol": "BaseAction.__str__",
+            "line": 171,
+            "gt_lines": [
+              170,
+              210,
+              323
+            ]
+          },
+          {
+            "path": "tenacity/__init__.py",
+            "symbol": "RetryError.__str__",
+            "line": 211,
+            "gt_lines": [
+              170,
+              210,
+              323
+            ]
+          },
+          {
+            "path": "tenacity/__init__.py",
+            "symbol": "BaseRetrying.__str__",
+            "line": 324,
+            "gt_lines": [
+              170,
+              210,
+              323
+            ]
+          },
+          {
+            "path": "tenacity/__init__.py",
+            "symbol": "BaseRetrying.__repr__",
+            "line": 328,
+            "gt_lines": [
+              163,
+              327,
+              659
+            ]
+          },
+          {
+            "path": "tenacity/__init__.py",
+            "symbol": "BaseRetrying.statistics",
+            "line": 341,
+            "gt_lines": [
+              340
+            ]
+          },
+          {
+            "path": "tenacity/__init__.py",
+            "symbol": "BaseRetrying.iter_state",
+            "line": 367,
+            "gt_lines": [
+              366
+            ]
+          },
+          {
+            "path": "tenacity/__init__.py",
+            "symbol": "BaseRetrying.wraps.retry_with",
+            "line": 397,
+            "gt_lines": [
+              688
+            ]
+          },
+          {
+            "path": "tenacity/__init__.py",
+            "symbol": "BaseRetrying.__call__",
+            "line": 522,
+            "gt_lines": [
+              521,
+              534,
+              690
+            ]
+          },
+          {
+            "path": "tenacity/__init__.py",
+            "symbol": "Retrying.__call__",
+            "line": 535,
+            "gt_lines": [
+              521,
+              534,
+              690
+            ]
+          },
+          {
+            "path": "tenacity/__init__.py",
+            "symbol": "Future.failed",
+            "line": 568,
+            "gt_lines": [
+              567
+            ]
+          },
+          {
+            "path": "tenacity/__init__.py",
+            "symbol": "Future.construct",
+            "line": 573,
+            "gt_lines": [
+              572
+            ]
+          },
+          {
+            "path": "tenacity/__init__.py",
+            "symbol": "RetryCallState.seconds_since_start",
+            "line": 631,
+            "gt_lines": [
+              630
+            ]
+          },
+          {
+            "path": "tenacity/__init__.py",
+            "symbol": "RetryCallState.__repr__",
+            "line": 660,
+            "gt_lines": [
+              163,
+              327,
+              659
+            ]
+          },
+          {
+            "path": "tenacity/__init__.py",
+            "symbol": "_AsyncRetryDecorator.__call__",
+            "line": 723,
+            "gt_lines": [
+              521,
+              534,
+              690
+            ]
+          },
+          {
+            "path": "tenacity/asyncio/__init__.py",
+            "symbol": "AsyncRetrying.__call__",
+            "line": 113,
+            "gt_lines": [
+              112
+            ]
+          },
+          {
+            "path": "tenacity/asyncio/__init__.py",
+            "symbol": "AsyncRetrying._add_action_func",
+            "line": 139,
+            "gt_lines": [
+              138
+            ]
+          },
+          {
+            "path": "tenacity/asyncio/__init__.py",
+            "symbol": "AsyncRetrying._run_retry",
+            "line": 143,
+            "gt_lines": [
+              142
+            ]
+          },
+          {
+            "path": "tenacity/asyncio/__init__.py",
+            "symbol": "AsyncRetrying._run_wait",
+            "line": 149,
+            "gt_lines": [
+              148
+            ]
+          },
+          {
+            "path": "tenacity/asyncio/__init__.py",
+            "symbol": "AsyncRetrying._run_stop",
+            "line": 160,
+            "gt_lines": [
+              159
+            ]
+          },
+          {
+            "path": "tenacity/asyncio/__init__.py",
+            "symbol": "AsyncRetrying.iter",
+            "line": 167,
+            "gt_lines": [
+              166
+            ]
+          },
+          {
+            "path": "tenacity/asyncio/__init__.py",
+            "symbol": "AsyncRetrying.__iter__",
+            "line": 175,
+            "gt_lines": [
+              174
+            ]
+          },
+          {
+            "path": "tenacity/asyncio/__init__.py",
+            "symbol": "AsyncRetrying.wraps",
+            "line": 211,
+            "gt_lines": [
+              210
+            ]
+          },
+          {
+            "path": "tenacity/asyncio/retry.py",
+            "symbol": "async_retry_base.__call__",
+            "line": 31,
+            "gt_lines": [
+              29,
+              72,
+              93,
+              109,
+              133
+            ]
+          }
+        ],
+        "false_absence_sample": []
+      },
+      "retrieval": {
+        "metrics": {
+          "queries": 30,
+          "hit_at_1": 0.7,
+          "hit_at_5": 0.8333,
+          "mrr": 0.7611,
+          "abstention_probes": 20,
+          "abstention_accuracy": 1.0
+        },
+        "unfound_queries": [
+          "tenacity/retry.py::__call__",
+          "tenacity/retry.py::__init__",
+          "tenacity/wait.py::__init__",
+          "tests/test_tenacity.py::__init__",
+          "tests/test_tenacity.py::__init__"
+        ],
+        "false_presence_queries": []
+      },
+      "impact": {
+        "metrics": {
+          "targets": 25,
+          "impact_recall": 0.88,
+          "unresolved_calls": 1161
+        },
+        "misses": [
+          {
+            "target": "CustomError",
+            "missing": [
+              "tests/test_tenacity.py::f",
+              "tests/test_tenacity.py::go",
+              "tests/test_tenacity.py::test"
+            ]
+          },
+          {
+            "target": "DoAttempt",
+            "missing": [
+              "tenacity/__init__.py::_begin_iter"
+            ]
+          },
+          {
+            "target": "DoSleep",
+            "missing": [
+              "tenacity/__init__.py::_post_stop_check_actions"
+            ]
+          }
+        ]
+      },
+      "duration_s": 9.2
+    },
+    {
+      "name": "python-slugify",
+      "license": "MIT",
+      "commit": "26b81c2e224ebb65c7fba40d37d17d762be3782f",
+      "diff_base": "e785874f0ea053cea393d396b615235e7c0ad179",
+      "diff_head": "3b51e23c81f466f3bd7dd916407d074ed0f802f5",
+      "diff_subject": "Create command line tool that can set all parameters",
+      "test_selection": {
+        "metrics": {
+          "test_selection_recall": 1.0,
+          "changed_symbols": [
+            "TestCommandParams",
+            "captured_stderr",
+            "loaded_stdin",
+            "main",
+            "parse_args",
+            "slugify_params"
+          ]
+        },
+        "gt_tests": [
+          "test.py"
+        ],
+        "engine_tests": [
+          "test.py"
+        ],
+        "missing_tests": []
+      },
+      "presence": {
+        "metrics": {
+          "presence_precision": 1.0,
+          "false_absence": 0,
+          "indexed_symbols": 97,
+          "oracle_definitions": 96,
+          "verified": 97
+        },
+        "parse_failures": [],
+        "near_misses": [],
+        "line_drift_sample": [
+          {
+            "path": "test.py",
+            "symbol": "captured_stderr",
+            "line": 545,
+            "gt_lines": [
+              544
+            ]
+          },
+          {
+            "path": "test.py",
+            "symbol": "loaded_stdin",
+            "line": 555,
+            "gt_lines": [
+              554
+            ]
+          }
+        ],
+        "false_absence_sample": []
+      },
+      "retrieval": {
+        "metrics": {
+          "queries": 30,
+          "hit_at_1": 0.8,
+          "hit_at_5": 0.9667,
+          "mrr": 0.8611,
+          "abstention_probes": 20,
+          "abstention_accuracy": 1.0
+        },
+        "unfound_queries": [
+          "slugify/slugify.py::slugify"
+        ],
+        "false_presence_queries": []
+      },
+      "impact": {
+        "metrics": {
+          "targets": 6,
+          "impact_recall": 0.838,
+          "unresolved_calls": 221
+        },
+        "misses": [
+          {
+            "target": "slugify",
+            "missing": [
+              "test.py::test_accented_text",
+              "test.py::test_accented_text_with_non_word_characters",
+              "test.py::test_contains_numbers",
+              "test.py::test_custom_separator",
+              "test.py::test_cyrillic_text",
+              "test.py::test_differently_cased_stopword_match",
+              "test.py::test_emojis",
+              "test.py::test_ends_with_number",
+              "test.py::test_extraneous_seperators",
+              "test.py::test_html_decimal_off",
+              "test.py::test_html_decimal_on",
+              "test.py::test_html_entities_off",
+              "test.py::test_html_entities_on",
+              "test.py::test_html_hexadecimal_off",
+              "test.py::test_html_hexadecimal_on",
+              "test.py::test_max_length",
+              "test.py::test_max_length_cutoff_not_required",
+              "test.py::test_multi_character_separator",
+              "test.py::test_multiple_stopword_occurances",
+              "test.py::test_multiple_stopwords",
+              "test.py::test_non_word_characters",
+              "test.py::test_numbers_and_symbols",
+              "test.py::test_numbers_only",
+              "test.py::test_phonetic_conversion_of_eastern_scripts",
+              "test.py::test_regex_pattern_keep_underscore",
+              "test.py::test_regex_pattern_keep_underscore_with_underscore_as_separator",
+              "test.py::test_replacements",
+              "test.py::test_replacements_german_umlaut_custom",
+              "test.py::test_save_order",
+              "test.py::test_save_order_rtl",
+              "test.py::test_starts_with_number",
+              "test.py::test_stopword_removal",
+              "test.py::test_stopword_removal_casesensitive",
+              "test.py::test_stopwords_with_different_separator",
+              "test.py::test_word_boundary"
+            ]
+          }
+        ]
+      },
+      "duration_s": 3.1
+    },
+    {
+      "name": "freezegun",
+      "license": "Apache-2.0",
+      "commit": "c9bf52c5aa12ea1b5b8647a136a92504ea071f2f",
+      "diff_base": "0823bcf8feaa910a79ee53c5f1d8c68b2784869f",
+      "diff_head": "76cc551711750577ecfe8a838395c429438c7b42",
+      "diff_subject": "Add some more time functions.: localtime, gmtime, strftime.",
+      "test_selection": {
+        "metrics": {
+          "test_selection_recall": 1.0,
+          "changed_symbols": [
+            "FakeGMTTime",
+            "FakeLocalTime",
+            "FakeStrfTime",
+            "fake_gmtime_function",
+            "fake_localtime_function",
+            "fake_strftime_function",
+            "modify_timezone",
+            "test_fake_gmtime_function",
+            "test_fake_strftime_function",
+            "test_import_localtime",
+            "test_strftime",
+            "test_time_gmtime",
+            "test_time_localtime"
+          ]
+        },
+        "gt_tests": [
+          "tests/test_class_import.py",
+          "tests/test_datetimes.py"
+        ],
+        "engine_tests": [
+          "tests/fake_module.py",
+          "tests/test_class_import.py",
+          "tests/test_datetimes.py",
+          "tests/test_import_alias.py",
+          "tests/test_operations.py",
+          "tests/test_pickle.py",
+          "tests/test_sqlite3.py",
+          "tests/utils.py"
+        ],
+        "missing_tests": []
+      },
+      "presence": {
+        "metrics": {
+          "presence_precision": 1.0,
+          "false_absence": 0,
+          "indexed_symbols": 316,
+          "oracle_definitions": 290,
+          "verified": 316
+        },
+        "parse_failures": [],
+        "near_misses": [],
+        "line_drift_sample": [
+          {
+            "path": "freezegun/api.py",
+            "symbol": "FakeDateMeta.__instancecheck__",
+            "line": 297,
+            "gt_lines": [
+              296,
+              356
+            ]
+          },
+          {
+            "path": "freezegun/api.py",
+            "symbol": "FakeDateMeta.__subclasscheck__",
+            "line": 301,
+            "gt_lines": [
+              300,
+              360
+            ]
+          },
+          {
+            "path": "freezegun/api.py",
+            "symbol": "FakeDate.today",
+            "line": 339,
+            "gt_lines": [
+              338,
+              420
+            ]
+          },
+          {
+            "path": "freezegun/api.py",
+            "symbol": "FakeDate._date_to_freeze",
+            "line": 344,
+            "gt_lines": [
+              343
+            ]
+          },
+          {
+            "path": "freezegun/api.py",
+            "symbol": "FakeDate._tz_offset",
+            "line": 348,
+            "gt_lines": [
+              347,
+              435
+            ]
+          },
+          {
+            "path": "freezegun/api.py",
+            "symbol": "FakeDatetimeMeta.__instancecheck__",
+            "line": 357,
+            "gt_lines": [
+              296,
+              356
+            ]
+          },
+          {
+            "path": "freezegun/api.py",
+            "symbol": "FakeDatetimeMeta.__subclasscheck__",
+            "line": 361,
+            "gt_lines": [
+              300,
+              360
+            ]
+          },
+          {
+            "path": "freezegun/api.py",
+            "symbol": "FakeDatetime.fromtimestamp",
+            "line": 387,
+            "gt_lines": [
+              386
+            ]
+          },
+          {
+            "path": "freezegun/api.py",
+            "symbol": "FakeDatetime.now",
+            "line": 401,
+            "gt_lines": [
+              400
+            ]
+          },
+          {
+            "path": "freezegun/api.py",
+            "symbol": "FakeDatetime.nanosecond",
+            "line": 413,
+            "gt_lines": [
+              412
+            ]
+          },
+          {
+            "path": "freezegun/api.py",
+            "symbol": "FakeDatetime.today",
+            "line": 421,
+            "gt_lines": [
+              338,
+              420
+            ]
+          },
+          {
+            "path": "freezegun/api.py",
+            "symbol": "FakeDatetime.utcnow",
+            "line": 425,
+            "gt_lines": [
+              424
+            ]
+          },
+          {
+            "path": "freezegun/api.py",
+            "symbol": "FakeDatetime._time_to_freeze",
+            "line": 430,
+            "gt_lines": [
+              429
+            ]
+          },
+          {
+            "path": "freezegun/api.py",
+            "symbol": "FakeDatetime._tz_offset",
+            "line": 436,
+            "gt_lines": [
+              347,
+              435
+            ]
+          },
+          {
+            "path": "tests/test_class_decorator.py",
+            "symbol": "TestClassDecoratorWithFixture",
+            "line": 9,
+            "gt_lines": [
+              8
+            ]
+          },
+          {
+            "path": "tests/test_class_decorator.py",
+            "symbol": "TestClassDecoratorWithFixture.ff",
+            "line": 11,
+            "gt_lines": [
+              10
+            ]
+          },
+          {
+            "path": "tests/test_class_decorator.py",
+            "symbol": "TestClassDecoratorWithFixture.yield_ff",
+            "line": 15,
+            "gt_lines": [
+              14
+            ]
+          },
+          {
+            "path": "tests/test_class_decorator.py",
+            "symbol": "TestClassDecoratorWithFixture.func",
+            "line": 19,
+            "gt_lines": [
+              18
+            ]
+          },
+          {
+            "path": "tests/test_class_decorator.py",
+            "symbol": "test_decorator_with_argument_named_func",
+            "line": 40,
+            "gt_lines": [
+              38
+            ]
+          },
+          {
+            "path": "tests/test_class_decorator.py",
+            "symbol": "test_freezegun_with_argument_named_arg",
+            "line": 47,
+            "gt_lines": [
+              45
+            ]
+          },
+          {
+            "path": "tests/test_class_decorator.py",
+            "symbol": "test_freezegun_decorator_first_parametrize_second",
+            "line": 54,
+            "gt_lines": [
+              52
+            ]
+          },
+          {
+            "path": "tests/test_class_import.py",
+            "symbol": "test_import_datetime_works",
+            "line": 25,
+            "gt_lines": [
+              24
+            ]
+          },
+          {
+            "path": "tests/test_class_import.py",
+            "symbol": "test_import_date_works",
+            "line": 30,
+            "gt_lines": [
+              29
+            ]
+          },
+          {
+            "path": "tests/test_class_import.py",
+            "symbol": "test_import_time",
+            "line": 35,
+            "gt_lines": [
+              34
+            ]
+          },
+          {
+            "path": "tests/test_class_import.py",
+            "symbol": "test_avoid_replacing_equal_to_anything",
+            "line": 107,
+            "gt_lines": [
+              106
+            ]
+          }
+        ],
+        "false_absence_sample": []
+      },
+      "retrieval": {
+        "metrics": {
+          "queries": 30,
+          "hit_at_1": 0.8333,
+          "hit_at_5": 1.0,
+          "mrr": 0.9167,
+          "abstention_probes": 20,
+          "abstention_accuracy": 1.0
+        },
+        "unfound_queries": [],
+        "false_presence_queries": []
+      },
+      "impact": {
+        "metrics": {
+          "targets": 25,
+          "impact_recall": 1.0,
+          "unresolved_calls": 754
+        },
+        "misses": []
+      },
+      "duration_s": 4.1
+    },
+    {
+      "name": "schedule",
+      "license": "MIT",
+      "commit": "4386f4562df3ed24fd198324e279d215db2154d6",
+      "diff_base": "4386f4562df3ed24fd198324e279d215db2154d6",
+      "diff_head": "2dcb5833cdf2b7d7a1bda90c19e2fb7e373e66df",
+      "diff_subject": "Timezone bugfixes (#623)",
+      "test_selection": {
+        "metrics": {
+          "test_selection_recall": 1.0,
+          "changed_symbols": [
+            "_move_to_next_weekday",
+            "_weekday_index"
+          ]
+        },
+        "gt_tests": [
+          "test_schedule.py"
+        ],
+        "engine_tests": [
+          "test_schedule.py"
+        ],
+        "missing_tests": []
+      },
+      "presence": {
+        "metrics": {
+          "presence_precision": 1.0,
+          "false_absence": 0,
+          "indexed_symbols": 126,
+          "oracle_definitions": 109,
+          "verified": 126
+        },
+        "parse_failures": [],
+        "near_misses": [],
+        "line_drift_sample": [
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Scheduler.idle_seconds",
+            "line": 197,
+            "gt_lines": [
+              196,
+              893
+            ]
+          },
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Job.second",
+            "line": 327,
+            "gt_lines": [
+              326
+            ]
+          },
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Job.seconds",
+            "line": 333,
+            "gt_lines": [
+              332
+            ]
+          },
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Job.minute",
+            "line": 338,
+            "gt_lines": [
+              337
+            ]
+          },
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Job.minutes",
+            "line": 344,
+            "gt_lines": [
+              343
+            ]
+          },
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Job.hour",
+            "line": 349,
+            "gt_lines": [
+              348
+            ]
+          },
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Job.hours",
+            "line": 355,
+            "gt_lines": [
+              354
+            ]
+          },
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Job.day",
+            "line": 360,
+            "gt_lines": [
+              359
+            ]
+          },
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Job.days",
+            "line": 366,
+            "gt_lines": [
+              365
+            ]
+          },
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Job.week",
+            "line": 371,
+            "gt_lines": [
+              370
+            ]
+          },
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Job.weeks",
+            "line": 377,
+            "gt_lines": [
+              376
+            ]
+          },
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Job.monday",
+            "line": 382,
+            "gt_lines": [
+              381
+            ]
+          },
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Job.tuesday",
+            "line": 393,
+            "gt_lines": [
+              392
+            ]
+          },
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Job.wednesday",
+            "line": 404,
+            "gt_lines": [
+              403
+            ]
+          },
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Job.thursday",
+            "line": 415,
+            "gt_lines": [
+              414
+            ]
+          },
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Job.friday",
+            "line": 426,
+            "gt_lines": [
+              425
+            ]
+          },
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Job.saturday",
+            "line": 437,
+            "gt_lines": [
+              436
+            ]
+          },
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Job.sunday",
+            "line": 448,
+            "gt_lines": [
+              447
+            ]
+          },
+          {
+            "path": "schedule/__init__.py",
+            "symbol": "Job.should_run",
+            "line": 668,
+            "gt_lines": [
+              667
+            ]
+          }
+        ],
+        "false_absence_sample": []
+      },
+      "retrieval": {
+        "metrics": {
+          "queries": 30,
+          "hit_at_1": 0.8333,
+          "hit_at_5": 1.0,
+          "mrr": 0.9,
+          "abstention_probes": 20,
+          "abstention_accuracy": 1.0
+        },
+        "unfound_queries": [],
+        "false_presence_queries": []
+      },
+      "impact": {
+        "metrics": {
+          "targets": 6,
+          "impact_recall": 1.0,
+          "unresolved_calls": 498
+        },
+        "misses": []
+      },
+      "duration_s": 4.3
+    },
+    {
+      "name": "pexpect",
+      "license": "ISC",
+      "commit": "aa989594e1e413f45c18b26ded1783f7d5990fe5",
+      "diff_base": "2532721644781543ca660e52d48a35bd93872fc1",
+      "diff_head": "c59c991ebac3f4d77d9860896e9a337fc68c6ce9",
+      "diff_subject": "rework async unittests to rely on unittest.IsolatedAsyncioTestCase",
+      "test_selection": {
+        "metrics": {
+          "test_selection_recall": 1.0,
+          "changed_symbols": [
+            "AsyncPexpectTestCase",
+            "_PexpectTestCaseBase",
+            "run"
+          ]
+        },
+        "gt_tests": [
+          "tests/test_async.py"
+        ],
+        "engine_tests": [
+          "tests/PexpectTestCase.py",
+          "tests/deprecated_test_filedescriptor.py",
+          "tests/deprecated_test_run_out_of_pty.py",
+          "tests/test_ansi.py",
+          "tests/test_async.py",
+          "tests/test_command_list_split.py",
+          "tests/test_constructor.py",
+          "tests/test_ctrl_chars.py",
+          "tests/test_delay.py",
+          "tests/test_destructor.py",
+          "tests/test_dotall.py",
+          "tests/test_env.py",
+          "tests/test_expect.py",
+          "tests/test_filedescriptor.py",
+          "tests/test_interact.py",
+          "tests/test_isalive.py",
+          "tests/test_log.py",
+          "tests/test_misc.py",
+          "tests/test_missing_command.py",
+          "tests/test_performance.py",
+          "tests/test_popen_spawn.py",
+          "tests/test_pxssh.py",
+          "tests/test_repr.py",
+          "tests/test_run.py",
+          "tests/test_screen.py",
+          "tests/test_socket.py",
+          "tests/test_socket_fd.py",
+          "tests/test_socket_pexpect.py",
+          "tests/test_timeout_pattern.py",
+          "tests/test_unicode.py",
+          "tests/test_which.py",
+          "tests/test_winsize.py"
+        ],
+        "missing_tests": []
+      },
+      "presence": {
+        "metrics": {
+          "presence_precision": 1.0,
+          "false_absence": 0,
+          "indexed_symbols": 631,
+          "oracle_definitions": 609,
+          "verified": 631
+        },
+        "parse_failures": [
+          "notes/my_forkpty.py",
+          "tests/platform_checks/check.py",
+          "tests/platform_checks/check2.py",
+          "tests/platform_checks/check_control_terminal.py",
+          "tests/platform_checks/check_handler.py",
+          "tests/platform_checks/check_read.py",
+          "tests/platform_checks/check_signals.py",
+          "tests/ticker.py"
+        ],
+        "near_misses": [],
+        "line_drift_sample": [
+          {
+            "path": "pexpect/_async_pre_await.py",
+            "symbol": "expect_async",
+            "line": 13,
+            "gt_lines": [
+              12
+            ]
+          },
+          {
+            "path": "pexpect/_async_pre_await.py",
+            "symbol": "repl_run_command_async",
+            "line": 38,
+            "gt_lines": [
+              37
+            ]
+          },
+          {
+            "path": "pexpect/pty_spawn.py",
+            "symbol": "_wrap_ptyprocess_err",
+            "line": 20,
+            "gt_lines": [
+              19
+            ]
+          },
+          {
+            "path": "pexpect/pty_spawn.py",
+            "symbol": "spawn.flag_eof",
+            "line": 624,
+            "gt_lines": [
+              619,
+              623
+            ]
+          },
+          {
+            "path": "pexpect/socket_pexpect.py",
+            "symbol": "SocketSpawn._timeout",
+            "line": 111,
+            "gt_lines": [
+              110
+            ]
+          },
+          {
+            "path": "pexpect/spawnbase.py",
+            "symbol": "_NullCoder.encode",
+            "line": 16,
+            "gt_lines": [
+              15
+            ]
+          },
+          {
+            "path": "pexpect/spawnbase.py",
+            "symbol": "_NullCoder.decode",
+            "line": 20,
+            "gt_lines": [
+              19
+            ]
+          },
+          {
+            "path": "tests/test_env.py",
+            "symbol": "example_script",
+            "line": 31,
+            "gt_lines": [
+              30
+            ]
+          },
+          {
+            "path": "tests/test_async.py",
+            "symbol": "AsyncTests",
+            "line": 17,
+            "gt_lines": [
+              16
+            ]
+          }
+        ],
+        "false_absence_sample": []
+      },
+      "retrieval": {
+        "metrics": {
+          "queries": 30,
+          "hit_at_1": 0.7333,
+          "hit_at_5": 0.9667,
+          "mrr": 0.8389,
+          "abstention_probes": 20,
+          "abstention_accuracy": 1.0
+        },
+        "unfound_queries": [
+          "pexpect/pty_spawn.py::send"
+        ],
+        "false_presence_queries": []
+      },
+      "impact": {
+        "metrics": {
+          "targets": 25,
+          "impact_recall": 0.96,
+          "unresolved_calls": 2610
+        },
+        "misses": [
+          {
+            "target": "hex_dump",
+            "missing": [
+              "tests/test_expect.py::hex_diff"
+            ]
+          }
+        ]
+      },
+      "duration_s": 4.8
+    },
+    {
+      "name": "requests",
+      "license": "Apache-2.0",
+      "commit": "6f205ff422bccd5e4c4fc0b64c5f3e7df5181db6",
+      "diff_base": "a58d7f2ffb4d00b46dca2d70a3932a0b37e22fac",
+      "diff_head": "a94e9b5308ffcc3d2913ab873e9810a6601a67da",
+      "diff_subject": "Add local TLS server",
+      "test_selection": {
+        "metrics": {
+          "test_selection_recall": 1.0,
+          "changed_symbols": [
+            "TLSServer"
+          ]
+        },
+        "gt_tests": [
+          "tests/test_requests.py"
+        ],
+        "engine_tests": [
+          "tests/certs/README.md",
+          "tests/certs/expired/Makefile",
+          "tests/certs/expired/README.md",
+          "tests/certs/expired/ca/Makefile",
+          "tests/certs/expired/ca/ca-private.key",
+          "tests/certs/expired/ca/ca.cnf",
+          "tests/certs/expired/ca/ca.crt",
+          "tests/certs/expired/ca/ca.srl",
+          "tests/certs/expired/server/Makefile",
+          "tests/certs/expired/server/cert.cnf",
+          "tests/certs/expired/server/server.csr",
+          "tests/certs/expired/server/server.key",
+          "tests/certs/expired/server/server.pem",
+          "tests/certs/mtls/Makefile",
+          "tests/certs/mtls/README.md",
+          "tests/certs/mtls/client/Makefile",
+          "tests/certs/mtls/client/ca",
+          "tests/certs/mtls/client/cert.cnf",
+          "tests/certs/mtls/client/client.csr",
+          "tests/certs/mtls/client/client.key",
+          "tests/certs/mtls/client/client.pem",
+          "tests/certs/valid/ca",
+          "tests/certs/valid/server/Makefile",
+          "tests/certs/valid/server/cert.cnf",
+          "tests/certs/valid/server/server.csr",
+          "tests/certs/valid/server/server.key",
+          "tests/certs/valid/server/server.pem",
+          "tests/test_adapters.py",
+          "tests/test_requests.py",
+          "tests/testserver/server.py"
+        ],
+        "missing_tests": []
+      },
+      "presence": {
+        "metrics": {
+          "presence_precision": 1.0,
+          "false_absence": 0,
+          "indexed_symbols": 763,
+          "oracle_definitions": 679,
+          "verified": 763
+        },
+        "parse_failures": [],
+        "near_misses": [],
+        "line_drift_sample": [
+          {
+            "path": "tests/test_hooks.py",
+            "symbol": "test_hooks",
+            "line": 17,
+            "gt_lines": [
+              10
+            ]
+          },
+          {
+            "path": "tests/utils.py",
+            "symbol": "override_environ",
+            "line": 6,
+            "gt_lines": [
+              5
+            ]
+          },
+          {
+            "path": "src/requests/_types.py",
+            "symbol": "SupportsRead",
+            "line": 28,
+            "gt_lines": [
+              27
+            ]
+          },
+          {
+            "path": "src/requests/_types.py",
+            "symbol": "SupportsItems",
+            "line": 33,
+            "gt_lines": [
+              32
+            ]
+          },
+          {
+            "path": "src/requests/cookies.py",
+            "symbol": "MockRequest.unverifiable",
+            "line": 102,
+            "gt_lines": [
+              101
+            ]
+          },
+          {
+            "path": "src/requests/cookies.py",
+            "symbol": "MockRequest.origin_req_host",
+            "line": 106,
+            "gt_lines": [
+              105
+            ]
+          },
+          {
+            "path": "src/requests/cookies.py",
+            "symbol": "MockRequest.host",
+            "line": 110,
+            "gt_lines": [
+              109
+            ]
+          },
+          {
+            "path": "src/requests/models.py",
+            "symbol": "RequestEncodingMixin.path_url",
+            "line": 113,
+            "gt_lines": [
+              112
+            ]
+          },
+          {
+            "path": "src/requests/models.py",
+            "symbol": "RequestEncodingMixin._encode_params",
+            "line": 152,
+            "gt_lines": [
+              151
+            ]
+          },
+          {
+            "path": "src/requests/models.py",
+            "symbol": "RequestEncodingMixin._encode_files",
+            "line": 184,
+            "gt_lines": [
+              183
+            ]
+          },
+          {
+            "path": "src/requests/models.py",
+            "symbol": "PreparedRequest._get_idna_encoded_host",
+            "line": 477,
+            "gt_lines": [
+              476
+            ]
+          },
+          {
+            "path": "src/requests/models.py",
+            "symbol": "Response.ok",
+            "line": 865,
+            "gt_lines": [
+              864
+            ]
+          },
+          {
+            "path": "src/requests/models.py",
+            "symbol": "Response.is_redirect",
+            "line": 880,
+            "gt_lines": [
+              879
+            ]
+          },
+          {
+            "path": "src/requests/models.py",
+            "symbol": "Response.is_permanent_redirect",
+            "line": 887,
+            "gt_lines": [
+              886
+            ]
+          },
+          {
+            "path": "src/requests/models.py",
+            "symbol": "Response.next",
+            "line": 895,
+            "gt_lines": [
+              894
+            ]
+          },
+          {
+            "path": "src/requests/models.py",
+            "symbol": "Response.apparent_encoding",
+            "line": 900,
+            "gt_lines": [
+              899
+            ]
+          },
+          {
+            "path": "src/requests/models.py",
+            "symbol": "Response.content",
+            "line": 1038,
+            "gt_lines": [
+              1037
+            ]
+          },
+          {
+            "path": "src/requests/models.py",
+            "symbol": "Response.text",
+            "line": 1057,
+            "gt_lines": [
+              1056
+            ]
+          },
+          {
+            "path": "src/requests/models.py",
+            "symbol": "Response.links",
+            "line": 1130,
+            "gt_lines": [
+              1129
+            ]
+          },
+          {
+            "path": "src/requests/utils.py",
+            "symbol": "atomic_open",
+            "line": 329,
+            "gt_lines": [
+              328
+            ]
+          },
+          {
+            "path": "src/requests/utils.py",
+            "symbol": "set_environ",
+            "line": 788,
+            "gt_lines": [
+              787
+            ]
+          },
+          {
+            "path": "tests/test_lowlevel.py",
+            "symbol": "test_use_proxy_from_environment",
+            "line": 290,
+            "gt_lines": [
+              289
+            ]
+          },
+          {
+            "path": "tests/test_requests.py",
+            "symbol": "TestRequests.test_invalid_url",
+            "line": 111,
+            "gt_lines": [
+              99
+            ]
+          },
+          {
+            "path": "tests/test_requests.py",
+            "symbol": "TestRequests.test_no_content_length",
+            "line": 125,
+            "gt_lines": [
+              124
+            ]
+          },
+          {
+            "path": "tests/test_requests.py",
+            "symbol": "TestRequests.test_no_body_content_length",
+            "line": 130,
+            "gt_lines": [
+              129
+            ]
+          }
+        ],
+        "false_absence_sample": []
+      },
+      "retrieval": {
+        "metrics": {
+          "queries": 30,
+          "hit_at_1": 0.8,
+          "hit_at_5": 0.9,
+          "mrr": 0.85,
+          "abstention_probes": 20,
+          "abstention_accuracy": 1.0
+        },
+        "unfound_queries": [
+          "src/requests/adapters.py::__init__",
+          "src/requests/models.py::Request",
+          "src/requests/sessions.py::Session"
+        ],
+        "false_presence_queries": []
+      },
+      "impact": {
+        "metrics": {
+          "targets": 25,
+          "impact_recall": 1.0,
+          "unresolved_calls": 1513
+        },
+        "misses": []
+      },
+      "duration_s": 8.2
+    },
+    {
+      "name": "jsonschema",
+      "license": "MIT",
+      "commit": "bb947f1e2cb4447da0647d79cbcb33f791cddd87",
+      "diff_base": "8b71f9eff23a8bdf5e4b8f55d636b00a31932856",
+      "diff_head": "e68b54949f503c0f3c599da5b8b4d265ed9a6eb7",
+      "diff_subject": "Move is_valid function to module scope",
+      "test_selection": {
+        "metrics": {
+          "test_selection_recall": null,
+          "reason": "no tests reference changed symbols"
+        },
+        "changed_symbols": [
+          "is_valid"
+        ],
+        "gt_tests": [],
+        "engine_tests": []
+      },
+      "presence": {
+        "metrics": {
+          "presence_precision": 1.0,
+          "false_absence": 0,
+          "indexed_symbols": 763,
+          "oracle_definitions": 691,
+          "verified": 763
+        },
+        "parse_failures": [],
+        "near_misses": [],
+        "line_drift_sample": [
+          {
+            "path": "jsonschema/tests/_suite.py",
+            "symbol": "Suite",
+            "line": 53,
+            "gt_lines": [
+              52
+            ]
+          },
+          {
+            "path": "jsonschema/tests/_suite.py",
+            "symbol": "Version",
+            "line": 82,
+            "gt_lines": [
+              81
+            ]
+          },
+          {
+            "path": "jsonschema/tests/_suite.py",
+            "symbol": "_Case",
+            "line": 135,
+            "gt_lines": [
+              134
+            ]
+          },
+          {
+            "path": "jsonschema/tests/_suite.py",
+            "symbol": "_Case.from_dict",
+            "line": 147,
+            "gt_lines": [
+              146
+            ]
+          },
+          {
+            "path": "jsonschema/tests/_suite.py",
+            "symbol": "_Test",
+            "line": 200,
+            "gt_lines": [
+              199
+            ]
+          },
+          {
+            "path": "jsonschema/tests/_suite.py",
+            "symbol": "_Test.fully_qualified_name",
+            "line": 221,
+            "gt_lines": [
+              220
+            ]
+          },
+          {
+            "path": "jsonschema/tests/fuzz_validate.py",
+            "symbol": "test_schemas",
+            "line": 29,
+            "gt_lines": [
+              28
+            ]
+          },
+          {
+            "path": "jsonschema/_format.py",
+            "symbol": "FormatChecker.cls_checks",
+            "line": 87,
+            "gt_lines": [
+              86
+            ]
+          },
+          {
+            "path": "jsonschema/_format.py",
+            "symbol": "FormatChecker._cls_checks",
+            "line": 102,
+            "gt_lines": [
+              101
+            ]
+          },
+          {
+            "path": "jsonschema/_format.py",
+            "symbol": "is_email",
+            "line": 236,
+            "gt_lines": [
+              234
+            ]
+          },
+          {
+            "path": "jsonschema/_format.py",
+            "symbol": "is_ipv4",
+            "line": 251,
+            "gt_lines": [
+              242
+            ]
+          },
+          {
+            "path": "jsonschema/_format.py",
+            "symbol": "is_ipv6",
+            "line": 258,
+            "gt_lines": [
+              257
+            ]
+          },
+          {
+            "path": "jsonschema/_format.py",
+            "symbol": "is_regex",
+            "line": 416,
+            "gt_lines": [
+              415
+            ]
+          },
+          {
+            "path": "jsonschema/_format.py",
+            "symbol": "is_date",
+            "line": 429,
+            "gt_lines": [
+              422
+            ]
+          },
+          {
+            "path": "jsonschema/_format.py",
+            "symbol": "is_draft3_time",
+            "line": 436,
+            "gt_lines": [
+              435
+            ]
+          },
+          {
+            "path": "jsonschema/_format.py",
+            "symbol": "is_uuid",
+            "line": 542,
+            "gt_lines": [
+              537
+            ]
+          },
+          {
+            "path": "jsonschema/_types.py",
+            "symbol": "TypeChecker",
+            "line": 65,
+            "gt_lines": [
+              64
+            ]
+          },
+          {
+            "path": "jsonschema/cli.py",
+            "symbol": "_Outputter",
+            "line": 36,
+            "gt_lines": [
+              35
+            ]
+          },
+          {
+            "path": "jsonschema/cli.py",
+            "symbol": "_Outputter.from_arguments",
+            "line": 43,
+            "gt_lines": [
+              42
+            ]
+          },
+          {
+            "path": "jsonschema/cli.py",
+            "symbol": "_PrettyFormatter",
+            "line": 78,
+            "gt_lines": [
+              77
+            ]
+          },
+          {
+            "path": "jsonschema/cli.py",
+            "symbol": "_PlainFormatter",
+            "line": 120,
+            "gt_lines": [
+              119
+            ]
+          },
+          {
+            "path": "jsonschema/cli.py",
+            "symbol": "run.load",
+            "line": 262,
+            "gt_lines": [
+              50
+            ]
+          },
+          {
+            "path": "jsonschema/exceptions.py",
+            "symbol": "_Error.create_from",
+            "line": 129,
+            "gt_lines": [
+              128
+            ]
+          },
+          {
+            "path": "jsonschema/exceptions.py",
+            "symbol": "_Error.absolute_path",
+            "line": 133,
+            "gt_lines": [
+              132
+            ]
+          },
+          {
+            "path": "jsonschema/exceptions.py",
+            "symbol": "_Error.absolute_schema_path",
+            "line": 143,
+            "gt_lines": [
+              142
+            ]
+          }
+        ],
+        "false_absence_sample": []
+      },
+      "retrieval": {
+        "metrics": {
+          "queries": 30,
+          "hit_at_1": 0.8333,
+          "hit_at_5": 0.9333,
+          "mrr": 0.875,
+          "abstention_probes": 20,
+          "abstention_accuracy": 1.0
+        },
+        "unfound_queries": [
+          "jsonschema/_format.py::__init__",
+          "jsonschema/_types.py::__repr__"
+        ],
+        "false_presence_queries": []
+      },
+      "impact": {
+        "metrics": {
+          "targets": 25,
+          "impact_recall": 0.9,
+          "unresolved_calls": 2037
+        },
+        "misses": [
+          {
+            "target": "Validator",
+            "missing": [
+              "jsonschema/validators.py::check_schema"
+            ]
+          },
+          {
+            "target": "_Test",
+            "missing": [
+              "jsonschema/tests/_suite.py::from_dict"
+            ]
+          },
+          {
+            "target": "_uniq_key",
+            "missing": [
+              "jsonschema/_utils.py::_uniq_key"
+            ]
+          }
+        ]
+      },
+      "duration_s": 8.0
+    },
+    {
+      "name": "markdown-it-py",
+      "license": "MIT",
+      "commit": "3b4ff6ddd368b679643d12debf09e10ef602d4db",
+      "diff_base": "c8f82bc07d4806716dcd7b8c85d1def34a16d8ff",
+      "diff_head": "f290ba985340682002155849a76c0a3ce13d03d4",
+      "diff_subject": "\u2728 NEW: Add simple typographic replacements (#59)",
+      "test_selection": {
+        "metrics": {
+          "test_selection_recall": 1.0,
+          "changed_symbols": [
+            "replace",
+            "replaceFn",
+            "replace_rare",
+            "replace_scoped",
+            "test_typographer"
+          ]
+        },
+        "gt_tests": [
+          "tests/test_api/test_main.py",
+          "tests/test_port/test_fixtures.py"
+        ],
+        "engine_tests": [
+          "tests/test_api/test_main.py",
+          "tests/test_port/fixtures/typographer.md",
+          "tests/test_port/test_fixtures.py"
+        ],
+        "missing_tests": []
+      },
+      "presence": {
+        "metrics": {
+          "presence_precision": 1.0,
+          "false_absence": 0,
+          "indexed_symbols": 370,
+          "oracle_definitions": 364,
+          "verified": 370
+        },
+        "parse_failures": [],
+        "near_misses": [],
+        "line_drift_sample": [
+          {
+            "path": "benchmarking/bench_core.py",
+            "symbol": "spec_text",
+            "line": 9,
+            "gt_lines": [
+              8
+            ]
+          },
+          {
+            "path": "benchmarking/bench_core.py",
+            "symbol": "parser",
+            "line": 14,
+            "gt_lines": [
+              13
+            ]
+          },
+          {
+            "path": "benchmarking/bench_core.py",
+            "symbol": "test_spec",
+            "line": 19,
+            "gt_lines": [
+              18
+            ]
+          },
+          {
+            "path": "benchmarking/bench_packages.py",
+            "symbol": "spec_text",
+            "line": 8,
+            "gt_lines": [
+              7
+            ]
+          },
+          {
+            "path": "benchmarking/bench_packages.py",
+            "symbol": "test_markdown_it_py",
+            "line": 13,
+            "gt_lines": [
+              12
+            ]
+          },
+          {
+            "path": "benchmarking/bench_packages.py",
+            "symbol": "test_markdown_it_pyrs",
+            "line": 22,
+            "gt_lines": [
+              21
+            ]
+          },
+          {
+            "path": "benchmarking/bench_packages.py",
+            "symbol": "test_mistune",
+            "line": 31,
+            "gt_lines": [
+              30
+            ]
+          },
+          {
+            "path": "benchmarking/bench_packages.py",
+            "symbol": "test_commonmark_py",
+            "line": 39,
+            "gt_lines": [
+              38
+            ]
+          },
+          {
+            "path": "benchmarking/bench_packages.py",
+            "symbol": "test_pymarkdown",
+            "line": 47,
+            "gt_lines": [
+              46
+            ]
+          },
+          {
+            "path": "benchmarking/bench_packages.py",
+            "symbol": "test_pymarkdown_extra",
+            "line": 55,
+            "gt_lines": [
+              54
+            ]
+          },
+          {
+            "path": "benchmarking/bench_packages.py",
+            "symbol": "test_mistletoe",
+            "line": 63,
+            "gt_lines": [
+              62
+            ]
+          },
+          {
+            "path": "benchmarking/bench_packages.py",
+            "symbol": "test_panflute",
+            "line": 72,
+            "gt_lines": [
+              70
+            ]
+          },
+          {
+            "path": "markdown_it/main.py",
+            "symbol": "MarkdownIt.reset_rules",
+            "line": 216,
+            "gt_lines": [
+              215
+            ]
+          },
+          {
+            "path": "markdown_it/parser_inline.py",
+            "symbol": "_default_terminator_re",
+            "line": 57,
+            "gt_lines": [
+              56
+            ]
+          },
+          {
+            "path": "markdown_it/presets/__init__.py",
+            "symbol": "gfm_like.make",
+            "line": 20,
+            "gt_lines": [
+              19,
+              41
+            ]
+          },
+          {
+            "path": "markdown_it/presets/__init__.py",
+            "symbol": "gfm_like2.make",
+            "line": 42,
+            "gt_lines": [
+              19,
+              41
+            ]
+          },
+          {
+            "path": "markdown_it/renderer.py",
+            "symbol": "RendererHTML.renderAttrs",
+            "line": 173,
+            "gt_lines": [
+              172
+            ]
+          },
+          {
+            "path": "markdown_it/ruler.py",
+            "symbol": "StateBase.src",
+            "line": 43,
+            "gt_lines": [
+              38,
+              42
+            ]
+          },
+          {
+            "path": "markdown_it/ruler.py",
+            "symbol": "StateBase.srcCharCode",
+            "line": 48,
+            "gt_lines": [
+              47
+            ]
+          },
+          {
+            "path": "markdown_it/ruler.py",
+            "symbol": "Rule",
+            "line": 68,
+            "gt_lines": [
+              67
+            ]
+          },
+          {
+            "path": "markdown_it/rules_inline/state_inline.py",
+            "symbol": "Delimiter",
+            "line": 16,
+            "gt_lines": [
+              15
+            ]
+          },
+          {
+            "path": "markdown_it/token.py",
+            "symbol": "Token",
+            "line": 22,
+            "gt_lines": [
+              21
+            ]
+          },
+          {
+            "path": "markdown_it/token.py",
+            "symbol": "Token.from_dict",
+            "line": 173,
+            "gt_lines": [
+              172
+            ]
+          },
+          {
+            "path": "markdown_it/tree.py",
+            "symbol": "SyntaxTreeNode.children",
+            "line": 115,
+            "gt_lines": [
+              110,
+              114
+            ]
+          },
+          {
+            "path": "markdown_it/tree.py",
+            "symbol": "SyntaxTreeNode.parent",
+            "line": 123,
+            "gt_lines": [
+              118,
+              122
+            ]
+          }
+        ],
+        "false_absence_sample": []
+      },
+      "retrieval": {
+        "metrics": {
+          "queries": 30,
+          "hit_at_1": 0.8333,
+          "hit_at_5": 0.9667,
+          "mrr": 0.8722,
+          "abstention_probes": 20,
+          "abstention_accuracy": 1.0
+        },
+        "unfound_queries": [
+          "benchmarking/bench_core.py::parser"
+        ],
+        "false_presence_queries": []
+      },
+      "impact": {
+        "metrics": {
+          "targets": 25,
+          "impact_recall": 1.0,
+          "unresolved_calls": 977
+        },
+        "misses": []
+      },
+      "duration_s": 3.8
+    }
+  ],
+  "aggregate": {
+    "metrics": {
+      "repos": 11,
+      "presence_precision_macro": 1.0,
+      "presence_precision_min": 1.0,
+      "false_absence_total": 0,
+      "impact_recall_macro": 0.9609,
+      "test_selection_recall_macro": 1.0,
+      "test_selection_measured_repos": 10,
+      "hit_at_1_macro": 0.7879,
+      "hit_at_5_macro": 0.9515,
+      "mrr_macro": 0.8555,
+      "abstention_accuracy_macro": 1.0
+    },
+    "checks": {
+      "presence_precision": true,
+      "false_absence": true,
+      "impact_recall": true,
+      "test_selection_recall": true
+    },
+    "gates": {
+      "presence_precision": 0.995,
+      "false_absence": 0,
+      "impact_recall": 0.95,
+      "test_selection_recall": 0.98,
+      "passed": true
+    }
+  },
+  "markdown": "# SG-204 holdout benchmark report\n\n- repos measured: **11** (pinned, licenses declared)\n- presence precision (macro / min): **1.0** / 1.0\n- false absence total: **0**\n- impact recall (macro, supported static scope): **0.9609**\n- test-selection recall (macro, 10 repos): **1.0**\n- retrieval Hit@1 / Hit@5 / MRR (reported, not gated): 0.7879 / 0.9515 / 0.8555\n- abstention accuracy: 1.0\n\n| repo | presence | false-abs | impact | test-sel |\n|---|---|---|---|---|\n| itsdangerous | 1.0 | 0 | 1.0 | 1.0 |\n| click | 1.0 | 0 | 0.992 | 1.0 |\n| structlog | 1.0 | 0 | 1.0 | 1.0 |\n| tenacity | 1.0 | 0 | 0.88 | 1.0 |\n| python-slugify | 1.0 | 0 | 0.838 | 1.0 |\n| freezegun | 1.0 | 0 | 1.0 | 1.0 |\n| schedule | 1.0 | 0 | 1.0 | 1.0 |\n| pexpect | 1.0 | 0 | 0.96 | 1.0 |\n| requests | 1.0 | 0 | 1.0 | 1.0 |\n| jsonschema | 1.0 | 0 | 0.9 | None |\n| markdown-it-py | 1.0 | 0 | 1.0 | 1.0 |\n\ngates: **ALL PASS**\n"
+}
