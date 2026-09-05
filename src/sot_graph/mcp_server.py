@@ -447,6 +447,12 @@ def create_server(service: McpService) -> Any:
                     "provider_name": {"type": "string", "description": "Provider to sync (default: codebase-memory)"},
                 }, "additionalProperties": False,
             }),
+            types.Tool(name="sot_cross_check", description="Read-only diagnostic: classify builtin graph claims vs external provider evidence into agreements / builtin-only / external-only / conflicts, joined on canonical symbol identity (never raw provider strings). When the evidence ledger has no external rows the report says so honestly instead of implying agreement.", inputSchema={
+                "type": "object", "properties": {
+                    "provider": {"type": "string", "description": "Restrict the external side to one provider name (default: all)"},
+                    "sample_limit": {"type": "integer", "minimum": 1, "maximum": 500, "description": "Max samples embedded per bucket; totals stay exact (default: 20)"},
+                }, "additionalProperties": False,
+            }),
             types.Tool(name="sot_git_history", description="Inspect git commit history with automated risk scoring and impacted symbol detection.", inputSchema={
                 "type": "object", "properties": {
                     "limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Maximum commits to evaluate (default: 10)"},
@@ -545,6 +551,11 @@ def create_server(service: McpService) -> Any:
                 result = await asyncio.to_thread(
                     service.providers_sync,
                     args.get("provider_name", "codebase-memory"),
+                )
+            elif name == "sot_cross_check":
+                result = await service.across_check(
+                    provider=args.get("provider"),
+                    sample_limit=args.get("sample_limit", 20),
                 )
             elif name == "sot_git_history":
                 result = await service.agit_history(

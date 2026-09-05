@@ -1142,24 +1142,49 @@ def cmd_providers(args: argparse.Namespace, root: str,
             print(f"❌ No index database at {db_path}; run `sot reconcile` first.", file=sys.stderr)
             return 1
         try:
-            report = cross_check(xc_db, provider=getattr(args, "provider", None))
+            if getattr(args, "receipt", False):
+                from sot_graph.assurance.impact_pipeline import ReceiptStore
+                from sot_graph.assurance.receipts import cross_check_receipt
+
+                receipt = cross_check_receipt(
+                    xc_db, root,
+                    provider=getattr(args, "provider", None),
+                )
+                try:  # persistence is best-effort; the digest is the address
+                    ReceiptStore(os.path.join(root, ".sot", "receipts")).put(receipt)
+                except Exception:  # noqa: BLE001
+                    pass
+                print(json.dumps(wrap_envelope(receipt, db=xc_db), indent=2, default=str))
+                return 0
+            report = cross_check(xc_db, provider=getattr(args, "provider", None),
+                                 repo_root=root)
             if getattr(args, "json", False):
                 print(json.dumps(wrap_envelope(report, db=xc_db), indent=2, default=str))
                 return 0
             totals = report["totals"]
-            print("\n🔍 Provider cross-check (builtin AST vs external evidence):")
-            print(f"  builtin pairs (graph_edges)     : {report['builtin_pair_count']}")
-            print(f"  external pairs (provider_evidence): {report['external_pair_count']}")
+            print("\n🔍 Provider cross-check (canonical identity joins, SG-203):")
+            print(f"  builtin pairs / definitions     : {report['builtin_pair_count']} / {report['builtin_definition_count']}")
+            print(f"  external pairs / definitions    : {report['external_pair_count']} / {report['external_definition_count']}")
+            print(f"  edges scanned / deduped         : {totals['builtin_edges_scanned']} / -{totals['builtin_duplicate_edges']} duplicates")
             print(f"  agreements (both claim)         : {totals['agreements']}")
             print(f"  builtin-only (AST found)        : {totals['builtin_only']}")
             print(f"  external-only (review these)    : {totals['external_only']}")
+            print(f"  conflicts (surfaced, adjudicated): {totals['conflicts']}")
+            for conflict in report["conflicts"][:5]:
+                c = conflict["conflict"]
+                print(f"    • {c['reason']}"
+                      f" [{c.get('adjudication', 'relation_mismatch')}]")
+            if totals["unresolved_builtin"] or totals["unresolved_external"]:
+                print(f"  unresolved identities (never joined):"
+                      f" {totals['unresolved_builtin']} builtin /"
+                      f" {totals['unresolved_external']} external")
             if totals["unmapped_external_relations"]:
                 print(f"  unmapped external relation rows : {totals['unmapped_external_relations']}")
             if report["provider_counts"]:
                 print("  external evidence rows per provider:")
                 for name, count in report["provider_counts"].items():
                     print(f"    • {name}: {count}")
-            print("\n  external-only pairs are candidate hallucinations OR builtin parser gaps — verify each before acting.")
+            print("\n  external-only claims are candidate hallucinations OR builtin parser gaps — verify each before acting.")
             return 0
         finally:
             xc_db.close()
@@ -2204,10 +2229,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_prov_xc = prov_subs.add_parser(
         "cross-check",
-        help="Read-only reconciliation: builtin AST evidence vs external provider evidence (R4)",
+        help="Read-only reconciliation: builtin AST evidence vs external provider evidence (R4/SG-203)",
     )
     p_prov_xc.add_argument("--json", action="store_true", help="Output the read-only envelope as JSON")
     p_prov_xc.add_argument("--provider", default=None, help="Restrict the external side to one provider name (default: all)")
+    p_prov_xc.add_argument("--receipt", action="store_true", help="Emit a snapshot-bound assurance receipt (SG-203, schema 1.7) instead of the raw report")
     p_prov_sync = prov_subs.add_parser(
         "sync",
         help="Explicit index sync for one provider (own timeout, lock, receipt)",

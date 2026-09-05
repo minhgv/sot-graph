@@ -937,10 +937,10 @@ class TestLimitTripwire:
     """
 
     _ACCOUNTED_LIMITS: Dict[Tuple[str, int], str] = {
-        ("receipts.py", 180): "edges_cap_500",
-        ("receipts.py", 240): "ledger_runs_cap_200",
-        ("receipts.py", 253): "ledger_runs_cap_200",
-        ("receipts.py", 763): "evidence_cap_50",
+        ("receipts.py", 181): "edges_cap_500",
+        ("receipts.py", 241): "ledger_runs_cap_200",
+        ("receipts.py", 254): "ledger_runs_cap_200",
+        ("receipts.py", 764): "evidence_cap_50",
         ("ledger.py", 104): "ledger_union_cap_5000",
         ("ledger.py", 132): "ledger_union_cap_5000 (legacy fallback query)",
     }

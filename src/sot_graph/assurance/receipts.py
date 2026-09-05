@@ -44,6 +44,7 @@ __all__ = [
     "diff_impact_receipt",
     "reconcile_receipt",
     "audit_receipt",
+    "cross_check_receipt",
     "classify_change_risk",
     "check_rename_gate",
     "omp_confirmations_for",
@@ -54,7 +55,7 @@ __all__ = [
     "RECEIPT_SCHEMA_VERSION",
     "RECEIPT_CITED_FILE_CAP",
 ]
-RECEIPT_SCHEMA_VERSION = "1.6"  # minor bump: 1.1 added canonical status vocabulary (P0); 1.2 added changed_files_total/changed_files_truncated (R5); 1.3 added request/projection blocks + machine-readable collection-error warnings (SG-105); 1.4 added per-collector collection_stats cap accounting + facts.truncation_sources reason codes (SG-107); 1.5 added scope_universe block + enumeration/parser-capability exhaustion facts (SG-108); 1.6 made the evidence join generation-correct (project-bound, live-only) + real open_conflicts from the union + invalidated_evidence_dead_count visibility (SG-109)
+RECEIPT_SCHEMA_VERSION = "1.7"  # minor bump: 1.1 added canonical status vocabulary (P0); 1.2 added changed_files_total/changed_files_truncated (R5); 1.3 added request/projection blocks + machine-readable collection-error warnings (SG-105); 1.4 added per-collector collection_stats cap accounting + facts.truncation_sources reason codes (SG-107); 1.5 added scope_universe block + enumeration/parser-capability exhaustion facts (SG-108); 1.6 made the evidence join generation-correct (project-bound, live-only) + real open_conflicts from the union + invalidated_evidence_dead_count visibility (SG-109); 1.7 added cross_check_receipt (SG-203: builtin-vs-external identity reconciliation, snapshot-bound, ABSTAINED on empty evidence ledger)
 
 #: Bounded-work cap on how many changed files a post-change receipt will
 #: measure (journal staleness, evidence invalidation, snapshot citation).
@@ -1162,6 +1163,125 @@ def audit_receipt(
         "quarantined_files": quarantined,
         "snapshot": snapshot_dict,
         "assurance_facts": asdict(facts),
+        "assurance": {
+            "status": decision["status"],
+            "reason_codes": decision["reason_codes"],
+            "decision": decision,
+        },
+    }
+    payload["digest"] = receipt_digest(
+        {k: v for k, v in payload.items() if k != "digest"}
+    )
+    return payload
+
+
+def cross_check_receipt(
+    db: Any,
+    repo_root: str,
+    provider: Optional[str] = None,
+    sample_limit: int = 20,
+) -> Dict[str, Any]:
+    """Receipt wrapping the SG-203 builtin-vs-external identity cross-check.
+
+    Binds the read-only cross-check report to a worktree snapshot and
+    turns it into an assurance decision: open conflicts are CONFLICTED,
+    unresolvable identities cap the receipt at PARTIAL, collection
+    failure is UNVERIFIABLE — and an empty external evidence ledger is
+    ABSTAINED, because a cross-check with nothing to check against
+    must never read as PASS.
+    """
+    from sot_graph.providers.cross_check import cross_check as _cross_check
+    from sot_graph.snapshot import capture_worktree_snapshot
+
+    collection_errors: List[str] = []
+    bounded_limit = max(1, min(int(sample_limit), 500))
+    try:
+        report = _cross_check(
+            db, provider=provider, sample_limit=bounded_limit,
+            repo_root=repo_root,
+        )
+    except Exception as exc:  # noqa: BLE001 - receipt must fail closed, not raise
+        collection_errors.append(f"cross_check_failed: {type(exc).__name__}")
+        report = {"totals": {}, "provider_counts": {}}
+
+    totals: Dict[str, Any] = report.get("totals") or {}
+
+    # Cited paths: only the bounded samples embedded in the report (the
+    # totals are exact counts, the samples are what carry file paths).
+    cited: List[str] = []
+    for bucket in ("agreements", "builtin_only", "external_only",
+                   "conflicts", "unresolved_builtin", "unresolved_external"):
+        for entry in report.get(bucket) or []:
+            for side in ("src", "dst", "identity"):
+                side_dict = entry.get(side)
+                if isinstance(side_dict, dict) and side_dict.get("path"):
+                    cited.append(str(side_dict["path"]))
+            if entry.get("path"):
+                cited.append(str(entry["path"]))
+    cited_paths = sorted(set(cited)) or None
+
+    snapshot_bound = False
+    snapshot_dict: Dict[str, Any] = {}
+    try:
+        snapshot = capture_worktree_snapshot(
+            repo_root, cited_paths=cited_paths)
+        snapshot_dict = snapshot.as_dict()
+        snapshot_bound = bool(snapshot_dict.get("scope_digest"))
+    except Exception as exc:  # noqa: BLE001
+        collection_errors.append(f"snapshot_capture_failed: {type(exc).__name__}")
+
+    unresolved_total = (
+        int(totals.get("unresolved_builtin", 0) or 0)
+        + int(totals.get("unresolved_external", 0) or 0)
+    )
+    facts = AssuranceFacts(
+        identity_status="UNIQUE",
+        collection_error=bool(collection_errors),
+        snapshot_bound=snapshot_bound and not bool(collection_errors),
+        open_conflicts=int(totals.get("conflicts", 0) or 0),
+        unresolved_count=unresolved_total,
+        unresolved_budget=0,
+        claim_profile="presence",
+        absence_claim=False,
+    )
+    decision = decide(facts)
+
+    # Empty evidence ledger: the reconciliation claim has no external
+    # side, so a clean bill would overstate. Downgrade the top status
+    # (never a harder one) to ABSTAINED with the explicit basis reason.
+    external_rows = int(totals.get("external_rows_scanned", 0) or 0)
+    if external_rows == 0 and not collection_errors \
+            and decision["status"] == "ASSURED_WITHIN_SCOPE":
+        decision = {
+            **decision,
+            "status": "ABSTAINED",
+            "reason_codes": ["no_external_evidence"]
+            + [r for r in decision["reason_codes"]
+               if r != "no_external_evidence"],
+        }
+
+    payload: Dict[str, Any] = {
+        "schema_version": RECEIPT_SCHEMA_VERSION,
+        "kind": "cross_check",
+        "proof_scope": "provider_identity_reconciliation",
+        "request": {
+            "provider": provider,
+            "sample_limit": bounded_limit,
+            "repo_root": repo_root,
+        },
+        "collection_errors": collection_errors,
+        "evidence_basis": {
+            "builtin_edges_scanned": int(
+                totals.get("builtin_edges_scanned", 0) or 0),
+            "builtin_duplicate_edges": int(
+                totals.get("builtin_duplicate_edges", 0) or 0),
+            "external_rows_scanned": external_rows,
+            "external_duplicate_rows": int(
+                totals.get("external_duplicate_rows", 0) or 0),
+            "provider_counts": report.get("provider_counts") or {},
+        },
+        "report": report,
+        "snapshot": snapshot_dict,
         "assurance": {
             "status": decision["status"],
             "reason_codes": decision["reason_codes"],

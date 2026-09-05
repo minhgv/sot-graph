@@ -520,7 +520,7 @@ class TestScopeReceiptUniverse:
             payload = scope_receipt(db, str(sg108_repo), "other")
         finally:
             db.close()
-        assert payload["schema_version"] == "1.6"
+        assert payload["schema_version"] == "1.7"
         # Positive end-to-end control: an exhausted, fully-capable,
         # fully-covered universe keeps the absence claim ASSURED.
         assert payload["assurance"]["status"] == "ASSURED_WITHIN_SCOPE"

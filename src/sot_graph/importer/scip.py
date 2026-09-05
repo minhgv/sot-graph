@@ -890,7 +890,13 @@ class ScipImporter:
                 continue
             journal_hashes[rel] = journal["sha256"]
             text = doc_texts.get(rel)
-            if isinstance(text, str):
+            # SG-203: absent/empty text (the norm for protobuf-derived
+            # indices, which never embed source) is UNKNOWN content, not
+            # empty-file content — hashing "" against a non-empty journal
+            # sha false-staled every text-less document at import time.
+            # Invalidation needs positive drift evidence: embedded text
+            # that disagrees, or the disk-state check below.
+            if isinstance(text, str) and text:
                 doc_sha = hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
                 norm_crlf_sha = hashlib.sha256(
                     text.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8", "replace")

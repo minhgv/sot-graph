@@ -247,7 +247,7 @@ class TestDiffReceiptGenerationJoin:
             assert util_rows[0][2] is None
         finally:
             db.close()
-        assert receipt["schema_version"] == "1.6"
+        assert receipt["schema_version"] == "1.7"
 
     def test_dead_count_zero_when_no_history(self, tmp_path):
         repo = tmp_path / "fresh"

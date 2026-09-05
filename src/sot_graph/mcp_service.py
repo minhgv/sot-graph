@@ -1629,6 +1629,41 @@ class McpService:
 
         return self._run(op)
 
+    def cross_check(
+        self,
+        provider: Optional[str] = None,
+        sample_limit: int = 20,
+    ) -> Dict[str, Any]:
+        """SG-203: read-only builtin-vs-external evidence cross-check.
+
+        Joins ``graph_edges``/``graph_nodes`` claims with ``provider_evidence``
+        claims on canonical :class:`SymbolIdentity` keys — never on raw
+        provider strings — and classifies agreements / builtin-only /
+        external-only / conflicts (relation mismatch, span disagreement
+        adjudicated against the filesystem).
+        """
+        from sot_graph.providers.cross_check import cross_check as _cross_check
+
+        if provider is not None:
+            if not isinstance(provider, str) or not provider.strip():
+                raise McpServiceError("invalid_argument", "provider must not be empty")
+            if len(provider) > 128:
+                raise McpServiceError("invalid_argument", "provider exceeds 128 characters")
+        sample_limit = self._bounded(sample_limit, 500, default=20)
+
+        def op(conn: sqlite3.Connection) -> Dict[str, Any]:
+            view = cast(Database, _ConnView(conn))
+            payload = _cross_check(
+                view,
+                provider=provider,
+                sample_limit=sample_limit,
+                repo_root=self.project_root,
+            )
+            payload["providers"] = self._providers(conn)
+            return self._fits_response(payload)
+
+        return self._run(op)
+
     def git_history(
         self,
         limit: int = 10,
@@ -1773,6 +1808,8 @@ class McpService:
 
     async def adiff_impact_receipt(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return await self._async(self.diff_impact_receipt, *args, **kwargs)
+    async def across_check(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return await self._async(self.cross_check, *args, **kwargs)
 
 
 __all__ = ["McpService", "McpServiceError", "ServiceLimits"]
