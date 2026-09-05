@@ -1,0 +1,348 @@
+{
+  "benchmark": "real-repo-holdout",
+  "description": "SG-204 holdout corpus: public repos pinned at full SHAs; diff tasks are the most recent non-merge commit touching 1-4 source .py files plus tests (selection documented in scripts/bench_holdout.py --regenerate-notes).",
+  "notes": [
+    "graph head (`commit`) pins the repo state for presence/retrieval/impact;",
+    "diff_task.base..head pins an independent real PR for test-selection;",
+    "diff commits were selected so top_level_delta is non-empty and at least",
+    "one test references a changed name (suite measurable, not vacuous)."
+  ],
+  "oracle": {
+    "independence": "evaluator uses stdlib ast only; it must not import sot_graph extraction internals (enforced by test)",
+    "suites": [
+      "presence",
+      "retrieval",
+      "impact",
+      "test_selection",
+      "abstention"
+    ]
+  },
+  "repos": [
+    {
+      "commit": "c294b2fb47447d83be02470525c9c6292ce5fd74",
+      "diff_task": {
+        "base": "93ae366874bbd4f69d90495c45b2cd336387496c",
+        "changed_files": [
+          "CHANGES.rst",
+          "src/itsdangerous/signer.py",
+          "tests/test_itsdangerous/test_serializer.py"
+        ],
+        "date": "2024-04-16",
+        "head": "7f4dcf83a07bb3d53f4e0e65ef1b43327b4cca90",
+        "subject": "access sha1 lazily"
+      },
+      "language": "python",
+      "license": "BSD-3-Clause",
+      "name": "itsdangerous",
+      "seed": 204001,
+      "tasks": [
+        "presence",
+        "retrieval",
+        "impact",
+        "test_selection"
+      ],
+      "url": "https://github.com/pallets/itsdangerous"
+    },
+    {
+      "commit": "a6256bfb5971d5e58585fe7b6c656134e1ade5a4",
+      "diff_task": {
+        "base": "b551fe85714c906565303fae98136d7c72b252ea",
+        "changed_files": [
+          "CHANGES.md",
+          "docs/handling-files.md",
+          "docs/utils.md",
+          "src/click/__init__.py",
+          "src/click/_termui_impl.py",
+          "src/click/core.py",
+          "src/click/termui.py",
+          "src/click/types.py",
+          "src/click/utils.py",
+          "tests/test_testing.py",
+          "tests/test_utils/test_KeepOpenFile.py",
+          "tests/test_utils/test_LazyFile.py",
+          "tests/test_utils/test_make_default_short_help.py"
+        ],
+        "date": "2026-07-16",
+        "head": "7a0a3447f6ddd2c15438c5d098e289323f9f9556",
+        "subject": "Mark clearly functions private status. Deprecated Python 2 utilities."
+      },
+      "language": "python",
+      "license": "BSD-3-Clause",
+      "name": "click",
+      "seed": 204002,
+      "tasks": [
+        "presence",
+        "retrieval",
+        "impact",
+        "test_selection"
+      ],
+      "url": "https://github.com/pallets/click"
+    },
+    {
+      "commit": "f194271d998edb9662c825adeca155e685345595",
+      "diff_task": {
+        "base": "3800d401db2c682c7c83b2d3eec38d81c9791f4d",
+        "changed_files": [
+          "pyproject.toml",
+          "tests/helpers.py",
+          "tests/processors/test_renderers.py",
+          "tests/test_base.py",
+          "tests/test_config.py",
+          "tests/test_frames.py",
+          "tests/test_output.py",
+          "tests/test_stdlib.py",
+          "tests/test_threadlocal.py",
+          "tests/test_twisted.py",
+          "tests/utils.py"
+        ],
+        "date": "2025-10-27",
+        "head": "aca10f23dd12bd9e14cfe712f1ce66c9cb5f4400",
+        "subject": "Drop pretend dependency (#766)"
+      },
+      "language": "python",
+      "license": "MIT OR Apache-2.0",
+      "name": "structlog",
+      "seed": 204003,
+      "tasks": [
+        "presence",
+        "retrieval",
+        "impact",
+        "test_selection"
+      ],
+      "url": "https://github.com/hynek/structlog"
+    },
+    {
+      "commit": "949dcfa6c0a4f0109dbbd019ff58208a580d185b",
+      "diff_task": {
+        "base": "ee6a8f7a76654d712fd44604d3b6d4f9af6b2249",
+        "changed_files": [
+          "releasenotes/notes/fix-local-context-overwrite-94190ba06a481631.yaml",
+          "tenacity/__init__.py",
+          "tenacity/asyncio/__init__.py",
+          "tests/test_issue_478.py"
+        ],
+        "date": "2024-06-24",
+        "head": "a15fa645326ef776dbef81ee13e3833cd14bdced",
+        "subject": "fix: Avoid overwriting local contexts with retry decorator (#479)"
+      },
+      "language": "python",
+      "license": "Apache-2.0",
+      "name": "tenacity",
+      "seed": 204004,
+      "tasks": [
+        "presence",
+        "retrieval",
+        "impact",
+        "test_selection"
+      ],
+      "url": "https://github.com/jd/tenacity"
+    },
+    {
+      "commit": "26b81c2e224ebb65c7fba40d37d17d762be3782f",
+      "diff_task": {
+        "base": "e785874f0ea053cea393d396b615235e7c0ad179",
+        "changed_files": [
+          "setup.py",
+          "slugify/__main__.py",
+          "slugify/slugify.py",
+          "test.py"
+        ],
+        "date": "2020-04-09",
+        "head": "3b51e23c81f466f3bd7dd916407d074ed0f802f5",
+        "subject": "Create command line tool that can set all parameters"
+      },
+      "language": "python",
+      "license": "MIT",
+      "name": "python-slugify",
+      "seed": 204005,
+      "tasks": [
+        "presence",
+        "retrieval",
+        "impact",
+        "test_selection"
+      ],
+      "url": "https://github.com/un33k/python-slugify"
+    },
+    {
+      "commit": "c9bf52c5aa12ea1b5b8647a136a92504ea071f2f",
+      "diff_task": {
+        "base": "0823bcf8feaa910a79ee53c5f1d8c68b2784869f",
+        "changed_files": [
+          "freezegun/api.py",
+          "tests/fake_module.py",
+          "tests/test_class_import.py",
+          "tests/test_datetimes.py"
+        ],
+        "date": "2015-02-05",
+        "head": "76cc551711750577ecfe8a838395c429438c7b42",
+        "subject": "Add some more time functions.: localtime, gmtime, strftime."
+      },
+      "language": "python",
+      "license": "Apache-2.0",
+      "name": "freezegun",
+      "seed": 204006,
+      "tasks": [
+        "presence",
+        "retrieval",
+        "impact",
+        "test_selection"
+      ],
+      "url": "https://github.com/spulec/freezegun"
+    },
+    {
+      "commit": "4386f4562df3ed24fd198324e279d215db2154d6",
+      "diff_task": {
+        "base": "4386f4562df3ed24fd198324e279d215db2154d6",
+        "changed_files": [
+          "docs/timezones.rst",
+          "schedule/__init__.py",
+          "test_schedule.py"
+        ],
+        "date": "2024-05-20",
+        "head": "2dcb5833cdf2b7d7a1bda90c19e2fb7e373e66df",
+        "subject": "Timezone bugfixes (#623)"
+      },
+      "language": "python",
+      "license": "MIT",
+      "name": "schedule",
+      "seed": 204007,
+      "tasks": [
+        "presence",
+        "retrieval",
+        "impact",
+        "test_selection"
+      ],
+      "url": "https://github.com/dbader/schedule"
+    },
+    {
+      "commit": "aa989594e1e413f45c18b26ded1783f7d5990fe5",
+      "diff_task": {
+        "base": "2532721644781543ca660e52d48a35bd93872fc1",
+        "changed_files": [
+          "tests/PexpectTestCase.py",
+          "tests/test_async.py"
+        ],
+        "date": "2023-08-28",
+        "head": "c59c991ebac3f4d77d9860896e9a337fc68c6ce9",
+        "subject": "rework async unittests to rely on unittest.IsolatedAsyncioTestCase"
+      },
+      "language": "python",
+      "license": "ISC",
+      "name": "pexpect",
+      "seed": 204008,
+      "tasks": [
+        "presence",
+        "retrieval",
+        "impact",
+        "test_selection"
+      ],
+      "url": "https://github.com/pexpect/pexpect"
+    },
+    {
+      "commit": "6f205ff422bccd5e4c4fc0b64c5f3e7df5181db6",
+      "diff_task": {
+        "base": "a58d7f2ffb4d00b46dca2d70a3932a0b37e22fac",
+        "changed_files": [
+          "src/requests/adapters.py",
+          "tests/certs/README.md",
+          "tests/certs/expired/Makefile",
+          "tests/certs/expired/README.md",
+          "tests/certs/expired/ca/Makefile",
+          "tests/certs/expired/ca/ca-private.key",
+          "tests/certs/expired/ca/ca.cnf",
+          "tests/certs/expired/ca/ca.crt",
+          "tests/certs/expired/ca/ca.srl",
+          "tests/certs/expired/server/Makefile",
+          "tests/certs/expired/server/cert.cnf",
+          "tests/certs/expired/server/server.csr",
+          "tests/certs/expired/server/server.key",
+          "tests/certs/expired/server/server.pem",
+          "tests/certs/mtls/Makefile",
+          "tests/certs/mtls/README.md",
+          "tests/certs/mtls/client/Makefile",
+          "tests/certs/mtls/client/ca",
+          "tests/certs/mtls/client/cert.cnf",
+          "tests/certs/mtls/client/client.csr",
+          "tests/certs/mtls/client/client.key",
+          "tests/certs/mtls/client/client.pem",
+          "tests/certs/valid/ca",
+          "tests/certs/valid/server/Makefile",
+          "tests/certs/valid/server/cert.cnf",
+          "tests/certs/valid/server/server.csr",
+          "tests/certs/valid/server/server.key",
+          "tests/certs/valid/server/server.pem",
+          "tests/test_requests.py",
+          "tests/testserver/server.py"
+        ],
+        "date": "2024-03-14",
+        "head": "a94e9b5308ffcc3d2913ab873e9810a6601a67da",
+        "subject": "Add local TLS server"
+      },
+      "language": "python",
+      "license": "Apache-2.0",
+      "name": "requests",
+      "seed": 204009,
+      "tasks": [
+        "presence",
+        "retrieval",
+        "impact",
+        "test_selection"
+      ],
+      "url": "https://github.com/psf/requests"
+    },
+    {
+      "commit": "bb947f1e2cb4447da0647d79cbcb33f791cddd87",
+      "diff_task": {
+        "base": "8b71f9eff23a8bdf5e4b8f55d636b00a31932856",
+        "changed_files": [
+          "jsonschema/_utils.py"
+        ],
+        "date": "2025-05-26",
+        "head": "e68b54949f503c0f3c599da5b8b4d265ed9a6eb7",
+        "subject": "Move is_valid function to module scope"
+      },
+      "language": "python",
+      "license": "MIT",
+      "name": "jsonschema",
+      "seed": 204010,
+      "tasks": [
+        "presence",
+        "retrieval",
+        "impact",
+        "test_selection"
+      ],
+      "url": "https://github.com/python-jsonschema/jsonschema"
+    },
+    {
+      "commit": "3b4ff6ddd368b679643d12debf09e10ef602d4db",
+      "diff_task": {
+        "base": "c8f82bc07d4806716dcd7b8c85d1def34a16d8ff",
+        "changed_files": [
+          "docs/conf.py",
+          "markdown_it/parser_core.py",
+          "markdown_it/rules_core/__init__.py",
+          "markdown_it/rules_core/replacements.js",
+          "markdown_it/rules_core/replacements.py",
+          "tests/test_api/test_main.py",
+          "tests/test_port/fixtures/typographer.md",
+          "tests/test_port/test_fixtures.py"
+        ],
+        "date": "2020-10-21",
+        "head": "f290ba985340682002155849a76c0a3ce13d03d4",
+        "subject": "\u2728 NEW: Add simple typographic replacements (#59)"
+      },
+      "language": "python",
+      "license": "MIT",
+      "name": "markdown-it-py",
+      "seed": 204011,
+      "tasks": [
+        "presence",
+        "retrieval",
+        "impact",
+        "test_selection"
+      ],
+      "url": "https://github.com/executablebooks/markdown-it-py"
+    }
+  ],
+  "schema_version": 1
+}

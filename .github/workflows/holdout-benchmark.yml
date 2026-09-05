@@ -1,0 +1,63 @@
+name: Holdout Benchmark
+
+# SG-204 real-repo holdout — runs the pinned 11-repo benchmark nightly
+# and on manual dispatch. Fails (exit 1) when any gate regresses, so a
+# red run here is the signal that graph fidelity dropped on real code.
+# Deliberately separate from "CI & Release": the CI watchdog must not
+# open issues for nightly benchmark regressions.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"   # 03:17 UTC nightly — off-peak, avoids :00 rush
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Run a single manifest repo (blank = all 11)"
+        required: false
+        default: ""
+
+concurrency:
+  group: holdout-benchmark
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: SG-204 holdout gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install project
+        run: uv sync --all-extras --dev
+
+      - name: Oracle unit tests (import independence + planted corpus)
+        run: uv run pytest tests/test_holdout_oracle.py -q
+
+      - name: Run holdout benchmark (pinned repos, --gate)
+        run: |
+          ARGS=(--gate --ensure-clone)
+          if [ -n "${{ github.event.inputs.only }}" ]; then
+            ARGS+=(--only "${{ github.event.inputs.only }}")
+          fi
+          uv run python scripts/bench_holdout.py "${ARGS[@]}"
+
+      - name: Upload benchmark report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: holdout-report
+          path: |
+            benchmarks/holdout/report.json
+            benchmarks/holdout/report.md
+          if-no-files-found: warn
+          retention-days: 30

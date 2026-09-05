@@ -32,6 +32,7 @@ graphify-out/
 !tests/fixtures/**/*.json
 !benchmarks/oracle/*.json
 !benchmarks/*.json
+!benchmarks/holdout/*.json
 sot_knowledge_graph.html
 sot_architecture_report.md
 GRAPH_REPORT.md
@@ -42,3 +43,6 @@ sot_obsidian_vault/
 # macOS metadata
 .DS_Store
 .zcode/
+
+# SG-204 holdout benchmark — cloned repos and their .sot indexes
+.holdout-cache/
