@@ -1,0 +1,123 @@
+{
+  "benchmark": "provider-identity-oracle",
+  "schema_version": 1,
+  "corpus": {
+    "digest": "b64682cd527ff75d",
+    "fixture": "tests/fixtures/cbm_sample_repo",
+    "golden": "tests/fixtures/cbm_golden (CBM 0.10.8, replayed; mangled root rehomed onto temp corpus)",
+    "scip": "synthetic SCIP JSON via real ScipImporter",
+    "truth_definitions": [
+      "app.main.build_code_label",
+      "app.main.build_invoice",
+      "app.main.dispatch",
+      "core.labels.format_label",
+      "core.service.compute_total",
+      "core.service.format_label"
+    ],
+    "truth_builtin_calls": [
+      [
+        "app.main.build_code_label",
+        "core.labels.format_label"
+      ],
+      [
+        "app.main.build_invoice",
+        "core.service.compute_total"
+      ]
+    ],
+    "truth_builtin_gap_calls": [
+      [
+        "app.main.build_invoice",
+        "core.service.format_label"
+      ]
+    ],
+    "probes": {
+      "definitions": 1,
+      "calls": 2,
+      "span_probes": 1,
+      "collisions": 1
+    }
+  },
+  "environment": {
+    "python": "3.14.6",
+    "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O"
+  },
+  "metrics": {
+    "join_precision": 1.0,
+    "join_recall": 1.0,
+    "edge_agreements": 2,
+    "definition_agreements": 3,
+    "span_conflict_detected": 1,
+    "span_conflict_adjudicated_builtin": 1,
+    "accidental_joins": 0,
+    "builtin_gap_calls_surfaced": 1
+  },
+  "observed": {
+    "edge_agreements": [
+      [
+        "app.main.build_code_label",
+        "core.labels.format_label"
+      ],
+      [
+        "app.main.build_invoice",
+        "core.service.compute_total"
+      ]
+    ],
+    "definition_agreements": [
+      "app.main.build_invoice",
+      "core.service.compute_total",
+      "core.service.format_label"
+    ],
+    "false_joins": [],
+    "false_definitions": [],
+    "missed_calls": [],
+    "missed_definitions": [],
+    "builtin_gap_calls": [
+      "app.main.build_invoice -> core.service.format_label"
+    ],
+    "scip_rows_imported": 3,
+    "totals": {
+      "agreements": 5,
+      "builtin_only": 6,
+      "external_only": 1,
+      "conflicts": 1,
+      "unresolved_builtin": 0,
+      "unresolved_external": 1,
+      "builtin_pairs": 5,
+      "builtin_definitions": 6,
+      "external_pairs": 3,
+      "external_definitions": 3,
+      "builtin_edges_scanned": 11,
+      "builtin_duplicate_edges": 0,
+      "external_rows_scanned": 8,
+      "external_duplicate_rows": 1,
+      "sample_limit": 200,
+      "truncated": {
+        "agreements": false,
+        "builtin_only": false,
+        "external_only": false,
+        "conflicts": false,
+        "unresolved_builtin": false,
+        "unresolved_external": false
+      },
+      "unmapped_external_relations": 4
+    }
+  },
+  "gates": {
+    "passed": true,
+    "thresholds": {
+      "join_precision": 1.0,
+      "join_recall": 1.0,
+      "span_conflict_detected": 1,
+      "span_conflict_adjudicated_builtin": 1,
+      "accidental_joins": 0
+    },
+    "checks": {
+      "join_precision": true,
+      "join_recall": true,
+      "span_conflict_detected": true,
+      "span_conflict_adjudicated_builtin": true,
+      "accidental_joins": true
+    },
+    "rationale": "Thresholds fixed from the first measured run on the planted corpus: identity joins must be exact (no invented joins, no missed both-claimed pairs), the span probe must adjudicate against the live file, and the node-ID collision probe must join nothing."
+  }
+}
