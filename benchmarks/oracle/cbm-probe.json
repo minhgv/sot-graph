@@ -1,7 +1,7 @@
 {
   "oracle_version": "2.0.0",
   "kind": "cbm-exploratory-probe",
-  "binary": "/Users/giapminh79/.local/bin/codebase-memory-mcp",
+  "binary": "~/.local/bin/codebase-memory-mcp",
   "cbm_version": "codebase-memory-mcp 0.10.8",
   "corpus": {
     "repo": "oracle-corpus-v1",

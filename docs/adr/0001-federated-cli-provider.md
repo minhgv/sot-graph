@@ -5,7 +5,7 @@
 - **Research pins:**
   - SOT-Graph studied at commit `ba99fbe0db8ead483a76a92070cfe86f63358f17` (= this repo's HEAD at decision time)
   - Codebase Memory source studied at commit `010569fa6ce1bc5d6430f858129243ea1a2e3fd5`
-  - Binary actually exercised: `/Users/giapminh79/.local/bin/codebase-memory-mcp`, version `codebase-memory-mcp 0.10.8`
+  - Binary actually exercised: `~/.local/bin/codebase-memory-mcp`, version `codebase-memory-mcp 0.10.8`
 - **Reference:** `sot-graph-codebase-memory-integration-solution.md` (P0–P5 roadmap; §13 test plan)
 
 ## 1. Context
