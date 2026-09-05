@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from sot_graph.assurance.identity import Span
 from sot_graph.providers.identity_join import (
@@ -77,10 +78,40 @@ class MangledRootPrefixTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             # macOS /var → /private/var: the prefix must come from the
             # REAL path or CBM names never strip.
+            mangled = mangled_root_prefix(tmp)
+            self.assertEqual(mangled, mangled_root_prefix(tmp))
+            # Platform-portable shape: separators and drive colons are
+            # mangled away, leaving a pure dash-joined label.
+            for raw in ("\\", "/", ":"):
+                self.assertNotIn(raw, mangled)
+            if os.name == "posix":
+                self.assertEqual(
+                    mangled,
+                    os.path.realpath(tmp).lstrip("/").replace("/", "-"),
+                )
+
+    def test_windows_style_root_mangles_deterministically(self):
+        # A Windows root must mangle to the same dash-only label shape as
+        # a POSIX root — the pre-fix lstrip/replace pair was a no-op on
+        # backslash paths and leaked raw separators/colon through.
+        win_root = ("C:\\Users\\runneradmin\\AppData\\Local\\Temp\\"
+                    "pytest-of-runneradmin\\pytest-2\\test_span0")
+        with mock.patch.object(os.path, "realpath", return_value=win_root):
+            mangled = mangled_root_prefix(win_root)
             self.assertEqual(
-                mangled_root_prefix(tmp),
-                os.path.realpath(tmp).lstrip("/").replace("/", "-"),
+                mangled,
+                "C-Users-runneradmin-AppData-Local-Temp-"
+                "pytest-of-runneradmin-pytest-2-test_span0",
             )
+            self.assertEqual(mangled, mangled_root_prefix(win_root))
+
+    def test_windows_mangled_shape_without_root_fails_closed(self):
+        # The Windows-mangled CBM name must hit the same no-repo_root
+        # fail-closed rule as the POSIX-mangled one.
+        name = ("C-Users-runneradmin-AppData-Local-Temp-"
+                "pytest-of-runneradmin-pytest-2-test_span0"
+                ".app.main.build_invoice")
+        self.assertIsNone(cbm_identity(name, repo_root=None))
 
 
 class BuiltinIdentityTests(unittest.TestCase):

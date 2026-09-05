@@ -23,6 +23,7 @@ import unittest
 from sot_graph.assurance.receipts import RECEIPT_SCHEMA_VERSION, cross_check_receipt
 from sot_graph.db import Database
 from sot_graph.providers.cross_check import canonical_relation, cross_check
+from sot_graph.providers.identity_join import mangled_root_prefix
 
 NOW = 1_700_000_000
 
@@ -62,8 +63,10 @@ class CrossCheckTests(unittest.TestCase):
             )
         # CBM mangles the absolute repo root into every qualified name
         # (realpath: macOS /var is a symlink to /private/var — the same
-        # aliasing the SG-108 scope normalizer had to absorb).
-        self.mangled = os.path.realpath(self.test_dir).lstrip("/").replace("/", "-")
+        # aliasing the SG-108 scope normalizer had to absorb). The shared
+        # mangling keeps this symmetric with cbm_identity stripping on
+        # Windows roots too.
+        self.mangled = mangled_root_prefix(self.test_dir)
         conn = self.db.conn
         # Builtin nodes: symbol nodes carry dotted FQNs + paths, and edges
         # reference them by node ID — the real storage shapes.
@@ -244,6 +247,24 @@ class CrossCheckTests(unittest.TestCase):
                           if c["conflict"]["reason"] == "span_disagreement"]
         self.assertEqual(len(span_conflicts), 1)
         self.assertEqual(span_conflicts[0]["conflict"]["adjudication"], "open")
+
+    def test_windows_mangled_names_fail_closed_without_repo_root(self):
+        # Regression (Windows CI): a Windows-mangled-root CBM name used to
+        # leak raw separators/colon past mangled_root_prefix, so its path
+        # chunks were dropped by canonical_fqn and the residue joined the
+        # builtin FQN — a spurious agreement under no repo_root. The
+        # dash-only Windows mangling must fail closed exactly like POSIX.
+        win_mangled = ("C-Users-runneradmin-AppData-Local-Temp-"
+                       "pytest-of-runneradmin-pytest-2-test_span0")
+        self._evidence(
+            "ev-win1", "run-1", "codebase-memory",
+            f"{win_mangled}.app.main.build_invoice",
+            f"{win_mangled}.core.service.compute_total",
+            "call:out", path="core/service.py", line_start=5, line_end=7,
+        )
+        report = cross_check(self.db)
+        self.assertEqual(report["totals"]["agreements"], 0)
+        self.assertEqual(report["totals"]["unresolved_external"], 1)
 
     def test_unresolved_endpoints_counted_never_joined(self):
         # Builtin edge whose dst node row is gone.

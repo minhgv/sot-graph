@@ -106,9 +106,16 @@ def mangled_root_prefix(repo_root: str) -> str:
     ``/Users/x/code/repo`` becomes ``Users-x-code-repo``; CBM prefixes
     every qualified name with it. Rebuilding the prefix requires the real
     root, which is exactly why stripping without ``repo_root`` must fail
-    closed.
+    closed. Windows roots are normalized first — separators and the
+    drive-letter colon — so the mangled form stays a dash-only label on
+    every platform: a raw ``C:\\Users\\...`` prefix would survive the
+    mangling untouched (``lstrip("/")``/``replace("/", "-")`` are no-ops
+    on backslash paths) and its chunks would then be silently dropped by
+    :func:`canonical_fqn`, joining names that must fail closed.
+    POSIX roots are byte-for-byte unchanged.
     """
-    real = os.path.realpath(repo_root)
+    real = os.path.realpath(repo_root).replace("\\", "/")
+    real = re.sub(r"^([A-Za-z]):", r"\1", real)
     return real.lstrip("/").replace("/", "-")
 
 
